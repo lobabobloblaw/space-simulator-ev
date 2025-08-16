@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Space Trading & Combat</title>
+    <link rel="stylesheet" href="./css/main.css">
+</head>
+<body>
+    <!-- Tutorial/Hint System -->
+    <div id="tutorialHint"></div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- Galaxy Trader HUD -->
+    <div id="gameHUD">
+        <div class="hud-container">
+            <!-- Left Panel: Ship Status -->
+            <div class="hud-left">
+                <div class="status-item">
+                    <span class="status-label">Hull</span>
+                    <span class="status-value" id="health">100%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Shield</span>
+                    <span class="status-value" id="shield">None</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Fuel</span>
+                    <span class="status-value" id="fuel">100%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Speed</span>
+                    <span class="status-value" id="speed">0.0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Cargo</span>
+                    <span class="status-value" id="cargo">0/10</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Sector</span>
+                    <span class="status-value" id="location">Deep Space</span>
+                </div>
+            </div>
+            
+            <!-- Center Panel: Logo & Key Stats -->
+            <div class="hud-center">
+                <div id="logo-container">
+                    <div id="logo-ascii">GALAXY TRADER</div>
+                </div>
+                <div class="key-stats">
+                    <div class="key-stat">
+                        <span class="status-label">Credits</span>
+                        <span class="status-value credits-value" id="credits">250</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">Weapon</span>
+                        <span class="status-value weapon-value" id="weapon">NONE</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">Kills</span>
+                        <span class="status-value" id="kills">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Controls & Minimap -->
+            <div class="hud-right">
+                <div class="controls">
+                    <span class="control-key">W/↑</span>
+                    <span class="control-action">Thrust</span>
+                    <span class="control-key">A/D</span>
+                    <span class="control-action">Turn</span>
+                    <span class="control-key">SPC</span>
+                    <span class="control-action">Brake</span>
+                    <span class="control-key">F</span>
+                    <span class="control-action">Fire</span>
+                    <span class="control-key">Q</span>
+                    <span class="control-action">Switch</span>
+                    <span class="control-key">L</span>
+                    <span class="control-action">Land</span>
+                </div>
+                <div id="minimap">
+                    <canvas id="minimapCanvas" width="75" height="75"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="landingOverlay">
+        <div id="landingHeader">
+            <h3 id="planetName">Planet Name</h3>
+        </div>
+        <div id="landingContent">
+            <div id="planetVisual">
+                <canvas id="planetCanvas" width="150" height="150"></canvas>
+            </div>
+            <div id="landingInfo">
+                <div id="landingMessage">Landing successful!</div>
+                <div id="planetDescription">Planet description goes here...</div>
+                <div id="landingDetails"></div>
+            </div>
+        </div>
+        <div id="tradingPanel">
+            <div class="cargo-status">
+                <strong>Credits:</strong> <span id="tradeCredits">0</span> | 
+                <strong>Cargo:</strong> <span id="tradeCargo">0/10</span>
+            </div>
+            <div id="commodityList"></div>
+        </div>
+        <div id="shopPanel">
+            <div class="cargo-status">
+                <strong>Credits:</strong> <span id="shopCredits">0</span>
+            </div>
+            <div id="shopList"></div>
+        </div>
+        <div id="landingButtons">
+            <button id="departBtn">[1] Depart</button>
+            <button id="stationBtn">[2] Station</button>
+            <button id="tradeBtn">[3] Trade</button>
+            <button id="outfitterBtn">[4] Outfitter</button>
+        </div>
+    </div>
+
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
