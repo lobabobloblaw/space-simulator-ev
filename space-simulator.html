@@ -1,0 +1,3426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Space Trading & Combat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+            background: #000;
+            width: 100%;
+            height: calc(100vh - 100px);
+        }
+        
+        /* Main HUD Container */
+        #gameHUD {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: linear-gradient(to top, 
+                rgba(0, 0, 0, 0.98) 0%, 
+                rgba(0, 10, 20, 0.95) 40%,
+                rgba(0, 20, 40, 0.9) 100%);
+            border-top: 1px solid #00ffff;
+            box-shadow: 
+                0 -1px 15px rgba(0, 255, 255, 0.3),
+                inset 0 1px 5px rgba(0, 255, 255, 0.1);
+        }
+        
+        /* HUD Layout Grid */
+        .hud-container {
+            display: grid;
+            grid-template-columns: 280px 1fr 280px;
+            height: 100%;
+            padding: 10px 20px;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        /* Left Panel - Ship Status */
+        .hud-left {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 4px 12px;
+            align-self: center;
+        }
+        
+        /* Center Panel - Logo & Credits */
+        .hud-center {
+            text-align: center;
+        }
+        
+        /* Right Panel - Minimap & Controls */
+        .hud-right {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 15px;
+            align-self: center;
+        }
+        
+        /* Status Item Styling */
+        .status-item {
+            display: flex;
+            align-items: center;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        
+        .status-label {
+            color: #0088cc;
+            font-size: 9px;
+            margin-right: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.8;
+        }
+        
+        .status-value {
+            color: #ffffff;
+            font-weight: bold;
+            text-shadow: 0 0 3px rgba(255, 255, 255, 0.3);
+            font-size: 11px;
+        }
+        
+        .status-value.critical {
+            color: #ff4444;
+            animation: pulse 0.5s infinite;
+        }
+        
+        .status-value.warning {
+            color: #ffaa00;
+        }
+        
+        .status-value.good {
+            color: #00ff88;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        
+        /* Galaxy Trader Logo */
+        #logo-container {
+            margin: 0;
+        }
+        
+        #logo-ascii {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            line-height: 1.0;
+            color: #00ffff;
+            text-shadow: 
+                0 0 8px #00ffff,
+                0 0 15px rgba(0, 255, 255, 0.4);
+            white-space: pre;
+            letter-spacing: 3px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 6px;
+        }
+        
+        /* Key Stats Row */
+        .key-stats {
+            display: flex;
+            justify-content: center;
+            gap: 25px;
+        }
+        
+        .key-stat {
+            display: flex;
+            align-items: center;
+            font-size: 11px;
+        }
+        
+        .key-stat .status-label {
+            color: #00aaff;
+            margin-right: 6px;
+        }
+        
+        .credits-value {
+            color: #ffd700;
+            text-shadow: 0 0 5px rgba(255, 215, 0, 0.5);
+        }
+        
+        .weapon-value {
+            color: #ff6666;
+        }
+        
+        /* Minimap */
+        #minimap {
+            width: 75px;
+            height: 75px;
+            border: 1px solid #00ffff;
+            border-radius: 50%;
+            background: radial-gradient(circle,
+                rgba(0, 40, 80, 0.2) 0%,
+                rgba(0, 20, 40, 0.5) 50%,
+                rgba(0, 0, 0, 0.8) 100%);
+            box-shadow: 
+                0 0 10px rgba(0, 255, 255, 0.3),
+                inset 0 0 10px rgba(0, 255, 255, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #minimapCanvas {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Controls */
+        .controls {
+            display: grid;
+            grid-template-columns: auto auto;
+            gap: 1px 6px;
+            font-size: 9px;
+        }
+        
+        .control-key {
+            color: #00ffff;
+            font-weight: bold;
+            text-shadow: 0 0 2px rgba(0, 255, 255, 0.5);
+        }
+        
+        .control-action {
+            color: #6699cc;
+            opacity: 0.9;
+        }
+        
+        #tradingPanel, #shopPanel {
+            display: none;
+            padding: 20px;
+            height: calc(100% - 120px);
+            overflow-y: auto;
+        }
+        
+        .commodity-row, .shop-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+        }
+        
+        .commodity-row:hover, .shop-item:hover {
+            background: rgba(74, 144, 226, 0.2);
+        }
+        
+        .commodity-info, .item-info {
+            flex: 1;
+        }
+        
+        .commodity-name, .item-name {
+            font-weight: bold;
+            color: #4A90E2;
+        }
+        
+        .price {
+            color: #F39C12;
+            margin: 0 10px;
+        }
+        
+        .buy-sell-buttons button, .shop-buy-button {
+            background: #4A90E2;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            margin: 0 2px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            border-radius: 3px;
+        }
+        
+        .buy-sell-buttons button:hover, .shop-buy-button:hover {
+            background: #357ABD;
+        }
+        
+        .buy-sell-buttons button:disabled, .shop-buy-button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .cargo-status {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(74, 144, 226, 0.1);
+            border-radius: 5px;
+        }
+        
+        #landingHeader {
+            background: linear-gradient(135deg, #4A90E2, #357ABD);
+            padding: 15px 20px;
+            border-radius: 13px 13px 0 0;
+            text-align: center;
+            border-bottom: 1px solid #666;
+        }
+        
+        #landingHeader h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+        
+        #landingContent {
+            display: flex;
+            height: calc(100% - 120px);
+        }
+        
+        #planetVisual {
+            width: 200px;
+            background: #111;
+            border-right: 1px solid #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        #planetCanvas {
+            width: 150px;
+            height: 150px;
+        }
+        
+        #landingInfo {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #landingMessage {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #4A90E2;
+        }
+        
+        #planetDescription {
+            font-size: 11px;
+            line-height: 1.4;
+            margin-bottom: 15px;
+            color: #ccc;
+            flex: 1;
+        }
+        
+        #landingDetails {
+            font-size: 12px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(74, 144, 226, 0.1);
+            border-radius: 5px;
+        }
+        
+        #landingButtons {
+            padding: 15px 20px;
+            border-top: 1px solid #666;
+            text-align: center;
+        }
+        
+        #landingButtons button {
+            background: #4A90E2;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            margin: 0 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            border-radius: 3px;
+        }
+        
+        #landingButtons button:hover {
+            background: #357ABD;
+        }
+        
+        #landingButtons button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border: 1px solid #333;
+            font-size: 10px;
+            display: none;
+        }
+        
+        #landingOverlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            border: 2px solid #4A90E2;
+            border-radius: 15px;
+            padding: 0;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            display: none;
+            width: 600px;
+            height: 500px;
+            z-index: 1000;
+        }
+        /* Tutorial Hint System */
+        #tutorialHint {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(74, 144, 226, 0.95);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            z-index: 100;
+            display: none;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        #tutorialHint.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- Tutorial/Hint System -->
+    <div id="tutorialHint"></div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- Galaxy Trader HUD -->
+    <div id="gameHUD">
+        <div class="hud-container">
+            <!-- Left Panel: Ship Status -->
+            <div class="hud-left">
+                <div class="status-item">
+                    <span class="status-label">Hull</span>
+                    <span class="status-value" id="health">100%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Shield</span>
+                    <span class="status-value" id="shield">None</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Fuel</span>
+                    <span class="status-value" id="fuel">100%</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Speed</span>
+                    <span class="status-value" id="speed">0.0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Cargo</span>
+                    <span class="status-value" id="cargo">0/10</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Sector</span>
+                    <span class="status-value" id="location">Deep Space</span>
+                </div>
+            </div>
+            
+            <!-- Center Panel: Logo & Key Stats -->
+            <div class="hud-center">
+                <div id="logo-container">
+                    <div id="logo-ascii">GALAXY TRADER</div>
+                </div>
+                <div class="key-stats">
+                    <div class="key-stat">
+                        <span class="status-label">Credits</span>
+                        <span class="status-value credits-value" id="credits">250</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">Weapon</span>
+                        <span class="status-value weapon-value" id="weapon">NONE</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">Kills</span>
+                        <span class="status-value" id="kills">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Controls & Minimap -->
+            <div class="hud-right">
+                <div class="controls">
+                    <span class="control-key">W/↑</span>
+                    <span class="control-action">Thrust</span>
+                    <span class="control-key">A/D</span>
+                    <span class="control-action">Turn</span>
+                    <span class="control-key">SPC</span>
+                    <span class="control-action">Brake</span>
+                    <span class="control-key">F</span>
+                    <span class="control-action">Fire</span>
+                    <span class="control-key">Q</span>
+                    <span class="control-action">Switch</span>
+                    <span class="control-key">L</span>
+                    <span class="control-action">Land</span>
+                </div>
+                <div id="minimap">
+                    <canvas id="minimapCanvas" width="75" height="75"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="landingOverlay">
+        <div id="landingHeader">
+            <h3 id="planetName">Planet Name</h3>
+        </div>
+        <div id="landingContent">
+            <div id="planetVisual">
+                <canvas id="planetCanvas" width="150" height="150"></canvas>
+            </div>
+            <div id="landingInfo">
+                <div id="landingMessage">Landing successful!</div>
+                <div id="planetDescription">Planet description goes here...</div>
+                <div id="landingDetails"></div>
+            </div>
+        </div>
+        <div id="tradingPanel">
+            <div class="cargo-status">
+                <strong>Credits:</strong> <span id="tradeCredits">0</span> | 
+                <strong>Cargo:</strong> <span id="tradeCargo">0/10</span>
+            </div>
+            <div id="commodityList"></div>
+        </div>
+        <div id="shopPanel">
+            <div class="cargo-status">
+                <strong>Credits:</strong> <span id="shopCredits">0</span>
+            </div>
+            <div id="shopList"></div>
+        </div>
+        <div id="landingButtons">
+            <button onclick="closeLandingOverlay()">[1] Depart</button>
+            <button onclick="showPanel('landing')">[2] Station</button>
+            <button onclick="showPanel('trading')">[3] Trade</button>
+            <button onclick="showPanel('shop')">[4] Outfitter</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Minimap setup
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        const minimapScale = 0.018; // Adjusted for 90px minimap
+        const minimapRange = 800; // Range in world units to display
+        
+        // Planet visual setup
+        const planetCanvas = document.getElementById('planetCanvas');
+        const planetCtx = planetCanvas.getContext('2d');
+        
+        // Set canvas size accounting for HUD
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight - 100; // Account for bottom HUD (100px)
+        
+        // Game state
+        const game = {
+            camera: { x: 0, y: 0 },
+            keys: {},
+            paused: false
+        };
+        
+        // Simple Mission System
+        const missions = {
+            active: null,
+            completed: [],
+            
+            available: [
+                {
+                    id: 'first_kill',
+                    type: 'bounty',
+                    title: 'First Blood',
+                    description: 'Destroy your first pirate vessel',
+                    target: 'pirate',
+                    count: 1,
+                    reward: 200,
+                    isComplete: () => ship.kills >= 1
+                },
+                {
+                    id: 'trader',
+                    type: 'trade',
+                    title: 'Merchant Apprentice',
+                    description: 'Earn 500 credits from trading',
+                    targetCredits: 750,  // Starting at 250, reach 750
+                    reward: 300,
+                    isComplete: () => ship.credits >= 750
+                },
+                {
+                    id: 'bounty_hunter',
+                    type: 'bounty',
+                    title: 'Bounty Hunter',
+                    description: 'Destroy 3 pirate vessels',
+                    target: 'pirate',
+                    count: 3,
+                    reward: 500,
+                    isComplete: () => ship.kills >= 3
+                }
+            ],
+            
+            checkCompletion() {
+                if (!this.active) return;
+                
+                if (this.active.isComplete()) {
+                    ship.credits += this.active.reward;
+                    this.completed.push(this.active.id);
+                    
+                    // Show completion message
+                    this.showMessage(`Mission Complete! +${this.active.reward} credits`);
+                    
+                    // Get next mission
+                    this.active = null;
+                    this.assignNext();
+                }
+            },
+            
+            assignNext() {
+                // Find next uncompleted mission
+                for (let mission of this.available) {
+                    if (!this.completed.includes(mission.id)) {
+                        this.active = mission;
+                        this.showMessage(`New Mission: ${mission.title}`);
+                        break;
+                    }
+                }
+            },
+            
+            showMessage(text) {
+                // Create temporary message element
+                const msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);background:rgba(74, 144, 226, 0.95);color:white;padding:10px 20px;border-radius:5px;font-family:Courier New;font-size:14px;z-index:100;';
+                msg.textContent = text;
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 3000);
+            }
+        };
+        
+        // Start first mission
+        missions.assignNext();
+        
+        // Player ship
+        const ship = {
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            angle: 0,
+            thrust: 0.004,  // Slower acceleration
+            maxSpeed: 0.45,  // Much slower top speed
+            fuel: 100,
+            maxFuel: 100,
+            credits: 250,  // Start with less money
+            tutorialStage: 'start',  // Track tutorial progress
+            size: 8,
+            isLanded: false,
+            landedPlanet: null,
+            landingCooldown: 0,
+            class: "shuttle",
+            health: 100,
+            maxHealth: 100,
+            weaponCooldown: 0,
+            weaponSwitchPressed: false,
+            kills: 0,
+            cargo: [],
+            cargoCapacity: 10,
+            weapons: [],  // Start with NO weapons!
+            currentWeapon: 0,
+            shield: 0,
+            maxShield: 0,
+            engineLevel: 1,
+            weaponLevel: 1,
+            currentPlanet: null
+        };
+        
+        // Ship classes and their properties
+        const shipClasses = {
+            shuttle: { size: 8, color: "#fff", maxSpeed: 0.75, thrust: 0.007 },
+            cruiser: { size: 12, color: "#4A90E2", maxSpeed: 1.2, thrust: 0.01 },
+            battleship: { size: 16, color: "#E74C3C", maxSpeed: 0.9, thrust: 0.008 },
+            carrier: { size: 20, color: "#F39C12", maxSpeed: 0.6, thrust: 0.006 },
+            freighter: { size: 14, color: "#95A5A6", maxSpeed: 0.5, thrust: 0.005 }
+        };
+        
+        // NPC ships
+        const npcShips = [];
+        let nextShipSpawn = Date.now() + Math.random() * 3000 + 2000; // 2-5 seconds for first spawn
+        
+        // NPC ship types with varied characteristics
+        const npcTypes = {
+            freighter: { 
+                color: "#8B7355", 
+                behavior: "passive",
+                shipClass: "freighter",
+                maxSpeed: 0.25,  // Very slow - even slower
+                thrust: 0.002,  // Terrible acceleration
+                turnSpeed: 0.006,  // Turns like a cargo ship
+                size: 22,  // Huge
+                width: 28,  // Wide body
+                credits: 800,  // Very valuable cargo
+                health: 150,
+                maxHealth: 150,
+                weapon: { type: "laser", damage: 3, cooldown: 40 }  // Token defense
+            },
+            trader: { 
+                color: "#95A5A6", 
+                behavior: "passive",
+                shipClass: "trader", 
+                maxSpeed: 0.45,
+                thrust: 0.004,
+                turnSpeed: 0.012,
+                size: 12,
+                width: 14,
+                credits: 200,
+                health: 50,
+                maxHealth: 50,
+                weapon: null  // No weapons
+            },
+            pirate: { 
+                color: "#E74C3C", 
+                behavior: "aggressive",
+                shipClass: "fighter", 
+                maxSpeed: 0.7,
+                thrust: 0.007,
+                turnSpeed: 0.02,
+                size: 11,  // Bulkier than before
+                width: 12,  // Wider body
+                credits: 150,
+                health: 80,  // Even more health to survive patrol encounters
+                maxHealth: 80,
+                weapon: { type: "laser", damage: 10, cooldown: 18 }  // Better weapon
+            },
+            patrol: { 
+                color: "#1E3A5F",  // Even darker, more military blue
+                behavior: "lawful",
+                shipClass: "interceptor", 
+                maxSpeed: 1.2,  // Still 2.5x faster than player
+                thrust: 0.015,   // Strong acceleration
+                turnSpeed: 0.08,  // Very fast turning for intercepting
+                size: 16,  // Smaller than before but still bigger than pirates
+                width: 18,  // Still wide
+                credits: 100,  // Better reward for the risk
+                health: 150,
+                maxHealth: 150,
+                weapon: { type: "rapid", damage: 6, cooldown: 20 }  // Much weaker, slower fire
+            }
+        };
+        
+        // Commodity types and base prices
+        const commodities = {
+            food: { name: "Food", basePrice: 20, icon: "🌾" },
+            ore: { name: "Ore", basePrice: 50, icon: "⛏️" },
+            tech: { name: "Tech", basePrice: 150, icon: "💻" },
+            fuel_cells: { name: "Fuel Cells", basePrice: 80, icon: "⚡" },
+            weapons: { name: "Weapons", basePrice: 200, icon: "🔫" },
+            luxury: { name: "Luxury Goods", basePrice: 300, icon: "💎" }
+        };
+        
+        // Space objects
+        const planets = [
+            { 
+                x: 500, y: 300, radius: 40, name: "Terra Nova", color: "#4A90E2", landable: true,
+                description: "A lush oceanic world with floating cities connected by quantum bridges. The atmosphere hums with advanced technology and the scent of exotic spices from the orbital markets.",
+                commodityPrices: {
+                    food: 15, // Produces food
+                    ore: 70,
+                    tech: 120, // Produces tech
+                    fuel_cells: 85,
+                    weapons: 250,
+                    luxury: 280
+                },
+                shopItems: ["weapon1", "shield1", "engine2", "weapon2"]
+            },
+            { 
+                x: -800, y: -600, radius: 60, name: "Crimson Moon", color: "#E74C3C", landable: true,
+                description: "This volcanic mining colony glows red from the molten ore refineries. Hardy miners extract rare crystals from the unstable crust while dodging frequent seismic tremors.",
+                commodityPrices: {
+                    food: 40,
+                    ore: 30, // Produces ore
+                    tech: 180,
+                    fuel_cells: 60, // Produces fuel cells
+                    weapons: 150, // Cheaper weapons
+                    luxury: 400
+                },
+                shopItems: ["weapon1", "weapon2", "weapon3", "cargo1"]
+            },
+            { 
+                x: 1200, y: -400, radius: 35, name: "Ice World", color: "#85C1E9", landable: true,
+                description: "An arctic research station built into crystalline ice caverns. Scientists here study quantum ice formations that might hold the key to faster-than-light travel.",
+                commodityPrices: {
+                    food: 35,
+                    ore: 90,
+                    tech: 100, // Wants tech
+                    fuel_cells: 100,
+                    weapons: 300,
+                    luxury: 200 // Produces luxury
+                },
+                shopItems: ["shield2", "engine3", "cargo2"]
+            },
+            { 
+                x: -400, y: 800, radius: 25, name: "Mining Station", color: "#F39C12", landable: true,
+                description: "A bustling asteroid processing facility where fortune-seekers trade rare metals. The station's mechanical arms constantly harvest resources from nearby debris fields.",
+                commodityPrices: {
+                    food: 50, // Needs food
+                    ore: 25, // Produces ore
+                    tech: 200,
+                    fuel_cells: 70,
+                    weapons: 180,
+                    luxury: 350
+                },
+                shopItems: ["weapon1", "cargo1", "cargo2", "engine2"]
+            }
+        ];
+        
+        // Shop items (upgrades)
+        const shopInventory = {
+            // Weapons - Player must buy these!
+            weapon1: { 
+                name: "Mining Laser", 
+                type: "weapon", 
+                price: 150, 
+                value: { type: "mining", damage: 2, cooldown: 35 },
+                description: "Very weak mining laser (2 damage, slow)"
+            },
+            // Shields
+            shield1: { 
+                name: "Basic Shield", 
+                type: "shield", 
+                price: 500, 
+                value: 25,
+                description: "Provides 25 shield points"
+            },
+            shield2: { 
+                name: "Advanced Shield", 
+                type: "shield", 
+                price: 1500, 
+                value: 50,
+                description: "Provides 50 shield points"
+            },
+            
+            // Engines
+            engine2: { 
+                name: "Enhanced Engine", 
+                type: "engine", 
+                price: 800, 
+                value: 2,
+                description: "Increases thrust by 50% and speed by 30%"
+            },
+            engine3: { 
+                name: "Military Engine", 
+                type: "engine", 
+                price: 2000, 
+                value: 3,
+                description: "Increases thrust by 100% and speed by 60%"
+            },
+            
+            // Weapons
+            weapon2: { 
+                name: "Rapid Laser", 
+                type: "weapon", 
+                price: 600, 
+                value: { type: "rapid", damage: 5, cooldown: 12 },
+                description: "Fast firing laser (5 damage)"
+            },
+            weapon3: { 
+                name: "Plasma Cannon", 
+                type: "weapon", 
+                price: 1200, 
+                value: { type: "plasma", damage: 20, cooldown: 35 },
+                description: "High damage plasma weapon (20 damage)"
+            },
+            
+            // Cargo
+            cargo1: { 
+                name: "Cargo Expansion", 
+                type: "cargo", 
+                price: 400, 
+                value: 5,
+                description: "Adds 5 cargo slots"
+            },
+            cargo2: { 
+                name: "Large Cargo Bay", 
+                type: "cargo", 
+                price: 1000, 
+                value: 10,
+                description: "Adds 10 cargo slots"
+            }
+        };
+        
+        const asteroids = [];
+        for (let i = 0; i < 50; i++) {
+            asteroids.push({
+                x: (Math.random() - 0.5) * 4000,
+                y: (Math.random() - 0.5) * 4000,
+                vx: (Math.random() - 0.5) * 0.3,
+                vy: (Math.random() - 0.5) * 0.3,
+                radius: Math.random() * 8 + 2,
+                color: "#666",
+                rotationSpeed: (Math.random() - 0.5) * 0.02,
+                health: 20,  // Can be mined/destroyed
+                maxHealth: 20,
+                oreContent: Math.floor(Math.random() * 3) + 1  // 1-3 ore when destroyed
+            });
+        }
+        
+        // Stars for background - multiple layers for depth
+        const stars = {
+            far: [],    // Distant stars (smallest, don't move)
+            mid: [],    // Mid-distance stars (slight parallax)
+            near: []    // Closer stars (more parallax)
+        };
+        
+        // Generate far stars (lots of tiny static stars)
+        for (let i = 0; i < 500; i++) {
+            stars.far.push({
+                x: (Math.random() - 0.5) * 8000,
+                y: (Math.random() - 0.5) * 8000,
+                brightness: Math.random() * 0.6 + 0.2,
+                size: Math.random() < 0.8 ? 1 : 2  // Most are 1 pixel
+            });
+        }
+        
+        // Generate mid-distance stars
+        for (let i = 0; i < 200; i++) {
+            stars.mid.push({
+                x: (Math.random() - 0.5) * 6000,
+                y: (Math.random() - 0.5) * 6000,
+                brightness: Math.random() * 0.7 + 0.3,
+                size: 1,
+                twinkle: Math.random() * Math.PI * 2  // For twinkling effect
+            });
+        }
+        
+        // Generate near stars (fewer, slightly bigger)
+        for (let i = 0; i < 100; i++) {
+            stars.near.push({
+                x: (Math.random() - 0.5) * 4000,
+                y: (Math.random() - 0.5) * 4000,
+                brightness: Math.random() * 0.8 + 0.4,
+                size: Math.random() < 0.7 ? 1 : 2
+            });
+        }
+        
+        // Projectiles for combat
+        const projectiles = [];
+        
+        // Explosions for visual effects
+        const explosions = [];
+        
+        // Pickups (ore, credits, etc.)
+        const pickups = [];
+        
+        // Sound System
+        const audio = {
+            context: null,
+            enabled: true,
+            masterVolume: 0.3,
+            sounds: {},
+            
+            init() {
+                try {
+                    this.context = new (window.AudioContext || window.webkitAudioContext)();
+                    // Click to start audio context (browser requirement)
+                    document.addEventListener('click', () => {
+                        if (this.context.state === 'suspended') {
+                            this.context.resume();
+                        }
+                    }, { once: true });
+                } catch (e) {
+                    console.log('Web Audio API not supported');
+                    this.enabled = false;
+                }
+            },
+            
+            playLaser(type = 'laser') {
+                if (!this.enabled || !this.context) return;
+                
+                const osc = this.context.createOscillator();
+                const gain = this.context.createGain();
+                
+                osc.connect(gain);
+                gain.connect(this.context.destination);
+                
+                // Different sounds for different weapons
+                if (type === 'mining') {
+                    osc.frequency.setValueAtTime(200, this.context.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(100, this.context.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.1 * this.masterVolume, this.context.currentTime);
+                } else if (type === 'rapid') {
+                    osc.frequency.setValueAtTime(800, this.context.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(400, this.context.currentTime + 0.05);
+                    gain.gain.setValueAtTime(0.15 * this.masterVolume, this.context.currentTime);
+                } else if (type === 'plasma') {
+                    osc.frequency.setValueAtTime(150, this.context.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(50, this.context.currentTime + 0.2);
+                    gain.gain.setValueAtTime(0.25 * this.masterVolume, this.context.currentTime);
+                } else {
+                    osc.frequency.setValueAtTime(600, this.context.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(200, this.context.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.15 * this.masterVolume, this.context.currentTime);
+                }
+                
+                gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.2);
+                
+                osc.start();
+                osc.stop(this.context.currentTime + 0.2);
+            },
+            
+            playExplosion(small = false) {
+                if (!this.enabled || !this.context) return;
+                
+                const noise = this.context.createBufferSource();
+                const buffer = this.context.createBuffer(1, this.context.sampleRate * 0.3, this.context.sampleRate);
+                const data = buffer.getChannelData(0);
+                
+                for (let i = 0; i < buffer.length; i++) {
+                    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / buffer.length, 2);
+                }
+                
+                noise.buffer = buffer;
+                
+                const gain = this.context.createGain();
+                const filter = this.context.createBiquadFilter();
+                
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(small ? 800 : 400, this.context.currentTime);
+                
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.context.destination);
+                
+                gain.gain.setValueAtTime(small ? 0.2 : 0.4 * this.masterVolume, this.context.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.3);
+                
+                noise.start();
+            },
+            
+            playThrust() {
+                if (!this.enabled || !this.context) return;
+                
+                // Only play if not already playing
+                if (this.sounds.thrustTimeout) return;
+                
+                const osc = this.context.createOscillator();
+                const gain = this.context.createGain();
+                const filter = this.context.createBiquadFilter();
+                
+                osc.type = 'triangle';  // Softer sound
+                filter.type = 'lowpass';
+                filter.frequency.value = 400;
+                
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.context.destination);
+                
+                // Soft fade in and out
+                osc.frequency.setValueAtTime(60, this.context.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(80, this.context.currentTime + 0.1);
+                
+                gain.gain.setValueAtTime(0, this.context.currentTime);
+                gain.gain.linearRampToValueAtTime(0.05 * this.masterVolume, this.context.currentTime + 0.05);
+                gain.gain.linearRampToValueAtTime(0.03 * this.masterVolume, this.context.currentTime + 0.15);
+                gain.gain.linearRampToValueAtTime(0, this.context.currentTime + 0.2);
+                
+                osc.start();
+                osc.stop(this.context.currentTime + 0.2);
+                
+                // Prevent overlapping sounds
+                this.sounds.thrustTimeout = setTimeout(() => {
+                    this.sounds.thrustTimeout = null;
+                }, 150);
+            },
+            
+            playShieldHit() {
+                if (!this.enabled || !this.context) return;
+                
+                const osc = this.context.createOscillator();
+                const gain = this.context.createGain();
+                
+                osc.connect(gain);
+                gain.connect(this.context.destination);
+                
+                osc.frequency.setValueAtTime(2000, this.context.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(500, this.context.currentTime + 0.1);
+                
+                gain.gain.setValueAtTime(0.1 * this.masterVolume, this.context.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.1);
+                
+                osc.start();
+                osc.stop(this.context.currentTime + 0.1);
+            },
+            
+            playPickup() {
+                if (!this.enabled || !this.context) return;
+                
+                const osc = this.context.createOscillator();
+                const gain = this.context.createGain();
+                
+                osc.connect(gain);
+                gain.connect(this.context.destination);
+                
+                osc.frequency.setValueAtTime(400, this.context.currentTime);
+                osc.frequency.setValueAtTime(600, this.context.currentTime + 0.05);
+                osc.frequency.setValueAtTime(800, this.context.currentTime + 0.1);
+                
+                gain.gain.setValueAtTime(0.15 * this.masterVolume, this.context.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.15);
+                
+                osc.start();
+                osc.stop(this.context.currentTime + 0.15);
+            },
+            
+            playLanding() {
+                if (!this.enabled || !this.context) return;
+                
+                const osc = this.context.createOscillator();
+                const gain = this.context.createGain();
+                
+                osc.connect(gain);
+                gain.connect(this.context.destination);
+                
+                osc.frequency.setValueAtTime(200, this.context.currentTime);
+                osc.frequency.linearRampToValueAtTime(100, this.context.currentTime + 0.5);
+                
+                gain.gain.setValueAtTime(0.2 * this.masterVolume, this.context.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.5);
+                
+                osc.start();
+                osc.stop(this.context.currentTime + 0.5);
+            }
+        };
+        
+        // Initialize audio
+        audio.init();
+        
+        // Window resize handler
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 100;
+        });
+        
+        // Input handling
+        document.addEventListener('keydown', (e) => {
+            game.keys[e.code] = true;
+            
+            // Station interface shortcuts when landed
+            if (game.paused && ship.isLanded) {
+                if (e.code === 'Digit1') closeLandingOverlay();
+                if (e.code === 'Digit2') showPanel('landing');
+                if (e.code === 'Digit3') showPanel('trading');
+                if (e.code === 'Digit4') showPanel('shop');
+            }
+            
+            // Volume controls
+            if (e.code === 'KeyM') {  // M to mute/unmute
+                audio.enabled = !audio.enabled;
+                const msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;top:20px;right:20px;background:rgba(0,0,0,0.8);color:white;padding:5px 10px;border-radius:3px;font-family:Courier New;font-size:11px;';
+                msg.textContent = audio.enabled ? '🔊 Sound ON' : '🔇 Sound OFF';
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 1500);
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            game.keys[e.code] = false;
+        });
+        
+        // Tutorial hint system
+        function updateTutorialHint() {
+            const hintElement = document.getElementById('tutorialHint');
+            if (!hintElement) return;
+            
+            let message = null;
+            
+            switch(ship.tutorialStage) {
+                case 'start':
+                    if (ship.weapons.length === 0) {
+                        message = "⚠️ UNARMED - Find a planet (L key near planet) and trade commodities to earn credits for weapons";
+                    } else {
+                        ship.tutorialStage = 'armed';
+                    }
+                    break;
+                    
+                case 'armed':
+                    message = "✓ Armed and ready! Press F to fire, Q to switch weapons. Hunt pirates for bounties!";
+                    setTimeout(() => {
+                        ship.tutorialStage = 'combat';
+                    }, 5000);
+                    break;
+                    
+                case 'combat':
+                    // No message during combat
+                    break;
+                    
+                case 'complete':
+                    message = "🎯 First kill! Trade between stations to buy ship upgrades. Good luck, pilot!";
+                    setTimeout(() => {
+                        ship.tutorialStage = 'done';
+                    }, 5000);
+                    break;
+            }
+            
+            if (message) {
+                hintElement.textContent = message;
+                hintElement.classList.add('visible');
+            } else {
+                hintElement.classList.remove('visible');
+            }
+        }
+        
+        // Game functions
+        function updateShip() {
+            // Rotation - slower turning
+            if (game.keys['ArrowLeft'] || game.keys['KeyA']) {
+                ship.angle -= 0.012;  // Slower turn rate
+            }
+            if (game.keys['ArrowRight'] || game.keys['KeyD']) {
+                ship.angle += 0.012;  // Slower turn rate
+            }
+            
+            // Thrust - only if fuel is actually available
+            if ((game.keys['ArrowUp'] || game.keys['KeyW']) && ship.fuel > 0.1) {
+                const thrustX = Math.cos(ship.angle) * ship.thrust;
+                const thrustY = Math.sin(ship.angle) * ship.thrust;
+                ship.vx += thrustX;
+                ship.vy += thrustY;
+                ship.fuel = Math.max(0, ship.fuel - 0.1);
+                
+                // Play thrust sound when accelerating
+                audio.playThrust();
+            }
+            
+            // Brake
+            if (game.keys['Space']) {
+                ship.vx *= 0.95;
+                ship.vy *= 0.95;
+            }
+            
+            // Fire weapon (only if player has one!)
+            if (game.keys['KeyF'] && ship.weaponCooldown <= 0 && ship.weapons.length > 0) {
+                const weapon = ship.weapons[ship.currentWeapon];
+                fireProjectile(ship, ship.angle, true, weapon);
+                ship.weaponCooldown = weapon.cooldown;
+                audio.playLaser(weapon.type);  // Sound effect!
+            }
+            
+            // Switch weapons (only if player has multiple)
+            if (game.keys['KeyQ'] && !ship.weaponSwitchPressed && ship.weapons.length > 1) {
+                ship.currentWeapon = (ship.currentWeapon + 1) % ship.weapons.length;
+                ship.weaponSwitchPressed = true;
+            } else if (!game.keys['KeyQ']) {
+                ship.weaponSwitchPressed = false;
+            }
+            
+            // Landing
+            if (game.keys['KeyL']) {
+                checkLanding();
+            }
+            
+            // Apply velocity limits
+            const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+            if (speed > ship.maxSpeed) {
+                ship.vx = (ship.vx / speed) * ship.maxSpeed;
+                ship.vy = (ship.vy / speed) * ship.maxSpeed;
+            }
+            
+            // Update position
+            ship.x += ship.vx;
+            ship.y += ship.vy;
+            
+            // Update weapon cooldown
+            if (ship.weaponCooldown > 0) {
+                ship.weaponCooldown--;
+            }
+            
+            // Manage landing cooldown
+            if (ship.landingCooldown > 0) {
+                ship.landingCooldown--;
+            }
+            
+            // Check if ship has moved away from landed planet
+            if (ship.isLanded && ship.landedPlanet) {
+                const dx = ship.x - ship.landedPlanet.x;
+                const dy = ship.y - ship.landedPlanet.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > ship.landedPlanet.radius + 80) {
+                    ship.isLanded = false;
+                    ship.landedPlanet = null;
+                }
+            }
+            
+            // Slowly regenerate fuel
+            if (ship.fuel < ship.maxFuel) {
+                ship.fuel = Math.min(ship.maxFuel, ship.fuel + 0.01);
+            }
+            
+            // Slowly regenerate shields
+            if (ship.shield < ship.maxShield) {
+                ship.shield = Math.min(ship.maxShield, ship.shield + 0.02);
+            }
+            
+            // Slowly regenerate health when landed
+            if (ship.isLanded && ship.health < ship.maxHealth) {
+                ship.health = Math.min(ship.maxHealth, ship.health + 0.1);
+            }
+            
+            // Check for pickup collection
+            for (let i = pickups.length - 1; i >= 0; i--) {
+                const pickup = pickups[i];
+                const dx = ship.x - pickup.x;
+                const dy = ship.y - pickup.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < ship.size + 10) {
+                    // Collect the pickup
+                    if (pickup.type === 'ore') {
+                        // Add ore to cargo if space available
+                        const cargoUsed = ship.cargo.reduce((sum, item) => sum + item.quantity, 0);
+                        if (cargoUsed < ship.cargoCapacity) {
+                            const existing = ship.cargo.find(c => c.type === 'ore');
+                            if (existing) {
+                                existing.quantity += pickup.value;
+                            } else {
+                                ship.cargo.push({ type: 'ore', quantity: pickup.value });
+                            }
+                            
+                            // Visual feedback
+                            createExplosion(pickup.x, pickup.y, true);
+                            audio.playPickup();  // Sound effect!
+                            pickups.splice(i, 1);
+                        }
+                    } else if (pickup.type === 'credits') {
+                        ship.credits += pickup.value;
+                        createExplosion(pickup.x, pickup.y, true);
+                        audio.playPickup();  // Sound effect!
+                        pickups.splice(i, 1);
+                    }
+                }
+            }
+        }
+        
+        function spawnNPC() {
+            const types = Object.keys(npcTypes);
+            // Weight the spawn rates: fewer patrols, more balanced
+            const weights = { freighter: 0.25, trader: 0.3, patrol: 0.2, pirate: 0.25 };
+            let random = Math.random();
+            let type = 'trader';
+            let cumulative = 0;
+            for (let t in weights) {
+                cumulative += weights[t];
+                if (random < cumulative) {
+                    type = t;
+                    break;
+                }
+            }
+            
+            const template = npcTypes[type];
+            
+            // Spawn location based on type
+            let spawnX, spawnY, initialVx, initialVy;
+            
+            if (type === 'trader') {
+                // Traders spawn near planets
+                const spawnPlanet = planets[Math.floor(Math.random() * planets.length)];
+                const angle = Math.random() * Math.PI * 2;
+                const distance = spawnPlanet.radius + 100 + Math.random() * 100;
+                spawnX = spawnPlanet.x + Math.cos(angle) * distance;
+                spawnY = spawnPlanet.y + Math.sin(angle) * distance;
+                
+                // Initial velocity away from planet
+                initialVx = Math.cos(angle) * template.maxSpeed * 0.5;
+                initialVy = Math.sin(angle) * template.maxSpeed * 0.5;
+                
+            } else if (type === 'pirate') {
+                // Pirates spawn at edges, moving toward center
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 1200 + Math.random() * 300;
+                spawnX = ship.x + Math.cos(angle) * distance;
+                spawnY = ship.y + Math.sin(angle) * distance;
+                
+                // Initial velocity toward player area
+                initialVx = -Math.cos(angle) * template.maxSpeed * 0.3;
+                initialVy = -Math.sin(angle) * template.maxSpeed * 0.3;
+                
+            } else if (type === 'patrol') {
+                // Patrols spawn closer to action, between player and typical pirate spawn areas
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 400 + Math.random() * 400;  // Closer to player
+                spawnX = ship.x + Math.cos(angle) * distance;
+                spawnY = ship.y + Math.sin(angle) * distance;
+                
+                // Start moving toward center (where action usually is)
+                initialVx = -Math.cos(angle) * template.maxSpeed * 0.5;
+                initialVy = -Math.sin(angle) * template.maxSpeed * 0.5;
+            } else {
+                // Freighters spawn in open space
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 600 + Math.random() * 600;
+                spawnX = ship.x + Math.cos(angle) * distance;
+                spawnY = ship.y + Math.sin(angle) * distance;
+                
+                // Random initial velocity
+                const velAngle = Math.random() * Math.PI * 2;
+                initialVx = Math.cos(velAngle) * template.maxSpeed * 0.3;
+                initialVy = Math.sin(velAngle) * template.maxSpeed * 0.3;
+            }
+            
+            const npc = {
+                x: spawnX,
+                y: spawnY,
+                vx: initialVx,
+                vy: initialVy,
+                angle: Math.atan2(initialVy, initialVx),
+                type: type,
+                ...template,
+                targetPlanet: type === 'trader' ? 
+                    planets[Math.floor(Math.random() * planets.length)] : null,
+                weaponCooldown: 0,
+                lifetime: 0,
+                thrusting: false
+            };
+            
+            npcShips.push(npc);
+        }
+        
+        function updateNPCs() {
+            // Count nearby NPCs
+            let nearbyCount = 0;
+            for (let npc of npcShips) {
+                const dist = Math.sqrt((npc.x - ship.x) ** 2 + (npc.y - ship.y) ** 2);
+                if (dist < 1000) nearbyCount++;
+            }
+            
+            // Spawn new NPCs periodically (adaptive rate based on nearby ships)
+            const maxNearby = 5;
+            if (Date.now() > nextShipSpawn && nearbyCount < maxNearby && npcShips.length < 12) {
+                spawnNPC();
+                // Spawn faster if fewer ships nearby
+                const spawnDelay = 3000 + (nearbyCount * 2000); // 3-13 seconds
+                nextShipSpawn = Date.now() + Math.random() * spawnDelay + spawnDelay/2;
+            }
+            
+            // Update each NPC
+            for (let i = npcShips.length - 1; i >= 0; i--) {
+                const npc = npcShips[i];
+                npc.lifetime++;
+                
+                // Clear movement flags
+                npc.thrusting = false;
+                
+                // Remove dead NPCs
+                if (npc.health <= 0) {
+                    // Only award credits/kills if player killed them
+                    if (npc.killedBy === 'player') {
+                        // Full bounty for pirates, half for others, plus kill bonus
+                        const bounty = npc.behavior === 'aggressive' ? npc.credits : Math.floor(npc.credits * 0.5);
+                        const killBonus = 25;  // Flat bonus per kill to help early game
+                        ship.credits += bounty + killBonus;
+                        ship.kills++;
+                        
+                        // Tutorial progression
+                        if (ship.tutorialStage === 'combat' && ship.kills >= 1) {
+                            ship.tutorialStage = 'complete';
+                        }
+                        
+                        // Check mission completion
+                        missions.checkCompletion();
+                    }
+                    
+                    // Pirates drop loot!
+                    if (npc.type === 'pirate' && Math.random() < 0.6) {  // 60% chance
+                        pickups.push({
+                            x: npc.x + (Math.random() - 0.5) * 20,
+                            y: npc.y + (Math.random() - 0.5) * 20,
+                            vx: (Math.random() - 0.5) * 0.5,
+                            vy: (Math.random() - 0.5) * 0.5,
+                            type: 'credits',
+                            value: 50 + Math.floor(Math.random() * 100),
+                            lifetime: 0,
+                            maxLifetime: 600  // 10 seconds
+                        });
+                    }
+                    
+                    createExplosion(npc.x, npc.y);
+                    audio.playExplosion();  // Sound effect!
+                    npcShips.splice(i, 1);
+                    continue;
+                }
+                
+                // Remove NPCs that are too far away (out of play area)
+                const distFromPlayer = Math.sqrt((npc.x - ship.x) ** 2 + (npc.y - ship.y) ** 2);
+                if (distFromPlayer > 3000) {
+                    npcShips.splice(i, 1);
+                    continue;
+                }
+                
+                // AI decision making - determine desired angle and whether to thrust
+                const dx = ship.x - npc.x;
+                const dy = ship.y - npc.y;
+                const distToPlayer = Math.sqrt(dx * dx + dy * dy);
+                
+                let desiredAngle = npc.angle;
+                let shouldThrust = false;
+                let shouldBrake = false;
+                
+                if (npc.behavior === "aggressive") {
+                    // Pirates hunt player AND merchant vessels, but evade patrols
+                    const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
+                    
+                    // Check for nearby patrol threats
+                    let nearbyPatrol = null;
+                    let patrolDist = 600;  // Wider detection range for patrols
+                    for (let other of npcShips) {
+                        if (other.behavior === "lawful") {
+                            const dist = Math.sqrt((other.x - npc.x) ** 2 + (other.y - npc.y) ** 2);
+                            if (dist < patrolDist) {
+                                nearbyPatrol = other;
+                                patrolDist = dist;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // EVADE PATROL if one is nearby and pursuing
+                    if (nearbyPatrol && nearbyPatrol.pursuing) {
+                        // Evasive maneuvers!
+                        const evadeX = npc.x - nearbyPatrol.x;
+                        const evadeY = npc.y - nearbyPatrol.y;
+                        desiredAngle = Math.atan2(evadeY, evadeX);  // Run away
+                        
+                        // Add zigzag evasion
+                        desiredAngle += Math.sin(npc.lifetime * 0.1) * 0.5;
+                        
+                        let angleDiff = desiredAngle - npc.angle;
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                        
+                        if (Math.abs(angleDiff) < Math.PI * 0.8) {
+                            shouldThrust = true;  // Run!
+                        }
+                    } else {
+                        // Normal pirate behavior - hunt targets
+                        // Look for closest target (player or merchant)
+                        let bestTarget = null;
+                        let bestTargetDist = 800;
+                        let targetIsPlayer = false;
+                        
+                        // Consider player as target
+                        if (distToPlayer < bestTargetDist) {
+                            bestTarget = ship;
+                            bestTargetDist = distToPlayer;
+                            targetIsPlayer = true;
+                        }
+                        
+                        // Look for merchant vessels to raid
+                        for (let other of npcShips) {
+                            if (other.behavior === "passive") {  // Traders and freighters
+                                const dist = Math.sqrt((other.x - npc.x) ** 2 + (other.y - npc.y) ** 2);
+                                if (dist < bestTargetDist) {
+                                    bestTarget = other;
+                                    bestTargetDist = dist;
+                                    targetIsPlayer = false;
+                                }
+                            }
+                        }
+                    
+                        // Attack the closest target
+                        if (bestTarget && bestTargetDist < 800) {
+                            // Calculate intercept angle (lead the target)
+                            const interceptTime = bestTargetDist / (npc.maxSpeed * 50);
+                            const targetX = bestTarget.x + bestTarget.vx * interceptTime;
+                            const targetY = bestTarget.y + bestTarget.vy * interceptTime;
+                            desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                            
+                            // Check if we're facing roughly the right direction
+                            let angleDiff = desiredAngle - npc.angle;
+                            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                            
+                            if (Math.abs(angleDiff) < Math.PI / 4) {
+                                // Facing the right way - manage distance
+                                if (bestTargetDist > 150) {
+                                    shouldThrust = true;
+                                } else if (bestTargetDist < 80) {
+                                    shouldBrake = true;  // Just brake when too close
+                                }
+                            }
+                            
+                            // Fire at target when in range and facing them
+                            if (bestTargetDist < 250 && Math.abs(angleDiff) < Math.PI / 6 && npc.weaponCooldown <= 0 && npc.weapon) {
+                                fireProjectile(npc, npc.angle, false, npc.weapon);
+                                npc.weaponCooldown = npc.weapon.cooldown;
+                            }
+                        } else {
+                            // Wander when no targets nearby
+                            if (!npc.wanderAngle || Math.random() < 0.01) {
+                                npc.wanderAngle = Math.random() * Math.PI * 2;
+                            }
+                            desiredAngle = npc.wanderAngle;
+                            
+                            let angleDiff = desiredAngle - npc.angle;
+                            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                            
+                            if (Math.abs(angleDiff) < Math.PI / 4) {
+                                shouldThrust = true;
+                            }
+                        }
+                    }  // End of normal pirate behavior
+                } else if (npc.behavior === "lawful") {
+                    // Patrol ships - AGGRESSIVELY hunt pirates attacking merchants
+                    const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
+                    
+                    // Check if player has been aggressive
+                    const playerIsHostile = ship.weaponCooldown > 0 || ship.kills > 2;
+                    
+                    // PRIORITY 1: Find ANY pirate, especially if attacking
+                    let targetPirate = null;
+                    let closestPirateDist = 1200;  // Much larger detection range
+                    let pirateIsAttacking = false;
+                    
+                    for (let other of npcShips) {
+                        if (other.behavior === "aggressive") {
+                            const dist = Math.sqrt((other.x - npc.x) ** 2 + (other.y - npc.y) ** 2);
+                            
+                            // Is this pirate actively shooting? (check if cooldown is active)
+                            const pirateShootingNow = other.weaponCooldown > 0;
+                            
+                            // Is pirate near ANY merchant?
+                            let nearMerchant = false;
+                            for (let victim of npcShips) {
+                                if (victim.behavior === "passive") {
+                                    const distToVictim = Math.sqrt(
+                                        (other.x - victim.x) ** 2 + (other.y - victim.y) ** 2
+                                    );
+                                    if (distToVictim < 400) {  // Wider protection radius
+                                        nearMerchant = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // Is pirate threatening player?
+                            const nearPlayer = Math.sqrt(
+                                (other.x - ship.x) ** 2 + (other.y - ship.y) ** 2
+                            ) < 500;
+                            
+                            // ALWAYS prioritize pirates that are shooting or near victims
+                            if (pirateShootingNow || nearMerchant) {
+                                targetPirate = other;
+                                closestPirateDist = dist;
+                                pirateIsAttacking = true;
+
+                                break;  // Immediately target this pirate!
+                            } else if (dist < closestPirateDist) {
+                                // Otherwise target closest pirate
+                                targetPirate = other;
+                                closestPirateDist = dist;
+                                pirateIsAttacking = false;
+                            }
+                        }
+                    }
+                    
+                    // Check if we found a pirate to pursue
+                    if (targetPirate) {
+                        npc.pursuing = true;  // Mark as pursuing
+                        if (!npc.pursuitTimer) npc.pursuitTimer = 0;  // Initialize pursuit timer
+                    } else {
+                        npc.pursuing = false;  // Clear pursuit state if no target
+                        npc.pursuitTimer = 0;  // Reset timer
+                    }
+                    
+                    // PRIORITY 2: Pursue hostile player
+                    if (!targetPirate && playerIsHostile && distToPlayer < 1000) {
+                        // Pursue hostile/armed player
+                        const interceptTime = distToPlayer / (npc.maxSpeed * 100);
+                        const targetX = ship.x + ship.vx * interceptTime * 2;
+                        const targetY = ship.y + ship.vy * interceptTime * 2;
+                        desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                        
+                        let angleDiff = desiredAngle - npc.angle;
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                        
+                        if (Math.abs(angleDiff) < Math.PI * 1.5) {
+                            shouldThrust = true;
+                        }
+                        
+                        // Fire at hostile player
+                        if (distToPlayer < 450 && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0 && npc.weapon) {
+                            fireProjectile(npc, npc.angle, false, npc.weapon);
+                            npc.weaponCooldown = npc.weapon.cooldown;
+                        }
+                    } 
+                    // PRIORITY 3: AGGRESSIVELY pursue and destroy pirates
+                    else if (targetPirate) {
+                        // Predict pirate's position for intercept
+                        const interceptTime = closestPirateDist / (npc.maxSpeed * 100);
+                        const targetX = targetPirate.x + targetPirate.vx * interceptTime * 2;
+                        const targetY = targetPirate.y + targetPirate.vy * interceptTime * 2;
+                        desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                        
+                        let angleDiff = desiredAngle - npc.angle;
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                        
+                        // Always thrust when chasing pirates (very aggressive)
+                        if (Math.abs(angleDiff) < Math.PI * 0.9) {  // Almost always thrust
+                            shouldThrust = true;
+                        }
+                        
+                        // Open fire at longer range but with MAJOR accuracy falloff
+                        if (closestPirateDist < 600 && Math.abs(angleDiff) < Math.PI / 2 && 
+                            npc.weaponCooldown <= 0 && npc.weapon) {
+                            // Much worse accuracy at range
+                            const accuracy = closestPirateDist < 150 ? 0.8 :  // 80% at close range
+                                           closestPirateDist < 300 ? 0.5 :   // 50% at medium range
+                                           closestPirateDist < 450 ? 0.3 :   // 30% at long range
+                                           0.2;                               // 20% at max range
+                            
+                            // Add movement penalty - harder to hit moving targets
+                            const targetSpeed = Math.sqrt(targetPirate.vx * targetPirate.vx + targetPirate.vy * targetPirate.vy);
+                            const movementPenalty = Math.max(0.5, 1 - targetSpeed * 0.5);
+                            
+                            if (Math.random() < accuracy * movementPenalty) {
+                                fireProjectile(npc, npc.angle, false, npc.weapon);
+                                npc.weaponCooldown = npc.weapon.cooldown;
+                            } else {
+                                // Still use cooldown even on miss (simulates taking the shot)
+                                npc.weaponCooldown = npc.weapon.cooldown * 0.5;
+                            }
+                        }
+                        
+                        // More likely to break off pursuit if pirate is escaping
+                        if (closestPirateDist > 800 && Math.random() < 0.05) {  // 5% chance per frame
+                            targetPirate = null;
+                            npc.pursuing = false;
+                        }
+                        
+                        // Also give up if chasing too long without hitting
+                        if (!npc.pursuitTimer) npc.pursuitTimer = 0;
+                        npc.pursuitTimer++;
+                        if (npc.pursuitTimer > 300 && Math.random() < 0.1) {  // After 5 seconds, start giving up
+                            targetPirate = null;
+                            npc.pursuing = false;
+                            npc.pursuitTimer = 0;
+                        }
+                    } 
+                    // PRIORITY 4: Regular patrol
+                    else {
+                        // No longer pursuing anyone
+                        npc.pursuing = false;
+                        
+                        // Initialize patrol pattern with random variation
+                        if (!npc.patrolAngle) {
+                            npc.patrolAngle = Math.random() * Math.PI * 2;
+                            npc.patrolSpeed = 0.008 + Math.random() * 0.008;  // Vary patrol speed
+                            npc.patrolDirection = Math.random() < 0.5 ? 1 : -1;  // Random direction
+                        }
+                        
+                        // Mix of circular and wandering movement
+                        if (Math.random() < 0.02) {  // 2% chance to change pattern
+                            npc.patrolDirection *= -1;  // Reverse direction
+                            npc.patrolSpeed = 0.008 + Math.random() * 0.008;
+                        }
+                        
+                        npc.patrolAngle += npc.patrolSpeed * npc.patrolDirection;
+                        desiredAngle = npc.patrolAngle;
+                        
+                        // Add some drift
+                        if (Math.random() < 0.3) {  // 30% chance to drift
+                            desiredAngle += (Math.random() - 0.5) * 0.5;
+                        }
+                        
+                        let angleDiff = desiredAngle - npc.angle;
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                        
+                        if (Math.abs(angleDiff) < Math.PI / 3) {
+                            shouldThrust = true;
+                        }
+                    }
+                } else if (npc.behavior === "passive") {
+                    // Traders navigate between planets
+                    let fleeing = false;
+                    
+                    // Check for threats
+                    if (distToPlayer < 300 && (ship.weaponCooldown > 0 || projectiles.some(p => p.isPlayer))) {
+                        // Flee from player threat
+                        desiredAngle = Math.atan2(-dy, -dx);
+                        shouldThrust = true;
+                        fleeing = true;
+                    }
+                    
+                    // Check for hostile NPCs nearby
+                    for (let other of npcShips) {
+                        if (other.behavior === "aggressive") {
+                            const odx = other.x - npc.x;
+                            const ody = other.y - npc.y;
+                            const distToHostile = Math.sqrt(odx * odx + ody * ody);
+                            if (distToHostile < 200) {
+                                desiredAngle = Math.atan2(-ody, -odx);
+                                shouldThrust = true;
+                                fleeing = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!fleeing && npc.targetPlanet) {
+                        // Navigate to target planet
+                        const pdx = npc.targetPlanet.x - npc.x;
+                        const pdy = npc.targetPlanet.y - npc.y;
+                        const distToPlanet = Math.sqrt(pdx * pdx + pdy * pdy);
+                        
+                        if (distToPlanet > npc.targetPlanet.radius + 50) {
+                            desiredAngle = Math.atan2(pdy, pdx);
+                            
+                            let angleDiff = desiredAngle - npc.angle;
+                            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                            
+                            // Only thrust if facing the right direction
+                            if (Math.abs(angleDiff) < Math.PI / 3) {
+                                // Slow down if approaching too fast
+                                const speed = Math.sqrt(npc.vx * npc.vx + npc.vy * npc.vy);
+                                const approachSpeed = (npc.vx * pdx + npc.vy * pdy) / distToPlanet;
+                                
+                                if (distToPlanet < 200 && approachSpeed > npc.maxSpeed * 0.3) {
+                                    shouldBrake = true;
+                                } else {
+                                    shouldThrust = true;
+                                }
+                            }
+                        } else {
+                            // At planet - brake and pick new destination
+                            shouldBrake = true;
+                            
+                            if (Math.random() < 0.01) {
+                                // Pick a new planet to visit
+                                const otherPlanets = planets.filter(p => p !== npc.targetPlanet);
+                                npc.targetPlanet = otherPlanets[Math.floor(Math.random() * otherPlanets.length)];
+                            }
+                        }
+                    }
+                } else {
+                    // Patrol ships - systematic patrol pattern
+                    if (!npc.patrolCenter) {
+                        // Initialize patrol pattern
+                        npc.patrolCenter = { x: npc.x, y: npc.y };
+                        npc.patrolAngle = 0;
+                        npc.patrolRadius = 300 + Math.random() * 200;
+                    }
+                    
+                    // Move in a circular patrol pattern
+                    npc.patrolAngle += 0.005;
+                    const targetX = npc.patrolCenter.x + Math.cos(npc.patrolAngle) * npc.patrolRadius;
+                    const targetY = npc.patrolCenter.y + Math.sin(npc.patrolAngle) * npc.patrolRadius;
+                    
+                    const pdx = targetX - npc.x;
+                    const pdy = targetY - npc.y;
+                    desiredAngle = Math.atan2(pdy, pdx);
+                    
+                    let angleDiff = desiredAngle - npc.angle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    
+                    if (Math.abs(angleDiff) < Math.PI / 3) {
+                        shouldThrust = true;
+                    }
+                    
+                    // Investigate nearby combat
+                    if (distToPlayer < 400 && ship.weaponCooldown > 0) {
+                        desiredAngle = Math.atan2(dy, dx);
+                        shouldThrust = true;
+                    }
+                }
+                
+                // Apply rotation toward desired angle
+                let angleDiff = desiredAngle - npc.angle;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                
+                if (Math.abs(angleDiff) > 0.01) {
+                    // Turn toward target, but respect turn speed limit
+                    const turnAmount = Math.min(Math.abs(angleDiff), npc.turnSpeed) * Math.sign(angleDiff);
+                    npc.angle += turnAmount;
+                }
+                
+                // Apply thrust/brake based on AI decision
+                if (shouldThrust) {
+                    // Forward thrust
+                    const thrustX = Math.cos(npc.angle) * npc.thrust;
+                    const thrustY = Math.sin(npc.angle) * npc.thrust;
+                    npc.vx += thrustX;
+                    npc.vy += thrustY;
+                    npc.thrusting = true;
+                } else if (shouldBrake) {
+                    // Brake
+                    npc.vx *= 0.95;
+                    npc.vy *= 0.95;
+                } else {
+                    npc.thrusting = false;
+                }
+                
+                // Update weapon cooldown
+                if (npc.weaponCooldown > 0) {
+                    npc.weaponCooldown--;
+                }
+                
+                // Apply space friction (very slight)
+                npc.vx *= 0.999;
+                npc.vy *= 0.999;
+                
+                // Apply velocity limits
+                const speed = Math.sqrt(npc.vx * npc.vx + npc.vy * npc.vy);
+                if (speed > npc.maxSpeed) {
+                    npc.vx = (npc.vx / speed) * npc.maxSpeed;
+                    npc.vy = (npc.vy / speed) * npc.maxSpeed;
+                }
+                
+                // Update position
+                npc.x += npc.vx;
+                npc.y += npc.vy;
+            }
+        }
+        
+        function fireProjectile(shooter, angle, isPlayer, weapon = null) {
+            // Default weapon if none specified (for NPCs)
+            if (!weapon) {
+                weapon = { type: "laser", damage: 10, cooldown: 15 };
+            }
+            
+            const projectile = {
+                x: shooter.x + Math.cos(angle) * (shooter.size + 5),
+                y: shooter.y + Math.sin(angle) * (shooter.size + 5),
+                vx: Math.cos(angle) * 2 + shooter.vx,
+                vy: Math.sin(angle) * 2 + shooter.vy,
+                isPlayer: isPlayer,
+                shooter: shooter,  // Track who fired this projectile
+                lifetime: 0,
+                damage: weapon.damage,
+                type: weapon.type
+            };
+            
+            // Adjust projectile properties based on weapon type
+            if (weapon.type === "rapid") {
+                projectile.vx = Math.cos(angle) * 3 + shooter.vx;
+                projectile.vy = Math.sin(angle) * 3 + shooter.vy;
+            } else if (weapon.type === "plasma") {
+                projectile.vx = Math.cos(angle) * 1.5 + shooter.vx;
+                projectile.vy = Math.sin(angle) * 1.5 + shooter.vy;
+            }
+            
+            projectiles.push(projectile);
+            
+            // Play sound for NPCs too (quieter)
+            if (!isPlayer && Math.random() < 0.3) {  // Only 30% of NPC shots make sound
+                audio.playLaser(weapon.type);
+            }
+        }
+        
+        function updateProjectiles() {
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const proj = projectiles[i];
+                
+                // Update position
+                proj.x += proj.vx;
+                proj.y += proj.vy;
+                proj.lifetime++;
+                
+                // Remove old projectiles
+                if (proj.lifetime > 60) {
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+                
+                // Check collision with player
+                if (!proj.isPlayer) {
+                    const dx = ship.x - proj.x;
+                    const dy = ship.y - proj.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < ship.size) {
+                        // Hit shields first
+                        if (ship.shield > 0) {
+                            ship.shield = Math.max(0, ship.shield - proj.damage);
+                            createExplosion(proj.x, proj.y, true);
+                            audio.playShieldHit();  // Sound effect!
+                        } else {
+                            ship.health -= proj.damage;
+                            createExplosion(proj.x, proj.y, true);
+                            audio.playExplosion(true);  // Sound effect!
+                        }
+                        projectiles.splice(i, 1);
+                        continue;
+                    }
+                }
+                
+                // Check collision with ALL NPCs (both player and NPC projectiles)
+                for (let npc of npcShips) {
+                    // Don't let NPCs shoot themselves
+                    if (proj.shooter === npc) continue;
+                    
+                    const dx = npc.x - proj.x;
+                    const dy = npc.y - proj.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < npc.size) {
+                        // Hit the NPC
+                        npc.health -= proj.damage;
+                        createExplosion(proj.x, proj.y, true);
+                        
+                        // Mark who killed this NPC if it dies
+                        if (npc.health <= 0 && !npc.killedBy) {
+                            npc.killedBy = proj.isPlayer ? 'player' : 'npc';
+                        }
+                        
+                        projectiles.splice(i, 1);
+                        break;
+                    }
+                }
+                
+                // Check collision with asteroids (mining)
+                for (let asteroid of asteroids) {
+                    const dx = asteroid.x - proj.x;
+                    const dy = asteroid.y - proj.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < asteroid.radius) {
+                        // Hit the asteroid
+                        asteroid.health -= proj.damage;
+                        createExplosion(proj.x, proj.y, true);
+                        projectiles.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        function createExplosion(x, y, small = false) {
+            explosions.push({
+                x: x,
+                y: y,
+                radius: small ? 5 : 15,
+                maxRadius: small ? 15 : 40,
+                lifetime: 0,
+                maxLifetime: 20
+            });
+        }
+        
+        function updateExplosions() {
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const exp = explosions[i];
+                exp.lifetime++;
+                
+                if (exp.lifetime >= exp.maxLifetime) {
+                    explosions.splice(i, 1);
+                }
+            }
+        }
+        
+        function updatePickups() {
+            for (let i = pickups.length - 1; i >= 0; i--) {
+                const pickup = pickups[i];
+                
+                // Update position (floating in space)
+                pickup.x += pickup.vx;
+                pickup.y += pickup.vy;
+                
+                // Slow down over time
+                pickup.vx *= 0.99;
+                pickup.vy *= 0.99;
+                
+                // Update lifetime
+                pickup.lifetime++;
+                
+                // Remove old pickups
+                if (pickup.lifetime >= pickup.maxLifetime) {
+                    pickups.splice(i, 1);
+                }
+            }
+        }
+        
+        function updateAsteroids() {
+            for (let i = asteroids.length - 1; i >= 0; i--) {
+                const asteroid = asteroids[i];
+                
+                // Remove destroyed asteroids and drop ore
+                if (asteroid.health <= 0) {
+                    // Drop ore at asteroid location
+                    const oreDrops = asteroid.oreContent;
+                    for (let j = 0; j < oreDrops; j++) {
+                        // Create floating ore pickup
+                        const angle = (Math.PI * 2 / oreDrops) * j;
+                        pickups.push({
+                            x: asteroid.x + Math.cos(angle) * 10,
+                            y: asteroid.y + Math.sin(angle) * 10,
+                            vx: Math.cos(angle) * 0.5 + asteroid.vx * 0.5,
+                            vy: Math.sin(angle) * 0.5 + asteroid.vy * 0.5,
+                            type: 'ore',
+                            value: 1,
+                            lifetime: 0,
+                            maxLifetime: 600  // 10 seconds at 60fps
+                        });
+                    }
+                    
+                    // Create small explosion
+                    createExplosion(asteroid.x, asteroid.y, true);
+                    
+                    // Replace with smaller asteroid if big enough
+                    if (asteroid.radius > 5) {
+                        for (let j = 0; j < 2; j++) {
+                            const angle = Math.random() * Math.PI * 2;
+                            asteroids.push({
+                                x: asteroid.x + Math.cos(angle) * asteroid.radius,
+                                y: asteroid.y + Math.sin(angle) * asteroid.radius,
+                                vx: Math.cos(angle) * 0.5 + asteroid.vx,
+                                vy: Math.sin(angle) * 0.5 + asteroid.vy,
+                                radius: asteroid.radius * 0.6,
+                                color: "#666",
+                                rotationSpeed: (Math.random() - 0.5) * 0.02,
+                                health: 10,
+                                maxHealth: 10,
+                                oreContent: 1
+                            });
+                        }
+                    }
+                    
+                    asteroids.splice(i, 1);
+                    continue;
+                }
+                
+                // Update position
+                asteroid.x += asteroid.vx;
+                asteroid.y += asteroid.vy;
+                
+                // Check collision with player ship
+                const dx = ship.x - asteroid.x;
+                const dy = ship.y - asteroid.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < ship.size + asteroid.radius) {
+                    // Calculate relative velocity for damage
+                    const relVx = ship.vx - asteroid.vx;
+                    const relVy = ship.vy - asteroid.vy;
+                    const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
+                    
+                    // Damage based on relative speed and asteroid size
+                    const damage = Math.floor(relSpeed * asteroid.radius * 2);
+                    
+                    if (ship.shield > 0) {
+                        ship.shield = Math.max(0, ship.shield - damage);
+                    } else {
+                        ship.health = Math.max(0, ship.health - damage);
+                    }
+                    
+                    // Bounce both objects
+                    const angle = Math.atan2(dy, dx);
+                    const force = 0.5;
+                    ship.vx += Math.cos(angle) * force;
+                    ship.vy += Math.sin(angle) * force;
+                    asteroid.vx -= Math.cos(angle) * force * 0.5;
+                    asteroid.vy -= Math.sin(angle) * force * 0.5;
+                    
+                    // Create impact effect
+                    createExplosion(asteroid.x + dx * 0.5, asteroid.y + dy * 0.5, true);
+                }
+                
+                // Wrap around world boundaries to keep asteroids in play
+                if (asteroid.x > 2000) asteroid.x = -2000;
+                if (asteroid.x < -2000) asteroid.x = 2000;
+                if (asteroid.y > 2000) asteroid.y = -2000;
+                if (asteroid.y < -2000) asteroid.y = 2000;
+                
+                // Slight random drift changes
+                if (Math.random() < 0.002) {
+                    asteroid.vx += (Math.random() - 0.5) * 0.05;
+                    asteroid.vy += (Math.random() - 0.5) * 0.05;
+                    
+                    // Keep velocities reasonable
+                    asteroid.vx = Math.max(-0.4, Math.min(0.4, asteroid.vx));
+                    asteroid.vy = Math.max(-0.4, Math.min(0.4, asteroid.vy));
+                }
+            }
+        }
+        
+        function checkLanding() {
+            // Prevent landing if on cooldown
+            if (ship.landingCooldown > 0) return;
+            
+            for (let planet of planets) {
+                const dx = ship.x - planet.x;
+                const dy = ship.y - planet.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < planet.radius + 30 && planet.landable) {
+                    // Check if already landed on this planet
+                    if (ship.isLanded && ship.landedPlanet === planet) {
+                        showLandingOverlay(planet, "Already docked at " + planet.name, 
+                            "You are currently docked here.", false);
+                        return;
+                    }
+                    
+                    // Successful landing
+                    ship.vx = 0;
+                    ship.vy = 0;
+                    ship.isLanded = true;
+                    ship.landedPlanet = planet;
+                    ship.landingCooldown = 60; // Prevent immediate re-landing
+                    
+                    // SCENE RESET - Clear ALL threats and NPCs
+                    // Clear all projectiles
+                    projectiles.length = 0;
+                    
+                    // Clear explosions
+                    explosions.length = 0;
+                    
+                    // CLEAR ALL NPCs - complete reset
+                    npcShips.length = 0;
+                    
+                    // Reset spawn timer to give player time to trade/upgrade
+                    nextShipSpawn = Date.now() + 5000 + Math.random() * 5000; // 5-10 seconds
+                    
+                    // Landing benefits
+                    const fuelGain = ship.maxFuel - ship.fuel;
+                    const healthGain = ship.maxHealth - ship.health;
+                    const creditGain = 50;
+                    ship.fuel = ship.maxFuel;
+                    ship.health = ship.maxHealth;
+                    ship.credits += creditGain;
+                    audio.playLanding();  // Sound effect!
+                    
+                    // Position ship just outside planet
+                    const angle = Math.atan2(dy, dx);
+                    ship.x = planet.x + Math.cos(angle) * (planet.radius + 25);
+                    ship.y = planet.y + Math.sin(angle) * (planet.radius + 25);
+                    
+                    // Show landing overlay
+                    let details = `Fuel refilled: +${fuelGain.toFixed(1)}%<br>`;
+                    if (healthGain > 0) {
+                        details += `Hull repaired: +${healthGain.toFixed(1)}%<br>`;
+                    }
+                    details += `Docking fee: +${creditGain} credits<br>`;
+                    details += `<span style="color: #4A90E2;">✓ Local space cleared of threats</span>`;
+                    
+                    showLandingOverlay(planet, "Landing successful!", details, true);
+                    break;
+                }
+            }
+        }
+        
+        function showLandingOverlay(planet, message, details, wasSuccessful) {
+            document.getElementById('planetName').textContent = planet.name;
+            document.getElementById('landingMessage').textContent = message;
+            document.getElementById('planetDescription').textContent = planet.description;
+            document.getElementById('landingDetails').innerHTML = details;
+            
+            // Store current planet for trading
+            ship.currentPlanet = planet;
+            
+            // Draw planet visual
+            drawPlanetVisual(planet);
+            
+            const overlay = document.getElementById('landingOverlay');
+            overlay.style.display = 'block';
+            overlay.style.borderColor = wasSuccessful ? '#4A90E2' : '#E74C3C';
+            
+            // Show landing panel by default
+            showPanel('landing');
+            
+            // Pause game while overlay is shown
+            game.paused = true;
+        }
+        
+        function showPanel(panelType) {
+            // Hide all panels
+            document.getElementById('landingContent').style.display = 'none';
+            document.getElementById('tradingPanel').style.display = 'none';
+            document.getElementById('shopPanel').style.display = 'none';
+            
+            // Show selected panel
+            if (panelType === 'landing') {
+                document.getElementById('landingContent').style.display = 'flex';
+            } else if (panelType === 'trading') {
+                document.getElementById('tradingPanel').style.display = 'block';
+                updateTradingPanel();
+            } else if (panelType === 'shop') {
+                document.getElementById('shopPanel').style.display = 'block';
+                updateShopPanel();
+            }
+        }
+        
+        function updateTradingPanel() {
+            if (!ship.currentPlanet) return;
+            
+            // Update status
+            document.getElementById('tradeCredits').textContent = ship.credits;
+            const cargoUsed = ship.cargo.reduce((sum, item) => sum + item.quantity, 0);
+            document.getElementById('tradeCargo').textContent = `${cargoUsed}/${ship.cargoCapacity}`;
+            
+            // Calculate total cargo value
+            let totalValue = 0;
+            for (let item of ship.cargo) {
+                totalValue += item.quantity * ship.currentPlanet.commodityPrices[item.type];
+            }
+            
+            // Build commodity list
+            const list = document.getElementById('commodityList');
+            list.innerHTML = '';
+            
+            // Add sell all button if carrying cargo
+            if (cargoUsed > 0) {
+                const sellAllRow = document.createElement('div');
+                sellAllRow.className = 'commodity-row';
+                sellAllRow.style.borderBottom = '2px solid #333';
+                sellAllRow.innerHTML = `
+                    <div class="commodity-info">
+                        <div class="commodity-name">💰 Sell All Cargo</div>
+                        <div>Total value: $${totalValue}</div>
+                    </div>
+                    <div class="buy-sell-buttons">
+                        <button onclick="sellAllCargo()">Sell All</button>
+                    </div>
+                `;
+                list.appendChild(sellAllRow);
+            }
+            
+            for (let key in commodities) {
+                const commodity = commodities[key];
+                const price = ship.currentPlanet.commodityPrices[key];
+                const basePrice = commodity.basePrice;
+                const owned = ship.cargo.find(c => c.type === key);
+                const ownedQty = owned ? owned.quantity : 0;
+                
+                // Show price indicator
+                let priceIndicator = '';
+                if (price < basePrice * 0.7) {
+                    priceIndicator = ' 📉'; // Good buy price
+                } else if (price > basePrice * 1.3) {
+                    priceIndicator = ' 📈'; // Good sell price
+                }
+                
+                const row = document.createElement('div');
+                row.className = 'commodity-row';
+                row.innerHTML = `
+                    <div class="commodity-info">
+                        <div class="commodity-name">${commodity.icon} ${commodity.name}</div>
+                        <div>Owned: ${ownedQty}</div>
+                    </div>
+                    <div class="price">$${price}${priceIndicator}</div>
+                    <div class="buy-sell-buttons">
+                        <button onclick="buyCommodity('${key}', ${price})">Buy</button>
+                        <button onclick="sellCommodity('${key}', ${price})" ${ownedQty === 0 ? 'disabled' : ''}>Sell</button>
+                    </div>
+                `;
+                list.appendChild(row);
+            }
+        }
+        
+        function buyCommodity(type, price) {
+            const cargoUsed = ship.cargo.reduce((sum, item) => sum + item.quantity, 0);
+            
+            if (ship.credits < price) {
+                // Create custom alert without using alert()
+                const msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#E74C3C;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
+                msg.textContent = 'Not enough credits!';
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 1500);
+                return;
+            }
+            
+            if (cargoUsed >= ship.cargoCapacity) {
+                // Create custom alert without using alert()
+                const msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#E74C3C;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
+                msg.textContent = 'Cargo hold full!';
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 1500);
+                return;
+            }
+            
+            ship.credits -= price;
+            
+            const existing = ship.cargo.find(c => c.type === type);
+            if (existing) {
+                existing.quantity++;
+            } else {
+                ship.cargo.push({ type: type, quantity: 1 });
+            }
+            
+            updateTradingPanel();
+        }
+        
+        function sellCommodity(type, price) {
+            const cargo = ship.cargo.find(c => c.type === type);
+            if (!cargo || cargo.quantity === 0) return;
+            
+            ship.credits += price;
+            cargo.quantity--;
+            
+            if (cargo.quantity === 0) {
+                ship.cargo = ship.cargo.filter(c => c.type !== type);
+            }
+            
+            updateTradingPanel();
+        }
+        
+        function sellAllCargo() {
+            if (!ship.currentPlanet) return;
+            
+            let totalEarned = 0;
+            for (let item of ship.cargo) {
+                const price = ship.currentPlanet.commodityPrices[item.type];
+                totalEarned += price * item.quantity;
+            }
+            
+            ship.credits += totalEarned;
+            ship.cargo = [];
+            updateTradingPanel();
+        }
+        
+        function updateShopPanel() {
+            if (!ship.currentPlanet) return;
+            
+            // Update status
+            document.getElementById('shopCredits').textContent = ship.credits;
+            
+            // Build shop list
+            const list = document.getElementById('shopList');
+            list.innerHTML = '';
+            
+            for (let itemId of ship.currentPlanet.shopItems) {
+                const item = shopInventory[itemId];
+                if (!item) continue;
+                
+                const row = document.createElement('div');
+                row.className = 'shop-item';
+                
+                // Check if already owned
+                let owned = false;
+                if (item.type === 'shield' && ship.maxShield > 0) owned = true;
+                if (item.type === 'engine' && ship.engineLevel >= item.value) owned = true;
+                if (item.type === 'weapon' && ship.weapons.some(w => w.type === item.value.type)) owned = true;
+                
+                row.innerHTML = `
+                    <div class="item-info">
+                        <div class="item-name">${item.name}</div>
+                        <div>${item.description}</div>
+                    </div>
+                    <div class="price">$${item.price}</div>
+                    <button class="shop-buy-button" onclick="buyUpgrade('${itemId}')" 
+                        ${owned || ship.credits < item.price ? 'disabled' : ''}>
+                        ${owned ? 'Owned' : 'Buy'}
+                    </button>
+                `;
+                list.appendChild(row);
+            }
+        }
+        
+        function buyUpgrade(itemId) {
+            const item = shopInventory[itemId];
+            if (!item || ship.credits < item.price) return;
+            
+            ship.credits -= item.price;
+            
+            switch(item.type) {
+                case 'shield':
+                    ship.maxShield = item.value;
+                    ship.shield = item.value;
+                    break;
+                case 'engine':
+                    ship.engineLevel = item.value;
+                    ship.thrust = 0.004 * (1 + (item.value - 1) * 0.5);  // 50% boost per level
+                    ship.maxSpeed = 0.45 * (1 + (item.value - 1) * 0.3);  // 30% speed boost per level
+                    break;
+                case 'weapon':
+                    ship.weapons.push(item.value);
+                    break;
+                case 'cargo':
+                    ship.cargoCapacity += item.value;
+                    break;
+            }
+            
+            updateShopPanel();
+        }
+        
+        function drawPlanetVisual(planet) {
+            // Clear canvas
+            planetCtx.fillStyle = '#000';
+            planetCtx.fillRect(0, 0, 150, 150);
+            
+            // Draw different surface scenes based on planet
+            switch(planet.name) {
+                case "Terra Nova":
+                    drawTerraNovaScene();
+                    break;
+                case "Crimson Moon":
+                    drawCrimsonMoonScene();
+                    break;
+                case "Ice World":
+                    drawIceWorldScene();
+                    break;
+                case "Mining Station":
+                    drawMiningStationScene();
+                    break;
+            }
+        }
+        
+        function drawTerraNovaScene() {
+            // Ocean background
+            const oceanGradient = planetCtx.createLinearGradient(0, 0, 0, 150);
+            oceanGradient.addColorStop(0, '#2E86AB');
+            oceanGradient.addColorStop(1, '#1A5490');
+            planetCtx.fillStyle = oceanGradient;
+            planetCtx.fillRect(0, 0, 150, 150);
+            
+            // Floating cities
+            planetCtx.fillStyle = '#E8F4FD';
+            planetCtx.fillRect(20, 40, 30, 20);
+            planetCtx.fillRect(100, 60, 25, 18);
+            planetCtx.fillRect(60, 90, 35, 22);
+            
+            // Quantum bridges (glowing lines)
+            planetCtx.strokeStyle = '#4A90E2';
+            planetCtx.lineWidth = 2;
+            planetCtx.setLineDash([3, 3]);
+            planetCtx.beginPath();
+            planetCtx.moveTo(35, 50);
+            planetCtx.lineTo(75, 80);
+            planetCtx.lineTo(112, 69);
+            planetCtx.stroke();
+            planetCtx.setLineDash([]);
+            
+            // City lights
+            planetCtx.fillStyle = '#FFE135';
+            for(let i = 0; i < 8; i++) {
+                planetCtx.fillRect(22 + (i * 3), 45, 2, 2);
+                planetCtx.fillRect(102 + (i * 2), 65, 1, 2);
+                planetCtx.fillRect(62 + (i * 4), 95, 2, 2);
+            }
+        }
+        
+        function drawCrimsonMoonScene() {
+            // Volcanic ground
+            const groundGradient = planetCtx.createLinearGradient(0, 100, 0, 150);
+            groundGradient.addColorStop(0, '#8B2635');
+            groundGradient.addColorStop(1, '#5D1A20');
+            planetCtx.fillStyle = groundGradient;
+            planetCtx.fillRect(0, 100, 150, 50);
+            
+            // Molten lava flows
+            planetCtx.fillStyle = '#FF6B35';
+            planetCtx.fillRect(10, 120, 40, 8);
+            planetCtx.fillRect(80, 115, 50, 12);
+            planetCtx.fillStyle = '#FF4500';
+            planetCtx.fillRect(15, 122, 30, 4);
+            planetCtx.fillRect(85, 118, 40, 6);
+            
+            // Mining structures
+            planetCtx.fillStyle = '#2C2C2C';
+            planetCtx.fillRect(30, 80, 15, 20);
+            planetCtx.fillRect(90, 75, 20, 25);
+            planetCtx.fillRect(60, 85, 12, 15);
+            
+            // Smoke/steam
+            planetCtx.fillStyle = '#666';
+            planetCtx.globalAlpha = 0.6;
+            for(let i = 0; i < 5; i++) {
+                planetCtx.beginPath();
+                planetCtx.arc(37 + (i * 2), 70 - (i * 8), 3 + i, 0, Math.PI * 2);
+                planetCtx.fill();
+                planetCtx.arc(100 + (i * 1.5), 65 - (i * 7), 4 + i, 0, Math.PI * 2);
+                planetCtx.fill();
+            }
+            planetCtx.globalAlpha = 1;
+        }
+        
+        function drawIceWorldScene() {
+            // Ice cavern background
+            const iceGradient = planetCtx.createLinearGradient(0, 0, 0, 150);
+            iceGradient.addColorStop(0, '#B8E6FF');
+            iceGradient.addColorStop(1, '#85C1E9');
+            planetCtx.fillStyle = iceGradient;
+            planetCtx.fillRect(0, 0, 150, 150);
+            
+            // Ice formations
+            planetCtx.fillStyle = '#E8F8FF';
+            planetCtx.beginPath();
+            planetCtx.moveTo(0, 120);
+            planetCtx.lineTo(30, 100);
+            planetCtx.lineTo(50, 130);
+            planetCtx.lineTo(0, 150);
+            planetCtx.fill();
+            
+            planetCtx.beginPath();
+            planetCtx.moveTo(120, 110);
+            planetCtx.lineTo(150, 90);
+            planetCtx.lineTo(150, 150);
+            planetCtx.lineTo(100, 150);
+            planetCtx.fill();
+            
+            // Research facility
+            planetCtx.fillStyle = '#2C3E50';
+            planetCtx.fillRect(50, 90, 50, 30);
+            planetCtx.fillStyle = '#3498DB';
+            planetCtx.fillRect(55, 95, 40, 20);
+            
+            // Quantum ice crystals (glowing)
+            planetCtx.fillStyle = '#00FFFF';
+            planetCtx.globalAlpha = 0.8;
+            for(let i = 0; i < 6; i++) {
+                const x = 20 + (i * 20);
+                const y = 60 + Math.sin(i) * 20;
+                planetCtx.beginPath();
+                planetCtx.arc(x, y, 3, 0, Math.PI * 2);
+                planetCtx.fill();
+            }
+            planetCtx.globalAlpha = 1;
+        }
+        
+        function drawMiningStationScene() {
+            // Space background with stars
+            planetCtx.fillStyle = '#0A0A0A';
+            planetCtx.fillRect(0, 0, 150, 150);
+            
+            // Stars
+            planetCtx.fillStyle = '#FFF';
+            for(let i = 0; i < 15; i++) {
+                const x = Math.random() * 150;
+                const y = Math.random() * 80;
+                planetCtx.fillRect(x, y, 1, 1);
+            }
+            
+            // Station structure
+            planetCtx.fillStyle = '#7F8C8D';
+            planetCtx.fillRect(40, 80, 70, 40);
+            planetCtx.fillStyle = '#95A5A6';
+            planetCtx.fillRect(45, 85, 60, 30);
+            
+            // Mechanical arms
+            planetCtx.strokeStyle = '#F39C12';
+            planetCtx.lineWidth = 4;
+            planetCtx.beginPath();
+            planetCtx.moveTo(30, 95);
+            planetCtx.lineTo(40, 100);
+            planetCtx.moveTo(110, 90);
+            planetCtx.lineTo(125, 85);
+            planetCtx.stroke();
+            
+            // Processing equipment
+            planetCtx.fillStyle = '#E67E22';
+            planetCtx.fillRect(50, 90, 8, 8);
+            planetCtx.fillRect(70, 92, 6, 6);
+            planetCtx.fillRect(90, 88, 10, 10);
+            
+            // Asteroid debris
+            planetCtx.fillStyle = '#5D6D7E';
+            for(let i = 0; i < 8; i++) {
+                const x = 10 + (i * 15);
+                const y = 130 + Math.sin(i) * 10;
+                planetCtx.beginPath();
+                planetCtx.arc(x, y, 2 + Math.random() * 2, 0, Math.PI * 2);
+                planetCtx.fill();
+            }
+        }
+        
+        function closeLandingOverlay() {
+            document.getElementById('landingOverlay').style.display = 'none';
+            game.paused = false;
+        }
+        
+        function updateCamera() {
+            game.camera.x = ship.x - canvas.width / 2;
+            game.camera.y = ship.y - canvas.height / 2;
+        }
+        
+        function updateHUD() {
+            // Health display with percentage and color coding
+            const healthPercent = Math.round(ship.health);
+            const healthElement = document.getElementById('health');
+            healthElement.textContent = healthPercent + '%';
+            healthElement.className = 'status-value' + 
+                (healthPercent < 30 ? ' critical' : healthPercent < 60 ? ' warning' : '');
+            
+            // Shield display
+            const shieldElement = document.getElementById('shield');
+            if (ship.maxShield > 0) {
+                const shieldPercent = Math.round((ship.shield / ship.maxShield) * 100);
+                shieldElement.textContent = shieldPercent + '%';
+                shieldElement.className = 'status-value good';
+            } else {
+                shieldElement.textContent = 'None';
+                shieldElement.className = 'status-value';
+            }
+            
+            // Fuel display with color coding
+            const fuelPercent = Math.round(ship.fuel);
+            const fuelElement = document.getElementById('fuel');
+            fuelElement.textContent = fuelPercent + '%';
+            fuelElement.className = 'status-value' + 
+                (fuelPercent < 20 ? ' critical' : fuelPercent < 40 ? ' warning' : '');
+            
+            // Speed display
+            const currentSpeed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+            document.getElementById('speed').textContent = currentSpeed.toFixed(1);
+            
+            // Credits with special formatting
+            document.getElementById('credits').textContent = ship.credits;
+            
+            // Kills counter
+            document.getElementById('kills').textContent = ship.kills;
+            
+            // Cargo display
+            const cargoUsed = ship.cargo.reduce((sum, item) => sum + item.quantity, 0);
+            document.getElementById('cargo').textContent = `${cargoUsed}/${ship.cargoCapacity}`;
+            
+            // Weapon display with color coding
+            const weaponElement = document.getElementById('weapon');
+            if (ship.weapons.length > 0) {
+                const weapon = ship.weapons[ship.currentWeapon];
+                let weaponName = 'LASER';
+                if (weapon.type === 'mining') weaponName = 'MINING';
+                if (weapon.type === 'rapid') weaponName = 'RAPID';
+                if (weapon.type === 'plasma') weaponName = 'PLASMA';
+                weaponElement.textContent = weaponName;
+                weaponElement.className = 'status-value weapon-value';
+            } else {
+                weaponElement.textContent = 'NONE';
+                weaponElement.className = 'status-value weapon-value';
+            }
+            
+            // Location/Sector display
+            let nearPlanet = null;
+            for (let planet of planets) {
+                const dx = ship.x - planet.x;
+                const dy = ship.y - planet.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < planet.radius + 100) {
+                    nearPlanet = planet.name;
+                    break;
+                }
+            }
+            document.getElementById('location').textContent = nearPlanet || 'Deep Space';
+            
+            // Mission HUD (show in location field when active)
+            if (missions.active) {
+                const missionText = `📋 ${missions.active.title}`;
+                document.getElementById('location').textContent = missionText;
+            }
+        }
+        
+        function drawStars() {
+            // Viewport boundaries for culling
+            const viewLeft = game.camera.x - 100;
+            const viewRight = game.camera.x + canvas.width + 100;
+            const viewTop = game.camera.y - 100;
+            const viewBottom = game.camera.y + canvas.height + 100;
+            
+            // Draw far stars (no parallax, smallest)
+            ctx.fillStyle = '#fff';
+            for (let star of stars.far) {
+                // Skip stars outside viewport
+                if (star.x < viewLeft || star.x > viewRight || 
+                    star.y < viewTop || star.y > viewBottom) continue;
+                    
+                const x = star.x - game.camera.x;
+                const y = star.y - game.camera.y;
+                
+                // Wrap stars around for infinite starfield
+                const wrappedX = ((x % canvas.width) + canvas.width) % canvas.width;
+                const wrappedY = ((y % canvas.height) + canvas.height) % canvas.height;
+                
+                ctx.globalAlpha = star.brightness;
+                if (star.size === 1) {
+                    ctx.fillRect(wrappedX, wrappedY, 1, 1);
+                } else {
+                    // Slightly bigger star (2x2) for variety
+                    ctx.fillRect(wrappedX, wrappedY, 2, 2);
+                }
+            }
+            
+            // Draw mid-distance stars (slight parallax and twinkling)
+            for (let star of stars.mid) {
+                // Parallax effect - moves slower than camera
+                const x = star.x - game.camera.x * 0.7;
+                const y = star.y - game.camera.y * 0.7;
+                
+                const wrappedX = ((x % canvas.width) + canvas.width) % canvas.width;
+                const wrappedY = ((y % canvas.height) + canvas.height) % canvas.height;
+                
+                // Twinkling effect
+                star.twinkle += 0.02;
+                const twinkleBrightness = Math.sin(star.twinkle) * 0.3 + 0.7;
+                
+                ctx.globalAlpha = star.brightness * twinkleBrightness;
+                ctx.fillRect(wrappedX, wrappedY, 1, 1);
+            }
+            
+            // Draw near stars (more parallax)
+            for (let star of stars.near) {
+                // More parallax effect
+                const x = star.x - game.camera.x * 0.5;
+                const y = star.y - game.camera.y * 0.5;
+                
+                const wrappedX = ((x % canvas.width) + canvas.width) % canvas.width;
+                const wrappedY = ((y % canvas.height) + canvas.height) % canvas.height;
+                
+                ctx.globalAlpha = star.brightness;
+                if (star.size === 1) {
+                    ctx.fillRect(wrappedX, wrappedY, 1, 1);
+                } else {
+                    ctx.fillRect(wrappedX, wrappedY, 2, 2);
+                }
+            }
+            
+            ctx.globalAlpha = 1;
+        }
+        
+        function drawAsteroids() {
+            for (let asteroid of asteroids) {
+                const x = asteroid.x - game.camera.x;
+                const y = asteroid.y - game.camera.y;
+                
+                if (x > -50 && x < canvas.width + 50 && y > -50 && y < canvas.height + 50) {
+                    // Show damage on asteroids
+                    const healthPercent = asteroid.health / asteroid.maxHealth;
+                    ctx.fillStyle = healthPercent < 0.5 ? '#553333' : asteroid.color;
+                    ctx.beginPath();
+                    ctx.arc(x, y, asteroid.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Cracks if damaged
+                    if (healthPercent < 0.7) {
+                        ctx.strokeStyle = '#333';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.moveTo(x - asteroid.radius * 0.5, y);
+                        ctx.lineTo(x + asteroid.radius * 0.3, y + asteroid.radius * 0.3);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        
+        function drawPickups() {
+            for (let pickup of pickups) {
+                const x = pickup.x - game.camera.x;
+                const y = pickup.y - game.camera.y;
+                
+                if (x > -20 && x < canvas.width + 20 && y > -20 && y < canvas.height + 20) {
+                    ctx.save();
+                    
+                    // Pulsing effect
+                    const pulse = Math.sin(pickup.lifetime * 0.1) * 0.3 + 0.7;
+                    ctx.globalAlpha = pulse;
+                    
+                    if (pickup.type === 'ore') {
+                        // Draw ore chunk (orange square)
+                        ctx.fillStyle = '#ff8800';
+                        ctx.fillRect(x - 4, y - 4, 8, 8);
+                        ctx.strokeStyle = '#ffaa00';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(x - 4, y - 4, 8, 8);
+                    } else if (pickup.type === 'credits') {
+                        // Draw credit pickup (yellow circle)
+                        ctx.fillStyle = '#ffd700';
+                        ctx.beginPath();
+                        ctx.arc(x, y, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                    
+                    // Fade out near end of lifetime
+                    if (pickup.lifetime > pickup.maxLifetime - 60) {
+                        ctx.globalAlpha = (pickup.maxLifetime - pickup.lifetime) / 60;
+                    }
+                    
+                    ctx.restore();
+                }
+            }
+        }
+        
+        function drawPlanets() {
+            for (let planet of planets) {
+                const x = planet.x - game.camera.x;
+                const y = planet.y - game.camera.y;
+                
+                if (x > -100 && x < canvas.width + 100 && y > -100 && y < canvas.height + 100) {
+                    // Planet body
+                    ctx.fillStyle = planet.color;
+                    ctx.beginPath();
+                    ctx.arc(x, y, planet.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Planet glow
+                    const gradient = ctx.createRadialGradient(x, y, planet.radius, x, y, planet.radius + 10);
+                    gradient.addColorStop(0, planet.color + '40');
+                    gradient.addColorStop(1, 'transparent');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(x, y, planet.radius + 10, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Planet name
+                    if (Math.sqrt((ship.x - planet.x) ** 2 + (ship.y - planet.y) ** 2) < 200) {
+                        ctx.fillStyle = '#fff';
+                        ctx.font = '12px Courier New';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(planet.name, x, y - planet.radius - 15);
+                    }
+                }
+            }
+        }
+        
+        function drawShip() {
+            const x = ship.x - game.camera.x;
+            const y = ship.y - game.camera.y;
+            
+            // Draw shield if active
+            if (ship.shield > 0) {
+                ctx.save();
+                const shieldAlpha = 0.2 + (ship.shield / ship.maxShield) * 0.3;
+                ctx.strokeStyle = '#00ffff';
+                ctx.globalAlpha = shieldAlpha;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(x, y, ship.size + 5, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Shield hit effect (flicker when recently hit)
+                if (ship.shield < ship.maxShield - 1) {
+                    ctx.globalAlpha = Math.random() * 0.3;
+                    ctx.fillStyle = '#00ffff';
+                    ctx.beginPath();
+                    ctx.arc(x, y, ship.size + 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+            
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(ship.angle);
+            
+            // Ship body - flash red when damaged
+            if (ship.health < 30) {
+                ctx.fillStyle = Math.floor(Date.now() / 200) % 2 ? '#ff4444' : '#fff';
+            } else {
+                ctx.fillStyle = '#fff';
+            }
+            ctx.beginPath();
+            ctx.moveTo(ship.size, 0);
+            ctx.lineTo(-ship.size, -ship.size/2);
+            ctx.lineTo(-ship.size/2, 0);
+            ctx.lineTo(-ship.size, ship.size/2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Thrust flame - only show if actually thrusting
+            if ((game.keys['ArrowUp'] || game.keys['KeyW']) && ship.fuel > 0.1) {
+                ctx.fillStyle = '#ff6600';
+                ctx.beginPath();
+                ctx.moveTo(-ship.size, -3);
+                ctx.lineTo(-ship.size - 8, 0);
+                ctx.lineTo(-ship.size, 3);
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+        
+        function drawNPCs() {
+            for (let npc of npcShips) {
+                const x = npc.x - game.camera.x;
+                const y = npc.y - game.camera.y;
+                
+                if (x > -50 && x < canvas.width + 50 && y > -50 && y < canvas.height + 50) {
+                    ctx.save();
+                    
+                    // Check if docking with planet
+                    let isDocking = false;
+                    if (npc.behavior === 'passive' && npc.targetPlanet) {
+                        const distToPlanet = Math.sqrt(
+                            (npc.x - npc.targetPlanet.x) ** 2 + 
+                            (npc.y - npc.targetPlanet.y) ** 2
+                        );
+                        isDocking = distToPlanet < npc.targetPlanet.radius + 60;
+                    }
+                    
+                    // Draw docking indicator
+                    if (isDocking) {
+                        ctx.strokeStyle = '#00ff00';
+                        ctx.globalAlpha = 0.5;
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.arc(x, y, npc.size + 8, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.globalAlpha = 1;
+                    }
+                    
+                    ctx.translate(x, y);
+                    ctx.rotate(npc.angle);
+                    
+                    // Draw different ship shapes based on type
+                    ctx.fillStyle = npc.color;
+                    
+                    if (npc.type === 'freighter') {
+                        // Bulky rectangular freighter
+                        ctx.beginPath();
+                        ctx.rect(-npc.size * 0.8, -npc.width/2, npc.size * 1.6, npc.width);
+                        ctx.fill();
+                        // Cargo pods
+                        ctx.fillStyle = '#666';
+                        ctx.fillRect(-npc.size * 0.3, -npc.width/2 - 4, 8, 4);
+                        ctx.fillRect(-npc.size * 0.3, npc.width/2, 8, 4);
+                        ctx.fillRect(npc.size * 0.1, -npc.width/2 - 4, 8, 4);
+                        ctx.fillRect(npc.size * 0.1, npc.width/2, 8, 4);
+                        // Bridge
+                        ctx.fillStyle = '#444';
+                        ctx.fillRect(npc.size * 0.5, -4, 6, 8);
+                    } else if (npc.type === 'trader') {
+                        // Rounded trader vessel
+                        ctx.beginPath();
+                        ctx.ellipse(0, 0, npc.size, npc.width/2, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        // Cockpit
+                        ctx.fillStyle = '#333';
+                        ctx.beginPath();
+                        ctx.ellipse(npc.size * 0.3, 0, 4, 3, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (npc.type === 'patrol') {
+                        // Cleaner, simpler patrol ship - still beefy but less cluttered
+                        // Single shield effect
+                        ctx.strokeStyle = '#ff0000';
+                        ctx.globalAlpha = 0.3;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(0, 0, npc.size + 6, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.globalAlpha = 1;
+                        
+                        // Main bulky hull - simplified shape
+                        ctx.fillStyle = npc.color;
+                        ctx.beginPath();
+                        ctx.moveTo(npc.size * 1.1, 0);
+                        ctx.lineTo(npc.size * 0.5, -npc.size * 0.35);
+                        ctx.lineTo(-npc.size * 0.6, -npc.size * 0.5);
+                        ctx.lineTo(-npc.size * 0.8, -npc.size * 0.3);
+                        ctx.lineTo(-npc.size * 0.8, npc.size * 0.3);
+                        ctx.lineTo(-npc.size * 0.6, npc.size * 0.5);
+                        ctx.lineTo(npc.size * 0.5, npc.size * 0.35);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        // Simple armor plate
+                        ctx.fillStyle = '#0D1F33';
+                        ctx.beginPath();
+                        ctx.moveTo(npc.size * 0.7, 0);
+                        ctx.lineTo(npc.size * 0.2, -npc.size * 0.2);
+                        ctx.lineTo(-npc.size * 0.3, -npc.size * 0.25);
+                        ctx.lineTo(-npc.size * 0.3, npc.size * 0.25);
+                        ctx.lineTo(npc.size * 0.2, npc.size * 0.2);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        // Wing structures - simplified
+                        ctx.strokeStyle = npc.color;
+                        ctx.lineWidth = 5;
+                        ctx.beginPath();
+                        ctx.moveTo(0, -npc.size * 0.3);
+                        ctx.lineTo(-npc.size * 0.6, -npc.size * 0.6);
+                        ctx.moveTo(0, npc.size * 0.3);
+                        ctx.lineTo(-npc.size * 0.6, npc.size * 0.6);
+                        ctx.stroke();
+                        
+                        // Weapon arrays - simplified
+                        ctx.fillStyle = '#ff0000';
+                        // Wing weapons
+                        ctx.fillRect(-npc.size * 0.5, -npc.size * 0.55, 6, 3);
+                        ctx.fillRect(-npc.size * 0.5, npc.size * 0.55 - 3, 6, 3);
+                        // Front weapon
+                        ctx.fillRect(npc.size * 0.9, -2, 6, 4);
+                        
+                        // Engine array - simplified
+                        ctx.fillStyle = '#00ffff';
+                        ctx.globalAlpha = 0.8;
+                        ctx.fillRect(-npc.size * 0.85, -8, 8, 6);
+                        ctx.fillRect(-npc.size * 0.85, 2, 8, 6);
+                        ctx.globalAlpha = 1;
+                    } else {
+                        // Pirate fighter - bulkier aggressive shape
+                        ctx.beginPath();
+                        ctx.moveTo(npc.size * 1.1, 0);
+                        ctx.lineTo(-npc.size * 0.5, -npc.size * 0.8);
+                        ctx.lineTo(-npc.size * 0.3, -npc.size * 0.3);
+                        ctx.lineTo(-npc.size * 0.3, npc.size * 0.3);
+                        ctx.lineTo(-npc.size * 0.5, npc.size * 0.8);
+                        ctx.closePath();
+                        ctx.fill();
+                        // Add engine pods for bulkier look
+                        ctx.fillStyle = '#8B2635';
+                        ctx.fillRect(-npc.size * 0.6, -npc.size * 0.5, 5, 4);
+                        ctx.fillRect(-npc.size * 0.6, npc.size * 0.5 - 4, 5, 4);
+                    }
+                    
+                    // Draw thrust flame when thrusting
+                    if (npc.thrusting) {
+                        ctx.fillStyle = '#ff6600';
+                        ctx.beginPath();
+                        ctx.moveTo(-npc.size, -3);
+                        ctx.lineTo(-npc.size - 8, 0);
+                        ctx.lineTo(-npc.size, 3);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    
+                    ctx.restore();
+                    
+                    // Health bar
+                    if (npc.health < npc.maxHealth) {
+                        ctx.fillStyle = '#333';
+                        ctx.fillRect(x - 15, y - npc.size - 10, 30, 3);
+                        ctx.fillStyle = npc.behavior === 'aggressive' ? '#E74C3C' : '#4A90E2';
+                        ctx.fillRect(x - 15, y - npc.size - 10, 30 * (npc.health / npc.maxHealth), 3);
+                    }
+                    
+                    // Type indicator with behavior state
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '10px Courier New';
+                    ctx.textAlign = 'center';
+                    
+                    // Use distinct labels for each type
+                    let label = '';
+                    if (npc.type === 'patrol') {
+                        label = 'LAW';  // Law enforcement
+                    } else if (npc.type === 'pirate') {
+                        label = 'PIR';  // Pirate
+                    } else if (npc.type === 'trader') {
+                        label = 'TRD';  // Trader
+                    } else if (npc.type === 'freighter') {
+                        label = 'FRT';  // Freighter
+                    }
+                    
+                    // Add state indicator for different behaviors
+                    if (npc.behavior === 'aggressive') {
+                        const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
+                        if (distToPlayer < 250) {
+                            label += '!'; // Attacking
+                        }
+                    } else if (npc.behavior === 'lawful') {
+                        // Show if patrol is actively pursuing pirates
+                        if (npc.pursuing) {
+                            label += '⚔'; // Crossed swords - engaging pirates!
+                            ctx.strokeStyle = '#ff0000';
+                            ctx.lineWidth = 2;
+                            ctx.globalAlpha = 0.5;
+                            ctx.beginPath();
+                            ctx.arc(x, y, npc.size + 12, 0, Math.PI * 2);
+                            ctx.stroke();
+                            ctx.globalAlpha = 1;
+                        } else {
+                            const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
+                            if (distToPlayer < 300 && (ship.weaponCooldown > 0 || ship.weapons.length > 0)) {
+                                label += '!'; // Pursuing player
+                            }
+                        }
+                    } else if (isDocking) {
+                        label += '↓'; // Docking
+                    }
+                    
+                    ctx.fillText(label, x, y - npc.size - 15);
+                }
+            }
+        }
+        
+        function drawProjectiles() {
+            for (let proj of projectiles) {
+                const x = proj.x - game.camera.x;
+                const y = proj.y - game.camera.y;
+                
+                if (x > -10 && x < canvas.width + 10 && y > -10 && y < canvas.height + 10) {
+                    // Different visuals for different weapon types
+                    if (proj.type === 'plasma') {
+                        // Plasma - large blue orb
+                        const gradient = ctx.createRadialGradient(x, y, 0, x, y, 8);
+                        gradient.addColorStop(0, '#00ffff');
+                        gradient.addColorStop(0.5, '#0088ff');
+                        gradient.addColorStop(1, 'transparent');
+                        ctx.fillStyle = gradient;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 8, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (proj.type === 'rapid') {
+                        // Rapid laser - thin yellow
+                        ctx.strokeStyle = '#ffff00';
+                        ctx.lineWidth = 1;
+                        ctx.globalAlpha = 0.9;
+                        ctx.beginPath();
+                        ctx.moveTo(x - proj.vx * 3, y - proj.vy * 3);
+                        ctx.lineTo(x + proj.vx * 3, y + proj.vy * 3);
+                        ctx.stroke();
+                        ctx.globalAlpha = 1;
+                    } else {
+                        // Standard laser - green/red
+                        ctx.strokeStyle = proj.isPlayer ? '#00ff00' : '#ff0000';
+                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.8;
+                        ctx.beginPath();
+                        ctx.moveTo(x - proj.vx * 2, y - proj.vy * 2);
+                        ctx.lineTo(x + proj.vx * 2, y + proj.vy * 2);
+                        ctx.stroke();
+                        
+                        // Bright center
+                        ctx.fillStyle = proj.isPlayer ? '#88ff88' : '#ff8888';
+                        ctx.globalAlpha = 1;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            ctx.globalAlpha = 1;
+        }
+        
+        function drawExplosions() {
+            for (let exp of explosions) {
+                const x = exp.x - game.camera.x;
+                const y = exp.y - game.camera.y;
+                
+                if (x > -50 && x < canvas.width + 50 && y > -50 && y < canvas.height + 50) {
+                    const progress = exp.lifetime / exp.maxLifetime;
+                    const radius = exp.radius + (exp.maxRadius - exp.radius) * progress;
+                    
+                    // Explosion effect
+                    ctx.globalAlpha = 1 - progress;
+                    
+                    // Outer ring
+                    ctx.strokeStyle = '#ff6600';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    // Inner glow
+                    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+                    gradient.addColorStop(0, '#ffff00');
+                    gradient.addColorStop(0.5, '#ff6600');
+                    gradient.addColorStop(1, 'transparent');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.globalAlpha = 1;
+        }
+        
+        function drawMinimap() {
+            // Clear minimap with dark background
+            minimapCtx.fillStyle = 'rgba(0, 10, 20, 0.8)';
+            minimapCtx.fillRect(0, 0, 90, 90);
+            
+            const centerX = 45;
+            const centerY = 45;
+            const mapRadius = 45;
+            
+            // Draw all major planets (always visible for navigation)
+            for (let planet of planets) {
+                const dx = planet.x - ship.x;
+                const dy = planet.y - ship.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Calculate position on minimap (scaled to fit entire system)
+                const systemScale = 0.02; // Smaller scale to show wider area
+                const mapX = centerX + (dx * systemScale);
+                const mapY = centerY + (dy * systemScale);
+                
+                // Only draw if within minimap circle
+                const distFromCenter = Math.sqrt((mapX - centerX) ** 2 + (mapY - centerY) ** 2);
+                if (distFromCenter < mapRadius) {
+                    // Different styling based on whether planet is in detection range
+                    if (distance < minimapRange) {
+                        // In range - full color and size
+                        minimapCtx.fillStyle = planet.color;
+                        minimapCtx.beginPath();
+                        minimapCtx.arc(mapX, mapY, Math.max(3, planet.radius * systemScale * 2), 0, Math.PI * 2);
+                        minimapCtx.fill();
+                    } else {
+                        // Out of range - dimmed and smaller
+                        minimapCtx.fillStyle = planet.color + '60';
+                        minimapCtx.beginPath();
+                        minimapCtx.arc(mapX, mapY, 2, 0, Math.PI * 2);
+                        minimapCtx.fill();
+                        
+                        // Add outline to make it more visible
+                        minimapCtx.strokeStyle = planet.color + '80';
+                        minimapCtx.lineWidth = 1;
+                        minimapCtx.stroke();
+                    }
+                }
+            }
+            
+            // Draw NPCs on minimap
+            for (let npc of npcShips) {
+                const dx = npc.x - ship.x;
+                const dy = npc.y - ship.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < minimapRange) {
+                    const mapX = centerX + (dx * minimapScale);
+                    const mapY = centerY + (dy * minimapScale);
+                    
+                    if (mapX > 0 && mapX < 134 && mapY > 0 && mapY < 134) {
+                        // Different colors for different NPC types
+                        if (npc.behavior === 'aggressive') {
+                            minimapCtx.fillStyle = '#ff0000';
+                        } else if (npc.behavior === 'passive') {
+                            minimapCtx.fillStyle = '#00ff00';
+                        } else {
+                            minimapCtx.fillStyle = '#ffff00';
+                        }
+                        minimapCtx.fillRect(mapX - 2, mapY - 2, 4, 4);
+                    }
+                }
+            }
+            
+            // Draw asteroids on minimap (only in detection range)
+            for (let asteroid of asteroids) {
+                const dx = asteroid.x - ship.x;
+                const dy = asteroid.y - ship.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < minimapRange) {
+                    const mapX = centerX + (dx * minimapScale);
+                    const mapY = centerY + (dy * minimapScale);
+                    
+                    if (mapX > 0 && mapX < 134 && mapY > 0 && mapY < 134) {
+                        minimapCtx.fillStyle = '#666';
+                        minimapCtx.fillRect(mapX - 1, mapY - 1, 2, 2);
+                    }
+                }
+            }
+            
+            // Draw ship at center (always visible)
+            minimapCtx.save();
+            minimapCtx.translate(centerX, centerY);
+            minimapCtx.rotate(ship.angle);
+            minimapCtx.fillStyle = '#00ff00';
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(4, 0);
+            minimapCtx.lineTo(-4, -2);
+            minimapCtx.lineTo(-2, 0);
+            minimapCtx.lineTo(-4, 2);
+            minimapCtx.closePath();
+            minimapCtx.fill();
+            minimapCtx.restore();
+            
+            // Draw detection range circle (smaller inner circle)
+            minimapCtx.strokeStyle = '#444';
+            minimapCtx.lineWidth = 1;
+            minimapCtx.beginPath();
+            minimapCtx.arc(centerX, centerY, minimapRange * minimapScale, 0, Math.PI * 2);
+            minimapCtx.stroke();
+            
+            // Draw outer minimap border
+            minimapCtx.strokeStyle = '#333';
+            minimapCtx.lineWidth = 1;
+            minimapCtx.beginPath();
+            minimapCtx.arc(centerX, centerY, mapRadius - 1, 0, Math.PI * 2);
+            minimapCtx.stroke();
+        }
+        
+        function draw() {
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawStars();
+            drawAsteroids();
+            drawPickups();
+            drawPlanets();
+            drawExplosions();
+            drawNPCs();
+            drawShip();
+            drawProjectiles();
+            drawMinimap();
+        }
+        
+        function gameLoop() {
+            if (!game.paused) {
+                updateShip();
+                updateNPCs();
+                updateProjectiles();
+                updateExplosions();
+                updatePickups();
+            updateAsteroids();
+                updateCamera();
+                updateHUD();
+                updateTutorialHint();
+                draw();
+                
+                // Check for game over
+                if (ship.health <= 0) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#ff0000';
+                    ctx.font = '48px Courier New';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2);
+                    ctx.font = '24px Courier New';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(`Credits: ${ship.credits}  Kills: ${ship.kills}`, canvas.width / 2, canvas.height / 2 + 50);
+                    ctx.font = '16px Courier New';
+                    ctx.fillText('Refresh to restart', canvas.width / 2, canvas.height / 2 + 80);
+                    return;
+                }
+            }
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Make functions globally accessible
+        window.closeLandingOverlay = closeLandingOverlay;
+        window.showPanel = showPanel;
+        window.buyCommodity = buyCommodity;
+        window.sellCommodity = sellCommodity;
+        window.buyUpgrade = buyUpgrade;
+        window.sellAllCargo = sellAllCargo;
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 100; // Account for HUD
+        });
+        
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
