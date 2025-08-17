@@ -428,17 +428,17 @@ function render() {
         ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
         ctx.stroke();
         
-        // Cloud layer (for habitable worlds) - subtle atmospheric banding
+        // Cloud layer and city lights for Terra Nova
         if (planet.name === "Terra Nova") {
             ctx.save();
-            ctx.globalAlpha = 0.12;
             
-            // Clip to planet circle
+            // Clip to planet circle for all Terra Nova details
             ctx.beginPath();
             ctx.arc(planet.x, planet.y, planet.radius * 0.98, 0, Math.PI * 2);
             ctx.clip();
             
-            // Create horizontal cloud bands
+            // Cloud bands (subtle)
+            ctx.globalAlpha = 0.12;
             for (let i = 0; i < 3; i++) {
                 const cloudOffset = (i - 1) * planet.radius * 0.4;
                 const cloudGradient = ctx.createLinearGradient(
@@ -458,6 +458,30 @@ function render() {
                     planet.radius * 0.4
                 );
             }
+            
+            // Tiny city lights (properly positioned on surface)
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = 'rgba(100, 200, 255, 0.8)';
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 0.5;
+            
+            // City cluster 1 (small dots, not rectangles)
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 2; j++) {
+                    const cityX = planet.x - planet.radius * 0.3 + i * 3;
+                    const cityY = planet.y + planet.radius * 0.2 + j * 3;
+                    ctx.fillRect(cityX, cityY, 1, 1);
+                }
+            }
+            
+            // City cluster 2 (tiny lights)
+            for (let i = 0; i < 4; i++) {
+                const angle = Math.PI * 0.3 + i * 0.1;
+                const cityX = planet.x + Math.cos(angle) * planet.radius * 0.7;
+                const cityY = planet.y + Math.sin(angle) * planet.radius * 0.7;
+                ctx.fillRect(cityX, cityY, 2, 2);
+            }
+            
             ctx.restore();
         }
         
