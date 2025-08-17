@@ -621,12 +621,12 @@ body {
     }
     
     #planetVisual {
-        width: 320px;  /* Smaller but still shows AI image */
+        width: 380px;  /* Adjusted for taller canvas */
     }
     
     #planetCanvas {
-        width: 300px;
-        height: 225px;  /* Maintain aspect ratio */
+        width: 360px;
+        height: 405px;  /* Maintain 8:9 aspect ratio */
     }
     
     #landingButtons button {
@@ -650,12 +650,12 @@ body {
     }
     
     #planetVisual {
-        width: 220px;  /* Much smaller on tiny screens */
+        width: 250px;  /* Adjusted for taller aspect */
     }
     
     #planetCanvas {
         width: 200px;
-        height: 150px;  /* Maintain aspect ratio */
+        height: 225px;  /* Maintain 8:9 aspect ratio */
     }
 }
 
