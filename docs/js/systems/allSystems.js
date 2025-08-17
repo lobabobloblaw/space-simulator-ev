@@ -1181,14 +1181,14 @@ export function updateTutorialHint(ship) {
     switch(ship.tutorialStage) {
         case 'start':
             if (ship.weapons.length === 0) {
-                message = "⚠️ UNARMED - Find a planet (L key near planet) and trade commodities to earn credits for weapons";
+                message = "WARNING: UNARMED // LOCATE PLANET AND TRADE FOR WEAPONS";
             } else {
                 ship.tutorialStage = 'armed';
             }
             break;
             
         case 'armed':
-            message = "✓ Armed and ready! Press F to fire, Q to switch weapons. Hunt pirates for bounties!";
+            message = "WEAPONS ONLINE // F: FIRE / Q: SWITCH / ENGAGE HOSTILES";
             setTimeout(() => {
                 ship.tutorialStage = 'combat';
             }, 5000);
@@ -1199,7 +1199,7 @@ export function updateTutorialHint(ship) {
             break;
             
         case 'complete':
-            message = "🎯 First kill! Trade between stations to buy ship upgrades. Good luck, pilot!";
+            message = "TARGET ELIMINATED // CONTINUE TRADING FOR UPGRADES";
             setTimeout(() => {
                 ship.tutorialStage = 'done';
             }, 5000);
@@ -1219,7 +1219,7 @@ export function updateHUD(ship) {
     document.getElementById('fuel').textContent = Math.round(ship.fuel) + '%';
     document.getElementById('speed').textContent = (Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy) * 100).toFixed(1);
     document.getElementById('cargo').textContent = ship.cargo.reduce((sum, item) => sum + item.quantity, 0) + '/' + ship.cargoCapacity;
-    document.getElementById('location').textContent = ship.isLanded ? ship.landedPlanet?.name : 'Deep Space';
+    document.getElementById('location').textContent = ship.isLanded ? ship.landedPlanet?.name : 'SPACE';
     document.getElementById('credits').textContent = ship.credits;
     document.getElementById('weapon').textContent = ship.weapons.length > 0 ? ship.weapons[ship.currentWeapon].type.toUpperCase() : 'NONE';
     document.getElementById('kills').textContent = ship.kills;
@@ -1347,20 +1347,18 @@ export function buyCommodity(type, price, ship, commodities) {
     const cargoUsed = ship.cargo.reduce((sum, item) => sum + item.quantity, 0);
     
     if (ship.credits < price) {
-        // Create custom alert without using alert()
         const msg = document.createElement('div');
-        msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#E74C3C;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
-        msg.textContent = 'Not enough credits!';
+        msg.className = 'game-notification error';
+        msg.textContent = 'INSUFFICIENT CREDITS';
         document.body.appendChild(msg);
         setTimeout(() => msg.remove(), 1500);
         return;
     }
     
     if (cargoUsed >= ship.cargoCapacity) {
-        // Create custom alert without using alert()
         const msg = document.createElement('div');
-        msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#E74C3C;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
-        msg.textContent = 'Cargo hold full!';
+        msg.className = 'game-notification error';
+        msg.textContent = 'CARGO HOLD FULL';
         document.body.appendChild(msg);
         setTimeout(() => msg.remove(), 1500);
         return;
@@ -1409,8 +1407,8 @@ export function sellAllCargo(ship, commodities) {
     
     // Show feedback
     const msg = document.createElement('div');
-    msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#4A90E2;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
-    msg.textContent = `Sold all cargo for ${totalEarned} credits!`;
+    msg.className = 'game-notification success';
+    msg.textContent = `CARGO SOLD: +${totalEarned} CREDITS`;
     document.body.appendChild(msg);
     setTimeout(() => msg.remove(), 2000);
     
@@ -1423,8 +1421,8 @@ export function buyUpgrade(itemId, ship, shopInventory) {
     // Check if player can afford it
     if (ship.credits < item.price) {
         const msg = document.createElement('div');
-        msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#E74C3C;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
-        msg.textContent = 'Not enough credits!';
+        msg.className = 'game-notification error';
+        msg.textContent = 'INSUFFICIENT CREDITS';
         document.body.appendChild(msg);
         setTimeout(() => msg.remove(), 1500);
         return;
@@ -1464,11 +1462,14 @@ export function buyUpgrade(itemId, ship, shopInventory) {
     
     // Show purchase confirmation
     const msg = document.createElement('div');
-    msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#4A90E2;color:white;padding:10px 20px;border-radius:5px;z-index:10000;font-family:Courier New;';
-    msg.textContent = `Purchased ${item.name}!`;
+    msg.className = 'game-notification success';
+    msg.textContent = `PURCHASED: ${item.name.toUpperCase()}`;
     document.body.appendChild(msg);
     setTimeout(() => msg.remove(), 2000);
     
     // Update shop display
     updateShopPanel(ship, shopInventory);
 }
+
+// Export SaveSystem
+export { SaveSystem } from './saveSystem.js';

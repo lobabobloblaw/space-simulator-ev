@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Galaxy Trader - Space Trading & Combat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/main.css">
 </head>
 <body>
@@ -12,81 +15,86 @@
     
     <canvas id="gameCanvas"></canvas>
     
-    <!-- Galaxy Trader HUD -->
+    <!-- 90s Space Sim HUD -->
     <div id="gameHUD">
+        <div class="tech-line"></div>
         <div class="hud-container">
-            <!-- Left Panel: Ship Status -->
+            <!-- Left Panel: Ship Systems -->
             <div class="hud-left">
-                <div class="status-item">
-                    <span class="status-label">Hull</span>
-                    <span class="status-value" id="health">100%</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Shield</span>
-                    <span class="status-value" id="shield">None</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Fuel</span>
-                    <span class="status-value" id="fuel">100%</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Speed</span>
-                    <span class="status-value" id="speed">0.0</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Cargo</span>
-                    <span class="status-value" id="cargo">0/10</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Sector</span>
-                    <span class="status-value" id="location">Deep Space</span>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">HULL</span>
+                        <span class="status-value" id="health">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SHIELD</span>
+                        <span class="status-value" id="shield">NONE</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">FUEL</span>
+                        <span class="status-value" id="fuel">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SPEED</span>
+                        <span class="status-value" id="speed">0.0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">CARGO</span>
+                        <span class="status-value" id="cargo">0/10</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SECTOR</span>
+                        <span class="status-value" id="location">SPACE</span>
+                    </div>
                 </div>
             </div>
             
-            <!-- Center Panel: Logo & Key Stats -->
+            <!-- Center Panel: Cyberpunk Logo -->
             <div class="hud-center">
                 <div id="logo-container">
                     <div id="logo-ascii">GALAXY TRADER</div>
                 </div>
+                <div class="hud-subtitle">/// SYSTEM ONLINE</div>
                 <div class="key-stats">
                     <div class="key-stat">
-                        <span class="status-label">Credits</span>
+                        <span class="status-label">CREDITS</span>
                         <span class="status-value credits-value" id="credits">250</span>
                     </div>
                     <div class="key-stat">
-                        <span class="status-label">Weapon</span>
+                        <span class="status-label">WEAPON</span>
                         <span class="status-value weapon-value" id="weapon">NONE</span>
                     </div>
                     <div class="key-stat">
-                        <span class="status-label">Kills</span>
+                        <span class="status-label">KILLS</span>
                         <span class="status-value" id="kills">0</span>
                     </div>
                 </div>
             </div>
             
-            <!-- Right Panel: Controls & Minimap -->
+            <!-- Right Panel: Controls & Radar -->
             <div class="hud-right">
-                <div class="controls">
-                    <span class="control-key">W/↑</span>
-                    <span class="control-action">Thrust</span>
-                    <span class="control-key">A/D</span>
-                    <span class="control-action">Turn</span>
-                    <span class="control-key">SPC</span>
-                    <span class="control-action">Brake</span>
-                    <span class="control-key">F</span>
-                    <span class="control-action">Fire</span>
-                    <span class="control-key">Q</span>
-                    <span class="control-action">Switch</span>
-                    <span class="control-key">L</span>
-                    <span class="control-action">Land</span>
+                <div class="controls-panel">
+                    <div class="controls">
+                        <span class="control-key">W</span>
+                        <span class="control-action">THR</span>
+                        <span class="control-key">A/D</span>
+                        <span class="control-action">TURN</span>
+                        <span class="control-key">F</span>
+                        <span class="control-action">FIRE</span>
+                        <span class="control-key">L</span>
+                        <span class="control-action">LAND</span>
+                        <span class="control-key">S/O</span>
+                        <span class="control-action">SAVE</span>
+                    </div>
                 </div>
                 <div id="minimap">
-                    <canvas id="minimapCanvas" width="75" height="75"></canvas>
+                    <canvas id="minimapCanvas" width="100" height="100"></canvas>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- Landing/Station Interface -->
     <div id="landingOverlay">
         <div id="landingHeader">
             <h3 id="planetName">Planet Name</h3>
@@ -96,29 +104,29 @@
                 <canvas id="planetCanvas" width="150" height="150"></canvas>
             </div>
             <div id="landingInfo">
-                <div id="landingMessage">Landing successful!</div>
+                <div id="landingMessage">DOCKING SUCCESSFUL</div>
                 <div id="planetDescription">Planet description goes here...</div>
                 <div id="landingDetails"></div>
             </div>
         </div>
         <div id="tradingPanel">
             <div class="cargo-status">
-                <strong>Credits:</strong> <span id="tradeCredits">0</span> | 
-                <strong>Cargo:</strong> <span id="tradeCargo">0/10</span>
+                <strong>CREDITS:</strong> <span id="tradeCredits">0</span> | 
+                <strong>CARGO:</strong> <span id="tradeCargo">0/10</span>
             </div>
             <div id="commodityList"></div>
         </div>
         <div id="shopPanel">
             <div class="cargo-status">
-                <strong>Credits:</strong> <span id="shopCredits">0</span>
+                <strong>CREDITS:</strong> <span id="shopCredits">0</span>
             </div>
             <div id="shopList"></div>
         </div>
         <div id="landingButtons">
-            <button id="departBtn">[1] Depart</button>
-            <button id="stationBtn">[2] Station</button>
-            <button id="tradeBtn">[3] Trade</button>
-            <button id="outfitterBtn">[4] Outfitter</button>
+            <button id="departBtn">[1] DEPART</button>
+            <button id="stationBtn">[2] STATION</button>
+            <button id="tradeBtn">[3] TRADE</button>
+            <button id="outfitterBtn">[4] OUTFITTER</button>
         </div>
     </div>
 

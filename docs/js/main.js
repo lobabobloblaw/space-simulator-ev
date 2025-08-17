@@ -35,7 +35,8 @@ import {
     buyCommodity,
     sellCommodity,
     sellAllCargo,
-    buyUpgrade
+    buyUpgrade,
+    SaveSystem
 } from './systems/allSystems.js';
 
 // Get canvas elements
@@ -48,7 +49,7 @@ const planetCtx = planetCanvas.getContext('2d');
 
 // Set canvas size
 canvas.width = window.innerWidth;
-canvas.height = window.innerHeight - 100;
+canvas.height = window.innerHeight - 150;  // HUD height (110px) + padding (40px)
 
 // Game state
 const game = {
@@ -167,6 +168,9 @@ const npcSpawnState = {
 const audioSystem = new AudioSystem();
 audioSystem.init();
 
+// Initialize save system
+const saveSystem = new SaveSystem();
+
 // Mission system
 const missionSystem = {
     active: null,
@@ -197,7 +201,7 @@ const missionSystem = {
     
     showMessage(text) {
         const msg = document.createElement('div');
-        msg.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);background:rgba(74, 144, 226, 0.95);color:white;padding:10px 20px;border-radius:5px;font-family:Courier New;font-size:14px;z-index:100;';
+        msg.className = 'game-notification info';
         msg.textContent = text;
         document.body.appendChild(msg);
         setTimeout(() => msg.remove(), 3000);
@@ -215,11 +219,25 @@ document.addEventListener('keydown', (e) => {
         if (e.code === 'Digit4') showPanel('shop');
     }
     
+    // Save game (KeyS when not typing)
+    if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !game.paused) {
+        saveSystem.saveGame(ship, game, missionSystem, npcShips, asteroids, pickups);
+    }
+    
+    // Load game (KeyO for Open save)
+    if (e.code === 'KeyO' && !game.paused) {
+        if (saveSystem.loadGame(ship, game, missionSystem, missions, npcShips, asteroids, pickups)) {
+            // Reset camera after load
+            game.camera.x = ship.x;
+            game.camera.y = ship.y;
+        }
+    }
+    
     if (e.code === 'KeyM') {
         audioSystem.enabled = !audioSystem.enabled;
         const msg = document.createElement('div');
-        msg.style.cssText = 'position:fixed;top:20px;right:20px;background:rgba(0,0,0,0.8);color:white;padding:5px 10px;border-radius:3px;font-family:Courier New;font-size:11px;';
-        msg.textContent = audioSystem.enabled ? '🔊 Sound ON' : '🔇 Sound OFF';
+        msg.className = 'game-notification info';
+        msg.textContent = audioSystem.enabled ? 'SOUND: ENABLED' : 'SOUND: DISABLED';
         document.body.appendChild(msg);
         setTimeout(() => msg.remove(), 1500);
     }
@@ -232,7 +250,7 @@ document.addEventListener('keyup', (e) => {
 // Window resize
 window.addEventListener('resize', () => {
     canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight - 100;
+    canvas.height = window.innerHeight - 150;  // HUD height (110px) + padding (40px)
 });
 
 // Main render function with full visual effects
@@ -774,37 +792,62 @@ function render() {
 }
 
 function renderMinimap() {
-    const centerX = 37.5;
-    const centerY = 37.5;
+    const centerX = 50;  // Center of 100x100 canvas
+    const centerY = 50;
+    const maxRadius = 45;  // Stay within circle bounds
     
-    // Clear minimap
-    minimapCtx.clearRect(0, 0, 75, 75);
+    // Clear minimap with subtle green tint
+    minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    minimapCtx.fillRect(0, 0, 100, 100);
     
-    // Draw planets on minimap
-    minimapCtx.fillStyle = '#44f';
+    // Draw range circles (radar style)
+    minimapCtx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
+    minimapCtx.lineWidth = 1;
+    for (let r = 15; r <= 45; r += 15) {
+        minimapCtx.beginPath();
+        minimapCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
+        minimapCtx.stroke();
+    }
+    
+    // Draw planets on minimap (holographic green)
+    minimapCtx.fillStyle = '#00ff00';
+    minimapCtx.shadowColor = '#00ff00';
+    minimapCtx.shadowBlur = 5;
     for (let planet of planets) {
         const dx = (planet.x - ship.x) * minimapScale;
         const dy = (planet.y - ship.y) * minimapScale;
-        if (Math.abs(dx) < 37 && Math.abs(dy) < 37) {
+        if (Math.abs(dx) < maxRadius && Math.abs(dy) < maxRadius) {
             minimapCtx.beginPath();
-            minimapCtx.arc(centerX + dx, centerY + dy, 2, 0, Math.PI * 2);
+            minimapCtx.arc(centerX + dx, centerY + dy, 3, 0, Math.PI * 2);
             minimapCtx.fill();
         }
     }
+    minimapCtx.shadowBlur = 0;
     
-    // Draw NPCs on minimap
+    // Draw NPCs on minimap (threat indicators)
     for (let npc of npcShips) {
         const dx = (npc.x - ship.x) * minimapScale;
         const dy = (npc.y - ship.y) * minimapScale;
-        if (Math.abs(dx) < 37 && Math.abs(dy) < 37) {
-            minimapCtx.fillStyle = npc.behavior === 'aggressive' ? '#f44' : '#888';
+        if (Math.abs(dx) < maxRadius && Math.abs(dy) < maxRadius) {
+            minimapCtx.fillStyle = npc.behavior === 'aggressive' ? '#ff0000' : '#ffff00';
             minimapCtx.fillRect(centerX + dx - 1, centerY + dy - 1, 2, 2);
         }
     }
     
-    // Draw player at center
-    minimapCtx.fillStyle = '#0f0';
-    minimapCtx.fillRect(centerX - 1, centerY - 1, 2, 2);
+    // Draw player at center with direction indicator (bright green)
+    minimapCtx.save();
+    minimapCtx.translate(centerX, centerY);
+    minimapCtx.rotate(ship.angle);
+    minimapCtx.fillStyle = '#00ff00';
+    minimapCtx.shadowColor = '#00ff00';
+    minimapCtx.shadowBlur = 5;
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(4, 0);
+    minimapCtx.lineTo(-2, -2);
+    minimapCtx.lineTo(-2, 2);
+    minimapCtx.closePath();
+    minimapCtx.fill();
+    minimapCtx.restore();
 }
 
 // Main game loop
@@ -870,6 +913,74 @@ document.getElementById('outfitterBtn').onclick = () => showPanel('shop', ship, 
 // Start first mission
 missionSystem.assignNext();
 
+// Check for existing save on startup
+if (saveSystem.hasSave()) {
+    // Show load prompt
+    const loadPrompt = document.createElement('div');
+    loadPrompt.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #141414;
+        border: 1px solid rgba(0, 255, 255, 0.3);
+        padding: 32px;
+        z-index: 10000;
+        font-family: 'JetBrains Mono', monospace;
+        color: white;
+        text-align: center;
+        box-shadow: 0 0 40px rgba(0, 255, 255, 0.2);
+    `;
+    loadPrompt.innerHTML = `
+        <h2 style="color: #00ffff; margin: 0 0 20px 0; font-weight: 300; letter-spacing: 4px; font-size: 18px;">SAVE DETECTED</h2>
+        <p style="margin-bottom: 24px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-size: 12px;">Continue Previous Session?</p>
+        <button id="loadSaveBtn" style="
+            background: transparent;
+            color: #00ffff;
+            border: 1px solid #00ffff;
+            padding: 10px 24px;
+            margin: 0 8px;
+            cursor: pointer;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 11px;
+            transition: all 0.2s;
+        ">LOAD</button>
+        <button id="newGameBtn" style="
+            background: transparent;
+            color: #888;
+            border: 1px solid #444;
+            padding: 10px 24px;
+            margin: 0 8px;
+            cursor: pointer;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 11px;
+            transition: all 0.2s;
+        ">NEW GAME</button>
+    `;
+    document.body.appendChild(loadPrompt);
+    
+    document.getElementById('loadSaveBtn').onclick = () => {
+        saveSystem.loadGame(ship, game, missionSystem, missions, npcShips, asteroids, pickups);
+        loadPrompt.remove();
+    };
+    
+    document.getElementById('newGameBtn').onclick = () => {
+        loadPrompt.remove();
+    };
+}
+
+// Autosave every 30 seconds
+setInterval(() => {
+    if (!game.paused && ship.health > 0) {
+        saveSystem.autoSave(ship, game, missionSystem, npcShips, asteroids, pickups);
+    }
+}, 30000);
+
 // Start the game
 console.log('Galaxy Trader initialized!');
+console.log('Controls: S = Save, O = Load, M = Toggle Sound');
 gameLoop();

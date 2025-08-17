@@ -1,399 +1,676 @@
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            background: #000;
-            color: #fff;
-            font-family: 'Courier New', monospace;
-            overflow: hidden;
-        }
-        
-        #gameCanvas {
-            display: block;
-            background: #000;
-            width: 100%;
-            height: calc(100vh - 100px);
-        }
-        
-        /* Main HUD Container */
-        #gameHUD {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 100px;
-            background: linear-gradient(to top, 
-                rgba(0, 0, 0, 0.98) 0%, 
-                rgba(0, 10, 20, 0.95) 40%,
-                rgba(0, 20, 40, 0.9) 100%);
-            border-top: 1px solid #00ffff;
-            box-shadow: 
-                0 -1px 15px rgba(0, 255, 255, 0.3),
-                inset 0 1px 5px rgba(0, 255, 255, 0.1);
-        }
-        
-        /* HUD Layout Grid */
-        .hud-container {
-            display: grid;
-            grid-template-columns: 280px 1fr 280px;
-            height: 100%;
-            padding: 10px 20px;
-            gap: 20px;
-            align-items: center;
-        }
-        
-        /* Left Panel - Ship Status */
-        .hud-left {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            grid-template-rows: repeat(2, 1fr);
-            gap: 4px 12px;
-            align-self: center;
-        }
-        
-        /* Center Panel - Logo & Credits */
-        .hud-center {
-            text-align: center;
-        }
-        
-        /* Right Panel - Minimap & Controls */
-        .hud-right {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 15px;
-            align-self: center;
-        }
-        
-        /* Status Item Styling */
-        .status-item {
-            display: flex;
-            align-items: center;
-            font-size: 10px;
-            white-space: nowrap;
-        }
-        
-        .status-label {
-            color: #0088cc;
-            font-size: 9px;
-            margin-right: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            opacity: 0.8;
-        }
-        
-        .status-value {
-            color: #ffffff;
-            font-weight: bold;
-            text-shadow: 0 0 3px rgba(255, 255, 255, 0.3);
-            font-size: 11px;
-        }
-        
-        .status-value.critical {
-            color: #ff4444;
-            animation: pulse 0.5s infinite;
-        }
-        
-        .status-value.warning {
-            color: #ffaa00;
-        }
-        
-        .status-value.good {
-            color: #00ff88;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        
-        /* Galaxy Trader Logo */
-        #logo-container {
-            margin: 0;
-        }
-        
-        #logo-ascii {
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            line-height: 1.0;
-            color: #00ffff;
-            text-shadow: 
-                0 0 8px #00ffff,
-                0 0 15px rgba(0, 255, 255, 0.4);
-            white-space: pre;
-            letter-spacing: 3px;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 6px;
-        }
-        
-        /* Key Stats Row */
-        .key-stats {
-            display: flex;
-            justify-content: center;
-            gap: 25px;
-        }
-        
-        .key-stat {
-            display: flex;
-            align-items: center;
-            font-size: 11px;
-        }
-        
-        .key-stat .status-label {
-            color: #00aaff;
-            margin-right: 6px;
-        }
-        
-        .credits-value {
-            color: #ffd700;
-            text-shadow: 0 0 5px rgba(255, 215, 0, 0.5);
-        }
-        
-        .weapon-value {
-            color: #ff6666;
-        }
-        
-        /* Minimap */
-        #minimap {
-            width: 75px;
-            height: 75px;
-            border: 1px solid #00ffff;
-            border-radius: 50%;
-            background: radial-gradient(circle,
-                rgba(0, 40, 80, 0.2) 0%,
-                rgba(0, 20, 40, 0.5) 50%,
-                rgba(0, 0, 0, 0.8) 100%);
-            box-shadow: 
-                0 0 10px rgba(0, 255, 255, 0.3),
-                inset 0 0 10px rgba(0, 255, 255, 0.15);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        #minimapCanvas {
-            width: 100%;
-            height: 100%;
-        }
-        
-        /* Controls */
-        .controls {
-            display: grid;
-            grid-template-columns: auto auto;
-            gap: 1px 6px;
-            font-size: 9px;
-        }
-        
-        .control-key {
-            color: #00ffff;
-            font-weight: bold;
-            text-shadow: 0 0 2px rgba(0, 255, 255, 0.5);
-        }
-        
-        .control-action {
-            color: #6699cc;
-            opacity: 0.9;
-        }
-        
-        #tradingPanel, #shopPanel {
-            display: none;
-            padding: 20px;
-            height: calc(100% - 120px);
-            overflow-y: auto;
-        }
-        
-        .commodity-row, .shop-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px;
-            margin: 5px 0;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 5px;
-        }
-        
-        .commodity-row:hover, .shop-item:hover {
-            background: rgba(74, 144, 226, 0.2);
-        }
-        
-        .commodity-info, .item-info {
-            flex: 1;
-        }
-        
-        .commodity-name, .item-name {
-            font-weight: bold;
-            color: #4A90E2;
-        }
-        
-        .price {
-            color: #F39C12;
-            margin: 0 10px;
-        }
-        
-        .buy-sell-buttons button, .shop-buy-button {
-            background: #4A90E2;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            margin: 0 2px;
-            cursor: pointer;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            border-radius: 3px;
-        }
-        
-        .buy-sell-buttons button:hover, .shop-buy-button:hover {
-            background: #357ABD;
-        }
-        
-        .buy-sell-buttons button:disabled, .shop-buy-button:disabled {
-            background: #666;
-            cursor: not-allowed;
-        }
-        
-        .cargo-status {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: rgba(74, 144, 226, 0.1);
-            border-radius: 5px;
-        }
-        
-        #landingHeader {
-            background: linear-gradient(135deg, #4A90E2, #357ABD);
-            padding: 15px 20px;
-            border-radius: 13px 13px 0 0;
-            text-align: center;
-            border-bottom: 1px solid #666;
-        }
-        
-        #landingHeader h3 {
-            margin: 0;
-            font-size: 18px;
-        }
-        
-        #landingContent {
-            display: flex;
-            height: calc(100% - 120px);
-        }
-        
-        #planetVisual {
-            width: 200px;
-            background: #111;
-            border-right: 1px solid #666;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-        
-        #planetCanvas {
-            width: 150px;
-            height: 150px;
-        }
-        
-        #landingInfo {
-            flex: 1;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        #landingMessage {
-            font-size: 14px;
-            margin-bottom: 10px;
-            color: #4A90E2;
-        }
-        
-        #planetDescription {
-            font-size: 11px;
-            line-height: 1.4;
-            margin-bottom: 15px;
-            color: #ccc;
-            flex: 1;
-        }
-        
-        #landingDetails {
-            font-size: 12px;
-            margin-bottom: 15px;
-            padding: 10px;
-            background: rgba(74, 144, 226, 0.1);
-            border-radius: 5px;
-        }
-        
-        #landingButtons {
-            padding: 15px 20px;
-            border-top: 1px solid #666;
-            text-align: center;
-        }
-        
-        #landingButtons button {
-            background: #4A90E2;
-            color: white;
-            border: none;
-            padding: 8px 12px;
-            margin: 0 5px;
-            cursor: pointer;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            border-radius: 3px;
-        }
-        
-        #landingButtons button:hover {
-            background: #357ABD;
-        }
-        
-        #landingButtons button:disabled {
-            background: #666;
-            cursor: not-allowed;
-        }
-        
-        #controls {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px;
-            border: 1px solid #333;
-            font-size: 10px;
-            display: none;
-        }
-        
-        #landingOverlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95);
-            border: 2px solid #4A90E2;
-            border-radius: 15px;
-            padding: 0;
-            color: #fff;
-            font-family: 'Courier New', monospace;
-            display: none;
-            width: 600px;
-            height: 500px;
-            z-index: 1000;
-        }
-        /* Tutorial Hint System */
-        #tutorialHint {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(74, 144, 226, 0.95);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            z-index: 100;
-            display: none;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-        
-        #tutorialHint.visible {
-            display: block;
-        }
+/* Cyberpunk Minimalist UI for Galaxy Trader */
+
+:root {
+    /* Core color palette - monochrome with cyan accent */
+    --bg-black: #0a0a0a;
+    --bg-dark: #141414;
+    --bg-medium: #1a1a1a;
+    --border-subtle: #2a2a2a;
+    --text-primary: #ffffff;
+    --text-secondary: #888888;
+    --text-dim: #555555;
+    
+    /* Accent colors - cyberpunk cyan */
+    --accent-primary: #00ffff;
+    --accent-glow: rgba(0, 255, 255, 0.5);
+    --accent-subtle: rgba(0, 255, 255, 0.1);
+    --accent-border: rgba(0, 255, 255, 0.3);
+    
+    /* Status colors */
+    --status-danger: #ff0040;
+    --status-warning: #ffaa00;
+    --status-success: #00ff88;
+    
+    /* Spacing system */
+    --spacing-xs: 8px;
+    --spacing-sm: 12px;
+    --spacing-md: 20px;
+    --spacing-lg: 32px;
+    --spacing-xl: 48px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--bg-black);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    overflow: hidden;
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+#gameCanvas {
+    display: block;
+    background: #000;
+    width: 100%;
+    height: calc(100vh - 150px); /* HUD height (110px) + padding (40px) */
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* Main HUD - Cyberpunk Minimalist */
+#gameHUD {
+    position: fixed;
+    bottom: var(--spacing-md);
+    left: var(--spacing-md);
+    right: var(--spacing-md);
+    height: 110px;  /* Increased height for content */
+    z-index: 100;
+    background: linear-gradient(180deg, 
+        transparent 0%, 
+        var(--bg-dark) 20%,
+        var(--bg-dark) 100%);
+    border: 1px solid var(--border-subtle);
+    border-bottom: 2px solid var(--accent-border);
+    backdrop-filter: blur(10px);
+    overflow: visible;
+}
+
+/* HUD Container */
+.hud-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    gap: var(--spacing-lg);
+    overflow: visible;  /* Allow overflow */
+}
+
+/* Left Panel - Ship Status */
+.hud-left {
+    flex: 0 0 360px;
+    height: 100%;  /* Full height */
+    display: flex;
+    align-items: center;
+    margin: 0;  /* No margin */
+    padding: 4px var(--spacing-md);  /* Minimal vertical padding */
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(0, 255, 255, 0.05);
+    box-sizing: border-box;
+    overflow: visible;  /* Allow overflow for bottom values */
+    position: relative;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(2, 1fr);
+    gap: 4px 8px;  /* Small vertical gap */
+    width: calc(100% - 8px);
+    height: calc(100% - 8px);  /* Slight padding */
+    margin: 0;
+    padding: 4px 0;
+    align-content: center;  /* Center content */
+}
+
+.status-item {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 3px 4px;  /* Slightly more padding */
+    min-height: 35px;  /* Minimum height to ensure content fits */
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;  /* Back to hidden */
+    box-sizing: border-box;
+}
+
+.status-label {
+    color: var(--text-dim);
+    font-size: 8px;  /* Slightly smaller */
+    text-transform: uppercase;
+    letter-spacing: 1px;  /* Less spacing */
+    margin-bottom: 1px;
+    width: 100%;  /* Full width */
+    display: block;
+}
+
+.status-value {
+    color: var(--text-primary);
+    font-size: 10px;  /* Even smaller */
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+    display: block;
+    line-height: 1.2;  /* Tighter line height */
+}
+
+.status-value.critical {
+    color: var(--status-danger);
+    text-shadow: 0 0 8px var(--status-danger);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Center Panel - Logo & Key Stats */
+.hud-center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-width: 0;
+    padding: var(--spacing-md) var(--spacing-md) var(--spacing-xs) var(--spacing-md);
+    position: relative;
+}
+
+/* Cyberpunk Minimalist Logo */
+#logo-container {
+    position: relative;
+    margin-bottom: 6px;
+    margin-top: 8px;
+}
+
+#logo-ascii {
+    font-family: 'Orbitron', 'Michroma', 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 300;
+    letter-spacing: 8px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    position: relative;
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+#logo-ascii::after {
+    content: 'GALAXY TRADER';
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: var(--accent-primary);
+    opacity: 0.15;
+    filter: blur(8px);
+    animation: glow-pulse 4s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+    0%, 100% { opacity: 0.15; }
+    50% { opacity: 0.25; }
+}
+
+.hud-subtitle {
+    font-size: 8px;
+    letter-spacing: 3px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-top: 2px;
+}
+
+/* Key Stats Bar */
+.key-stats {
+    display: flex;
+    gap: var(--spacing-lg);
+    padding: 6px var(--spacing-md);
+    margin-top: auto;
+    margin-bottom: 4px;
+}
+
+.key-stat {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing-xs);
+}
+
+.key-stat .status-label {
+    color: var(--text-dim);
+    font-size: 9px;
+}
+
+.key-stat .status-value {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.credits-value {
+    color: var(--accent-primary);
+    text-shadow: 0 0 10px var(--accent-glow);
+}
+
+.weapon-value {
+    color: var(--text-primary);
+}
+
+/* Right Panel - Controls & Radar */
+.hud-right {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    height: calc(100% - var(--spacing-sm));
+    margin: var(--spacing-xs) 0;
+}
+
+/* Controls Panel */
+.controls-panel {
+    padding: var(--spacing-xs);
+    overflow: hidden;
+}
+
+.controls {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 2px var(--spacing-xs);
+    font-size: 9px;
+}
+
+.control-key {
+    color: var(--accent-primary);
+    font-weight: 500;
+    font-size: 9px;
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+.control-action {
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 8px;
+    white-space: nowrap;
+}
+
+/* Minimap - Cyberpunk Radar */
+#minimap {
+    width: 80px;
+    height: 80px;
+    background: radial-gradient(circle,
+        var(--accent-subtle) 0%,
+        transparent 40%,
+        var(--bg-black) 70%);
+    border: 1px solid var(--accent-border);
+    position: relative;
+    overflow: hidden;
+}
+
+#minimap::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 1px;
+    background: var(--accent-border);
+    transform: translate(-50%, -50%);
+    opacity: 0.3;
+}
+
+#minimap::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1px;
+    height: 100%;
+    background: var(--accent-border);
+    transform: translate(-50%, -50%);
+    opacity: 0.3;
+}
+
+#minimapCanvas {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+}
+
+/* Landing Overlay - Cyberpunk Terminal */
+#landingOverlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-dark);
+    border: 1px solid var(--accent-border);
+    color: var(--text-primary);
+    font-family: inherit;
+    display: none;
+    width: min(700px, 90vw);
+    max-height: 80vh;
+    z-index: 1000;
+    box-shadow: 
+        0 0 100px var(--accent-subtle),
+        inset 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+#landingHeader {
+    background: var(--bg-medium);
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--accent-border);
+    position: relative;
+}
+
+#landingHeader::before {
+    content: '// STATION INTERFACE';
+    position: absolute;
+    top: var(--spacing-xs);
+    left: var(--spacing-md);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+}
+
+#landingHeader h3 {
+    margin: 0;
+    font-size: 20px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    font-weight: 300;
+    color: var(--accent-primary);
+    text-shadow: 0 0 20px var(--accent-glow);
+}
+
+#landingContent {
+    display: flex;
+    min-height: 300px;
+}
+
+#planetVisual {
+    width: 180px;
+    background: var(--bg-black);
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#landingInfo {
+    flex: 1;
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+#landingMessage {
+    font-size: 11px;
+    color: var(--status-success);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+#planetDescription {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    flex: 1;
+}
+
+#landingButtons {
+    padding: var(--spacing-md);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: center;
+}
+
+#landingButtons button {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    padding: var(--spacing-xs) var(--spacing-md);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: all 0.2s;
+    position: relative;
+}
+
+#landingButtons button:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-border);
+    background: var(--accent-subtle);
+    box-shadow: 0 0 20px var(--accent-subtle);
+}
+
+/* Trading and Shop Panels */
+#tradingPanel, #shopPanel {
+    display: none;
+    padding: var(--spacing-md);
+    max-height: 400px;
+    overflow-y: auto;
+    background: var(--bg-black);
+}
+
+.commodity-row, .shop-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm);
+    margin: var(--spacing-xs) 0;
+    background: var(--bg-medium);
+    border: 1px solid var(--border-subtle);
+    transition: all 0.2s;
+}
+
+.commodity-row:hover, .shop-item:hover {
+    border-color: var(--accent-border);
+    background: var(--accent-subtle);
+}
+
+.commodity-info, .item-info {
+    flex: 1;
+}
+
+.commodity-name, .item-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.price {
+    color: var(--accent-primary);
+    margin: 0 var(--spacing-md);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.buy-sell-buttons button, .shop-buy-button {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    padding: 6px 12px;
+    margin: 0 2px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+}
+
+.buy-sell-buttons button:hover:not(:disabled), 
+.shop-buy-button:hover:not(:disabled) {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    background: var(--accent-subtle);
+}
+
+.buy-sell-buttons button:disabled, 
+.shop-buy-button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* Tutorial Hints - Cyberpunk Alert Style */
+#tutorialHint {
+    position: fixed;
+    top: var(--spacing-lg);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-dark);
+    border: 1px solid var(--accent-border);
+    border-left: 3px solid var(--accent-primary);
+    color: var(--text-primary);
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    max-width: 600px;
+}
+
+#tutorialHint.visible {
+    display: block;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+/* Cargo Status Bar */
+.cargo-status {
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm);
+    background: var(--bg-medium);
+    border-left: 2px solid var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.cargo-status strong {
+    color: var(--text-primary);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-black);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-subtle);
+    border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-border);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+    .controls-panel {
+        display: none;
+    }
+    
+    #minimap {
+        width: 70px;
+        height: 70px;
+    }
+}
+
+@media (max-width: 768px) {
+    #gameHUD {
+        height: 80px;
+    }
+    
+    .hud-container {
+        padding: var(--spacing-sm);
+        gap: var(--spacing-sm);
+    }
+    
+    .hud-left {
+        flex: 0 0 300px;  /* Adjusted for smaller screens */
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+    
+    .status-grid {
+        gap: 4px 6px;
+    }
+    
+    .status-item {
+        padding: 4px 4px;
+    }
+    
+    #logo-ascii {
+        font-size: 12px;
+        letter-spacing: 3px;
+    }
+    
+    .key-stats {
+        gap: var(--spacing-sm);
+    }
+    
+    #minimap {
+        width: 60px;
+        height: 60px;
+    }
+}
+
+/* Game notifications - unified style */
+.game-notification {
+    position: fixed;
+    top: var(--spacing-lg);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-dark);
+    border: 1px solid var(--accent-border);
+    color: var(--text-primary);
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 12px;
+    letter-spacing: 1px;
+    z-index: 10000;
+    animation: notificationSlide 0.3s ease-out;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes notificationSlide {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.game-notification.success {
+    border-left: 3px solid var(--status-success);
+}
+
+.game-notification.error {
+    border-left: 3px solid var(--status-danger);
+}
+
+.game-notification.info {
+    border-left: 3px solid var(--accent-primary);
+}
