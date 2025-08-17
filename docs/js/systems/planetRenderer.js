@@ -307,7 +307,8 @@ export class PlanetRenderer {
                 center, center, layer.radius
             );
             gradient.addColorStop(0, planet.color + '00');
-            gradient.addColorStop(0.5, planet.color + Math.floor(layer.alpha * 255).toString(16));
+            const alphaHex = Math.floor(layer.alpha * 255).toString(16).padStart(2, '0');
+            gradient.addColorStop(0.5, planet.color + alphaHex);
             gradient.addColorStop(1, 'transparent');
             
             ctx.fillStyle = gradient;
@@ -412,7 +413,10 @@ export class PlanetRenderer {
      */
     renderPlanet(ctx, planet, time) {
         const cache = this.planetCache.get(planet.name);
-        if (!cache) return;
+        if (!cache) {
+            console.warn(`No cache for planet: ${planet.name}`);
+            return;
+        }
         
         this.animationTime = time;
         
@@ -420,11 +424,13 @@ export class PlanetRenderer {
         
         // Draw atmosphere first (behind planet)
         const atmSize = cache.atmosphere.width;
-        const atmOffset = atmSize / 2 - planet.radius;
+        const atmOffset = atmSize / 2;
         ctx.drawImage(
             cache.atmosphere,
             planet.x - atmOffset,
-            planet.y - atmOffset
+            planet.y - atmOffset,
+            atmSize,
+            atmSize
         );
         
         // Draw planet surface

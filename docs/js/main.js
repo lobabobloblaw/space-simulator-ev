@@ -42,7 +42,7 @@ import {
     TouchControls
 } from './systems/allSystems.js';
 
-import { PlanetRenderer } from './systems/planetRenderer.js';
+import { PlanetRenderer } from './systems/planetRenderer2.js';
 
 // Get canvas elements
 const canvas = document.getElementById('gameCanvas');
