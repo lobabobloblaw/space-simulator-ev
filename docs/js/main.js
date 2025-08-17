@@ -123,8 +123,8 @@ window.warpEffects = warpEffects;
 window.explosions = explosions;
 window.pickups = pickups;
 window.planets = planets;
-window.audioSystem = audioSystem;
 window.checkLanding = checkLanding;
+// window.audioSystem will be set after initialization
 
 // Generate asteroids
 for (let i = 0; i < 50; i++) {
@@ -187,6 +187,7 @@ const npcSpawnState = {
 // Main game loop
 const audioSystem = new AudioSystem();
 audioSystem.init();
+window.audioSystem = audioSystem;  // Now make it accessible
 
 // Initialize planet renderer
 const planetRenderer = new ProceduralPlanetRenderer();
@@ -1055,7 +1056,7 @@ function gameLoop() {
         
         // Check for landing
         if (game.keys['KeyL']) {
-            checkLanding(ship, planets, audioSystem, npcShips, projectiles, explosions, game);
+            checkLanding(ship, planets, audioSystem, npcShips, projectiles, explosions, game, warpEffects);
         }
         
         // Update NPCs

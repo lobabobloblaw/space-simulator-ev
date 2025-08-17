@@ -1326,8 +1326,8 @@ export function updatePickups(pickups, ship, audioSystem, explosions) {
         }
     }
 }
-// Removed extra arguments that were causing issues
-export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, explosions, game) {
+// Check for landing near planets
+export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, explosions, game, warpEffects) {
     if (ship.landingCooldown > 0) return;
     
     for (let planet of planets) {
@@ -1351,7 +1351,7 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             npcShips.length = 0;
             projectiles.length = 0;
             explosions.length = 0;
-            warpEffects.length = 0;
+            if (warpEffects) warpEffects.length = 0;
             
             // Landing benefits
             ship.fuel = ship.maxFuel;

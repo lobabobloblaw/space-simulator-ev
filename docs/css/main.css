@@ -344,8 +344,8 @@ body {
     font-family: inherit;
     display: none;  /* Changed to flex when shown */
     flex-direction: column;
-    width: min(700px, 90vw);
-    max-height: min(600px, 80vh);  /* Limit maximum height */
+    width: min(900px, 90vw);  /* Increased to accommodate 400px image */
+    max-height: min(700px, 85vh);  /* Increased height */
     max-width: 90vw;
     z-index: 1000;
     box-shadow: 
@@ -385,18 +385,26 @@ body {
     display: flex;
     flex: 1;  /* Take available space */
     min-height: 0;  /* Allow shrinking */
-    max-height: calc(80vh - 120px);  /* Account for header and buttons */
+    max-height: calc(85vh - 120px);  /* Account for header and buttons */
     position: relative;
     overflow: hidden;
 }
 
 #planetVisual {
-    width: 180px;
+    width: 420px;  /* Accommodate 400px wide canvas + padding */
+    padding: 10px;
     background: var(--bg-black);
     border-right: 1px solid var(--border-subtle);
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;  /* Prevent shrinking */
+}
+
+#planetCanvas {
+    display: block;
+    image-rendering: crisp-edges;  /* Better scaling for AI images */
+    box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
 }
 
 #landingInfo {
@@ -459,10 +467,11 @@ body {
     flex-direction: column;
     padding: var(--spacing-md);
     min-height: 0;  /* Allow shrinking */
-    max-height: calc(80vh - 200px);  /* Dynamic based on viewport */
+    max-height: calc(85vh - 200px);  /* Dynamic based on viewport */
     overflow-y: auto;
     background: var(--bg-black);
     border-left: 1px solid var(--border-subtle);
+    min-width: 350px;  /* Ensure readability */
 }
 
 #commodityList, #shopList {
@@ -616,7 +625,12 @@ body {
     }
     
     #planetVisual {
-        width: 140px;  /* Narrower planet visual */
+        width: 320px;  /* Smaller but still shows AI image */
+    }
+    
+    #planetCanvas {
+        width: 300px;
+        height: 225px;  /* Maintain aspect ratio */
     }
     
     #tradingPanel, #shopPanel {
@@ -645,7 +659,12 @@ body {
     }
     
     #planetVisual {
-        display: none;  /* Hide planet visual on very small screens */
+        width: 220px;  /* Much smaller on tiny screens */
+    }
+    
+    #planetCanvas {
+        width: 200px;
+        height: 150px;  /* Maintain aspect ratio */
     }
 }
 
