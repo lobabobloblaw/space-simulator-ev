@@ -608,6 +608,96 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
         npcSpawnState.nextShipSpawn = Date.now() + Math.random() * spawnDelay + spawnDelay/2;
     }
     
+    // First, check player hostility status ONCE for all patrols
+    let playerIsHostile = false;
+    let playerRecentlyFired = false;
+    const playerIsAlive = !ship.isDestroyed;
+    
+    if (playerIsAlive && projectiles.length > 0) {
+        // Check recent player projectiles
+        for (let proj of projectiles) {
+            if (proj.isPlayer && proj.lifetime < 30) {  // Recent shots only
+                playerRecentlyFired = true;
+                const projAngle = Math.atan2(proj.vy, proj.vx);
+                
+                // Check if shooting at any patrol or innocent
+                for (let npc of npcShips) {
+                    if (npc.behavior === "lawful" || npc.behavior === "passive") {
+                        const distToNPC = Math.sqrt((npc.x - proj.x) ** 2 + (npc.y - proj.y) ** 2);
+                        if (distToNPC < 400) {
+                            const angleToNPC = Math.atan2(npc.y - proj.y, npc.x - proj.x);
+                            const angleDiff = Math.abs(angleToNPC - projAngle);
+                            if (angleDiff < Math.PI / 6) {
+                                playerIsHostile = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (playerIsHostile) break;
+            }
+        }
+    }
+    
+    // Career criminal check
+    if (ship.kills > 5 && ship.pirateKills < ship.kills * 0.5) {
+        playerIsHostile = true;
+    }
+    
+    // Handle warning system ONCE per frame
+    if (playerIsHostile && !ship.patrolWarningShown && !ship.patrolWarningExpired) {
+        // Check if any patrol is close enough to warn
+        let patrolNearby = false;
+        for (let npc of npcShips) {
+            if (npc.behavior === "lawful") {
+                const dist = Math.sqrt((npc.x - ship.x) ** 2 + (npc.y - ship.y) ** 2);
+                if (dist < 1000) {
+                    patrolNearby = true;
+                    break;
+                }
+            }
+        }
+        
+        if (patrolNearby) {
+            ship.patrolWarningShown = true;
+            ship.patrolWarningTime = Date.now();
+            
+            // Show warning to player (cyberpunk style)
+            const msg = document.createElement('div');
+            msg.className = 'game-notification error';
+            msg.style.cssText = 'background: linear-gradient(90deg, #ff0044, #aa0033); border: 1px solid #ff0066; font-size: 16px; text-shadow: 0 0 10px #ff0066;';
+            msg.innerHTML = '<span style="color: #ffff00;">⚠</span> PATROL WARNING: CEASE HOSTILE ACTIONS';
+            document.body.appendChild(msg);
+            setTimeout(() => msg.remove(), 3000);
+        }
+    }
+    
+    // Check if warning has expired
+    if (ship.patrolWarningShown && Date.now() - ship.patrolWarningTime > 2000) {
+        ship.patrolWarningExpired = true;
+    }
+    
+    // Clear hostility if player stops firing
+    if (!playerRecentlyFired && ship.patrolWarningShown) {
+        if (Date.now() - ship.patrolWarningTime > 5000) {
+            // Player has been peaceful for 5 seconds
+            if (ship.patrolWarningShown && !ship.patrolStandingDown) {
+                ship.patrolStandingDown = true;
+                ship.patrolWarningShown = false;
+                ship.patrolWarningExpired = false;
+                
+                const msg = document.createElement('div');
+                msg.className = 'game-notification success';
+                msg.textContent = 'PATROL: STANDING DOWN';
+                document.body.appendChild(msg);
+                setTimeout(() => {
+                    msg.remove();
+                    ship.patrolStandingDown = false;
+                }, 2000);
+            }
+        }
+    }
+    
     // Update each NPC
     for (let i = npcShips.length - 1; i >= 0; i--) {
         const npc = npcShips[i];
@@ -839,63 +929,8 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                 }
             }  // End of normal pirate behavior
         } else if (npc.behavior === "lawful") {
-            // Patrol ships - AGGRESSIVELY hunt pirates attacking merchants
+            // Patrol ships - hunt pirates and respond to hostile players
             const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
-            
-            // Check if player has been aggressive (and is alive)
-            const playerIsAlive = !ship.isDestroyed;
-            
-            // Smart hostility detection - check WHO the player is attacking
-            let playerIsHostile = false;
-            let playerRecentlyFired = false;
-            
-            if (playerIsAlive && projectiles.length > 0) {
-                // Check recent player projectiles to see who they're targeting
-                for (let proj of projectiles) {
-                    if (proj.isPlayer && proj.lifetime < 30) {  // Recent shots only
-                        playerRecentlyFired = true;
-                        // Calculate trajectory to see who player is aiming at
-                        const projAngle = Math.atan2(proj.vy, proj.vx);
-                        
-                        // Check if shooting at THIS patrol
-                        const angleToPatrol = Math.atan2(npc.y - proj.y, npc.x - proj.x);
-                        const angleDiff = Math.abs(angleToPatrol - projAngle);
-                        if (angleDiff < Math.PI / 6 && distToPlayer < 400) {
-                            playerIsHostile = true;  // Player is shooting at us!
-                            break;
-                        }
-                        
-                        // Check if shooting at innocent traders/freighters
-                        for (let victim of npcShips) {
-                            if (victim.behavior === "passive") {
-                                const distToVictim = Math.sqrt((victim.x - proj.x) ** 2 + (victim.y - proj.y) ** 2);
-                                const angleToVictim = Math.atan2(victim.y - proj.y, victim.x - proj.x);
-                                const angleDiff = Math.abs(angleToVictim - projAngle);
-                                
-                                if (distToVictim < 300 && angleDiff < Math.PI / 6) {
-                                    playerIsHostile = true;  // Player attacking innocents!
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (playerIsHostile) break;
-                    }
-                }
-            }
-            
-            // Also hostile if player has killed many innocents (career criminal)
-            if (ship.kills > 5 && ship.pirateKills < ship.kills * 0.5) {
-                playerIsHostile = true;  // More civilian kills than pirate kills = bad
-            }
-            
-            // Clear hostility if player hasn't fired recently
-            if (!playerRecentlyFired && ship.patrolWarningShown) {
-                // Check if enough time has passed since last hostile action
-                if (Date.now() - ship.patrolWarningTime > 5000) {
-                    playerIsHostile = false;  // Player has ceased fire for 5 seconds
-                }
-            }
             
             // Check if player is a pirate hunter (good reputation)
             const playerIsFriendly = ship.pirateKills >= 3 && (!ship.kills || ship.pirateKills >= ship.kills * 0.8);
@@ -971,80 +1006,40 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                 npc.pursuitTimer = 0;  // Reset timer
             }
             
-            // PRIORITY 2: Pursue hostile player (but give them a warning first)
-            if (!targetPirate && playerIsHostile && distToPlayer < 1000) {
-                // Initialize warning system (track globally to avoid spam)
-                if (!ship.patrolWarningShown) {
-                    ship.patrolWarningShown = true;
-                    ship.patrolWarningTime = Date.now();
-                    
-                    // Show warning to player (cyberpunk style)
-                    const msg = document.createElement('div');
-                    msg.className = 'game-notification error';
-                    msg.style.cssText = 'background: linear-gradient(90deg, #ff0044, #aa0033); border: 1px solid #ff0066; font-size: 16px; text-shadow: 0 0 10px #ff0066;';
-                    msg.innerHTML = '<span style="color: #ffff00;">⚠</span> PATROL WARNING: CEASE HOSTILE ACTIONS';
-                    document.body.appendChild(msg);
-                    setTimeout(() => msg.remove(), 3000);
+            // PRIORITY 2: Pursue hostile player if warning has expired
+            if (!targetPirate && playerIsHostile && ship.patrolWarningExpired && distToPlayer < 1000) {
+                // Warning has expired - engage hostile player
+                const interceptTime = distToPlayer / (npc.maxSpeed * 100);
+                const targetX = ship.x + ship.vx * interceptTime * 2;
+                const targetY = ship.y + ship.vy * interceptTime * 2;
+                desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                
+                let angleDiff = desiredAngle - npc.angle;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                
+                if (Math.abs(angleDiff) < Math.PI * 1.5) {
+                    shouldThrust = true;
                 }
                 
-                // Check if warning period has expired (2 seconds)
-                const warningExpired = Date.now() - ship.patrolWarningTime > 2000;
-                
-                // Only attack after warning period
-                if (!warningExpired) {
-                    // Just approach, don't fire yet
-                    const interceptTime = distToPlayer / (npc.maxSpeed * 100);
-                    const targetX = ship.x + ship.vx * interceptTime * 2;
-                    const targetY = ship.y + ship.vy * interceptTime * 2;
-                    desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
-                    
-                    let angleDiff = desiredAngle - npc.angle;
-                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    
-                    if (Math.abs(angleDiff) < Math.PI * 1.5) {
-                        shouldThrust = true;
-                    }
-                    
-                    // Mark this patrol as warning (for coordination)
-                    npc.isWarning = true;
-                } else {
-                    // Warning expired - engage hostile player
-                    npc.isEngaging = true;
-                    npc.isWarning = false;
-                    // Pursue hostile/armed player
-                    const interceptTime = distToPlayer / (npc.maxSpeed * 100);
-                    const targetX = ship.x + ship.vx * interceptTime * 2;
-                    const targetY = ship.y + ship.vy * interceptTime * 2;
-                    desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
-                    
-                    let angleDiff = desiredAngle - npc.angle;
-                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    
-                    if (Math.abs(angleDiff) < Math.PI * 1.5) {
-                        shouldThrust = true;
-                    }
-                    
-                    // Fire at hostile player after warning
-                    if (distToPlayer < 450 && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0 && npc.weapon) {
-                        fireProjectile(npc, npc.angle, false, npc.weapon, projectiles);
-                        npc.weaponCooldown = npc.weapon.cooldown;
-                    }
+                // Fire at hostile player
+                if (distToPlayer < 450 && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0 && npc.weapon) {
+                    fireProjectile(npc, npc.angle, false, npc.weapon, projectiles);
+                    npc.weaponCooldown = npc.weapon.cooldown;
                 }
-            } else {
-                // Clear warning if player stops being hostile
-                if (ship.patrolWarningShown && !playerIsHostile) {
-                    ship.patrolWarningShown = false;
-                    ship.patrolWarningTime = 0;
-                    
-                    // Show all-clear message
-                    const msg = document.createElement('div');
-                    msg.className = 'game-notification success';
-                    msg.style.cssText = 'font-size: 14px;';
-                    msg.textContent = 'PATROL: STANDING DOWN';
-                    document.body.appendChild(msg);
-                    setTimeout(() => msg.remove(), 2000);
+            } else if (!targetPirate && playerIsHostile && ship.patrolWarningShown && !ship.patrolWarningExpired && distToPlayer < 1000) {
+                // Warning period - approach but don't fire
+                const interceptTime = distToPlayer / (npc.maxSpeed * 100);
+                const targetX = ship.x + ship.vx * interceptTime * 2;
+                const targetY = ship.y + ship.vy * interceptTime * 2;
+                desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                
+                let angleDiff = desiredAngle - npc.angle;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                
+                if (Math.abs(angleDiff) < Math.PI * 1.5) {
+                    shouldThrust = true;
                 }
             }
             
