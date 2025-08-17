@@ -36,7 +36,8 @@ import {
     sellCommodity,
     sellAllCargo,
     buyUpgrade,
-    SaveSystem
+    SaveSystem,
+    TouchControls
 } from './systems/allSystems.js';
 
 // Get canvas elements
@@ -170,6 +171,10 @@ audioSystem.init();
 
 // Initialize save system
 const saveSystem = new SaveSystem();
+
+// Initialize touch controls for mobile devices
+const touchControls = new TouchControls(game, ship, canvas);
+window.touchControls = touchControls;  // Make accessible for debugging
 
 // Mission system
 const missionSystem = {
@@ -789,6 +794,9 @@ function render() {
     
     // Draw minimap
     renderMinimap();
+    
+    // Draw touch controls on top of everything
+    touchControls.render();
 }
 
 function renderMinimap() {
@@ -885,6 +893,9 @@ function gameLoop() {
         
         // Update tutorial
         updateTutorialHint(ship);
+        
+        // Update touch controls
+        touchControls.update();
     }
     
     // Always render
