@@ -1623,20 +1623,21 @@ function loadPlanetLandscape(planet, planetCanvas) {
     let prompt = '';
     
     if (planet.name === "Terra Nova") {
-        prompt = 'vast endless ocean planet, water world, floating crystalline city platforms on infinite blue ocean, transparent bridges over water, underwater structures visible beneath waves, ocean planet with 90% water coverage, aquatic alien world, bioluminescent sea life, sunset over endless water horizon, photorealistic sci-fi seascape, no text, no labels, no words, portrait orientation';
+        // WATER WORLD - emphasize ocean
+        prompt = 'ocean surface view, deep blue ocean water, endless sea horizon, ocean waves crashing, underwater perspective, deep ocean trenches, bioluminescent sea creatures, vast open ocean, water planet, aquatic world, 99% water coverage, tiny distant floating city platform, submarine view, underwater cities, ocean floor, coral reefs, sea life, marine ecosystem, waterworld movie style ocean planet';
     } else if (planet.name === "Crimson Moon") {
-        prompt = 'volcanic mining colony, red glowing lava flows, molten ore refineries, industrial structures on volcanic planet, smoke and ash, seismic activity, dark red sky, dystopian sci-fi landscape, no text, no labels, no words, portrait orientation, vertical composition';
+        prompt = 'volcanic planet surface, rivers of lava, molten rock, volcanic eruption, red hot magma, volcanic landscape, industrial mining equipment on lava planet, glowing red atmosphere, lava flows, pyroclastic clouds';
     } else if (planet.name === "Ice World") {
-        prompt = 'arctic research station, crystalline ice caverns, futuristic domes in snow, aurora borealis, quantum ice formations, frozen alien landscape, blue and white color scheme, sci-fi outpost, no text, no labels, no words, portrait orientation, tall aspect ratio';
+        prompt = 'frozen planet surface, ice crystals, snow covered landscape, arctic tundra, frozen wasteland, ice caves, research domes in snow, aurora in sky, frozen alien world, glaciers, ice formations';
     } else if (planet.name === "Mining Station") {
-        prompt = 'asteroid mining facility, mechanical arms harvesting space debris, industrial space station, metallic structures, ore processing facility, dark space background with stars, cyberpunk industrial, no text, no labels, no words, portrait orientation, vertical view';
+        prompt = 'asteroid mining operation, space mining equipment, industrial machinery in space, metal structures, ore extractors, space station mining facility, starfield background, mining robots, conveyor belts';
     } else {
         // Generic space landscape
-        prompt = 'alien planet landscape, futuristic colony, sci-fi environment, otherworldly terrain, space exploration outpost, cinematic lighting, no text, no labels, no words, portrait orientation';
+        prompt = 'alien planet surface, extraterrestrial landscape, sci-fi planet environment, otherworldly terrain, alien colony structures, futuristic buildings';
     }
     
-    // Add style modifiers for better results
-    prompt += ', 8k, highly detailed, artstation, concept art, sharp focus, illustration, 8:9 aspect ratio, no text, wordless, no typography';
+    // Different approach to no-text instruction
+    prompt = prompt + ', digital art, concept art, matte painting, no text at all, no words anywhere, no writing, no letters, no typography, no labels, no signatures, no watermarks, textless image, wordless artwork, 8:9 aspect ratio, portrait orientation';
     
     // Create image element
     const img = new Image();
@@ -1645,9 +1646,13 @@ function loadPlanetLandscape(planet, planetCanvas) {
     // Encode prompt for URL
     const encodedPrompt = encodeURIComponent(prompt);
     
+    // Add random seed to prevent caching and get fresh images
+    const randomSeed = Math.floor(Math.random() * 1000000);
+    
     // Pollinations.ai URL (free, no API key needed)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=450&nologo=true`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=450&nologo=true&seed=${randomSeed}`;
     console.log('Loading AI image from:', imageUrl);
+    console.log('Seed:', randomSeed);
     img.src = imageUrl;
     
     // Handle successful load
@@ -1677,14 +1682,7 @@ function loadPlanetLandscape(planet, planetCanvas) {
             ctx.stroke();
         }
         
-        // Add planet name overlay
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(0, planetCanvas.height - 40, planetCanvas.width, 40);
-        
-        ctx.fillStyle = '#00ffff';
-        ctx.font = 'bold 16px "Orbitron", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(planet.name.toUpperCase(), planetCanvas.width / 2, planetCanvas.height - 15);
+        // DO NOT add planet name - we don't want text on the images
         
         console.log('AI landscape loaded successfully for', planet.name);
     };
