@@ -95,39 +95,34 @@ export class SaveSystem {
                 missionSystem.active = missions.find(m => m.id === data.mission.activeId) || null;
             }
             
-            // Clear and restore NPCs
+            // Clear existing NPCs completely
             npcShips.length = 0;
-            data.npcs.forEach(npcData => {
-                npcShips.push({
-                    ...npcData,
-                    vx: 0,
-                    vy: 0,
-                    angle: Math.random() * Math.PI * 2,
-                    size: 10,
-                    maxHealth: 100,
-                    behavior: npcData.type === 'pirate' ? 'aggressive' : 'passive',
-                    color: this.getNPCColor(npcData.type),
-                    thrusting: false
-                });
-            });
+            
+            // Note: NPCs are intentionally NOT restored from save data
+            // This prevents issues with frozen/damaged NPCs appearing after load
+            // NPCs will naturally respawn based on the normal spawn system
             
             // Restore asteroids
             asteroids.length = 0;
-            data.asteroids.forEach(astData => {
-                asteroids.push({
-                    ...astData,
-                    vx: (Math.random() - 0.5) * 0.3,
-                    vy: (Math.random() - 0.5) * 0.3,
-                    radius: Math.random() * 8 + 2,
-                    color: "#666",
-                    rotationSpeed: (Math.random() - 0.5) * 0.02,
-                    maxHealth: 20
+            if (data.asteroids) {
+                data.asteroids.forEach(astData => {
+                    asteroids.push({
+                        ...astData,
+                        vx: (Math.random() - 0.5) * 0.3,
+                        vy: (Math.random() - 0.5) * 0.3,
+                        radius: astData.radius || Math.random() * 8 + 2,
+                        color: "#666",
+                        rotationSpeed: (Math.random() - 0.5) * 0.02,
+                        maxHealth: 20
+                    });
                 });
-            });
+            }
             
             // Restore pickups
             pickups.length = 0;
-            data.pickups.forEach(p => pickups.push({...p}));
+            if (data.pickups) {
+                data.pickups.forEach(p => pickups.push({...p}));
+            }
             
             // Update camera
             game.camera.x = ship.x;
