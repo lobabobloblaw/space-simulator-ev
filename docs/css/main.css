@@ -344,9 +344,10 @@ body {
     font-family: inherit;
     display: none;  /* Changed to flex when shown */
     flex-direction: column;
-    width: min(900px, 90vw);  /* Increased to accommodate 400px image */
-    max-height: min(700px, 85vh);  /* Increased height */
-    max-width: 90vw;
+    width: 850px;  /* Fixed width */
+    height: 600px;  /* Fixed height */
+    max-width: 95vw;
+    max-height: 90vh;
     z-index: 1000;
     box-shadow: 
         0 0 100px var(--accent-subtle),
@@ -385,7 +386,7 @@ body {
     display: flex;
     flex: 1;  /* Take available space */
     min-height: 0;  /* Allow shrinking */
-    max-height: calc(85vh - 120px);  /* Account for header and buttons */
+    height: calc(100% - 130px);  /* Fixed height minus header and buttons */
     position: relative;
     overflow: hidden;
 }
@@ -467,10 +468,9 @@ body {
     flex-direction: column;
     padding: var(--spacing-md);
     min-height: 0;  /* Allow shrinking */
-    max-height: calc(85vh - 200px);  /* Dynamic based on viewport */
+    height: 100%;  /* Full height of content area */
     overflow-y: auto;
     background: var(--bg-black);
-    border-left: 1px solid var(--border-subtle);
     min-width: 350px;  /* Ensure readability */
 }
 
@@ -617,11 +617,7 @@ body {
 /* Landing overlay responsive adjustments */
 @media (max-height: 700px) {
     #landingOverlay {
-        max-height: 90vh;  /* Use more vertical space on short screens */
-    }
-    
-    #landingContent {
-        max-height: calc(90vh - 100px);  /* Adjust for smaller screens */
+        height: 550px;  /* Slightly smaller on shorter screens */
     }
     
     #planetVisual {
@@ -633,10 +629,6 @@ body {
         height: 225px;  /* Maintain aspect ratio */
     }
     
-    #tradingPanel, #shopPanel {
-        max-height: calc(90vh - 150px);
-    }
-    
     #landingButtons button {
         padding: 6px 12px;  /* Smaller buttons */
         font-size: 10px;
@@ -645,9 +637,8 @@ body {
 
 @media (max-height: 500px) {
     #landingOverlay {
-        top: 10px;
-        transform: translateX(-50%);
-        max-height: calc(100vh - 20px);
+        height: 450px;  /* Even smaller for tiny screens */
+        width: 750px;
     }
     
     #landingHeader {
@@ -665,6 +656,12 @@ body {
     #planetCanvas {
         width: 200px;
         height: 150px;  /* Maintain aspect ratio */
+    }
+}
+
+@media (max-width: 900px) {
+    #landingOverlay {
+        width: 95vw;  /* Use full width on narrow screens */
     }
 }
 
