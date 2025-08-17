@@ -1623,8 +1623,8 @@ function loadPlanetLandscape(planet, planetCanvas) {
     let prompt = '';
     
     if (planet.name === "Terra Nova") {
-        // WATER WORLD - emphasize ocean
-        prompt = 'ocean surface view, deep blue ocean water, endless sea horizon, ocean waves crashing, underwater perspective, deep ocean trenches, bioluminescent sea creatures, vast open ocean, water planet, aquatic world, 99% water coverage, tiny distant floating city platform, submarine view, underwater cities, ocean floor, coral reefs, sea life, marine ecosystem, waterworld movie style ocean planet';
+        // OCEANIC WORLD - mostly water with floating cities
+        prompt = 'oceanic planet landscape, floating futuristic cities on ocean, elevated platforms above water, sci-fi ocean colony, blue ocean with white architecture, quantum bridges connecting floating structures, advanced technology floating cities, chrome and glass buildings rising from sea, orbital market platforms, ocean world civilization, archipelago of artificial islands, spaceport on water, 75% ocean coverage with floating metropolis';
     } else if (planet.name === "Crimson Moon") {
         prompt = 'volcanic planet surface, rivers of lava, molten rock, volcanic eruption, red hot magma, volcanic landscape, industrial mining equipment on lava planet, glowing red atmosphere, lava flows, pyroclastic clouds';
     } else if (planet.name === "Ice World") {
@@ -1637,7 +1637,7 @@ function loadPlanetLandscape(planet, planetCanvas) {
     }
     
     // Different approach to no-text instruction
-    prompt = prompt + ', digital art, concept art, matte painting, no text at all, no words anywhere, no writing, no letters, no typography, no labels, no signatures, no watermarks, textless image, wordless artwork, 8:9 aspect ratio, portrait orientation';
+    prompt = prompt + ', digital art, concept art, matte painting, scenic view, landscape only, no text at all, no words anywhere, no writing, no letters, no typography, no labels, no signatures, no watermarks, textless image, wordless artwork, visual only, 8:9 aspect ratio, portrait orientation';
     
     // Create image element
     const img = new Image();

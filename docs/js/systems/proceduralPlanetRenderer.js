@@ -226,15 +226,15 @@ export class ProceduralPlanetRenderer {
                     // Detail noise
                     const detail = this.fbm(px * 8 + seed, py * 8 + seed, 2, 2.0, 0.5);
                     
-                    // Combine noises - shift down by 0.25 for balanced water/land ratio
-                    const elevation = (continental * 0.6 + mountains * 0.3 + detail * 0.1) - 0.25;
+                    // Combine noises - shift down by 0.45 for 75% water coverage (oceanic world)
+                    const elevation = (continental * 0.6 + mountains * 0.3 + detail * 0.1) - 0.45;
                     
                     const i = (y * size + x) * 4;
                     
                     if (elevation < 0.08) {
                         // Unified ocean with smooth gradient based on depth
                         // Deeper water = darker, shallower = lighter
-                        const waterDepth = Math.max(0, Math.min(1, (elevation + 0.25) / 0.33));
+                        const waterDepth = Math.max(0, Math.min(1, (elevation + 0.45) / 0.53));
                         
                         // Smooth color interpolation from deep to shallow
                         const deepR = 15;
