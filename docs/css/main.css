@@ -342,13 +342,16 @@ body {
     border: 1px solid var(--accent-border);
     color: var(--text-primary);
     font-family: inherit;
-    display: none;
+    display: none;  /* Changed to flex when shown */
+    flex-direction: column;
     width: min(700px, 90vw);
-    max-height: 80vh;
+    max-height: min(600px, 80vh);  /* Limit maximum height */
+    max-width: 90vw;
     z-index: 1000;
     box-shadow: 
         0 0 100px var(--accent-subtle),
         inset 0 0 30px rgba(0, 0, 0, 0.5);
+    overflow: hidden;  /* Prevent content overflow */
 }
 
 #landingHeader {
@@ -380,8 +383,11 @@ body {
 
 #landingContent {
     display: flex;
-    min-height: 400px;
+    flex: 1;  /* Take available space */
+    min-height: 0;  /* Allow shrinking */
+    max-height: calc(80vh - 120px);  /* Account for header and buttons */
     position: relative;
+    overflow: hidden;
 }
 
 #planetVisual {
@@ -399,7 +405,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
-    min-height: 400px;
+    min-height: 0;  /* Allow shrinking */
+    overflow-y: auto;  /* Scroll if needed */
 }
 
 #landingMessage {
@@ -451,8 +458,8 @@ body {
     flex: 1;
     flex-direction: column;
     padding: var(--spacing-md);
-    min-height: 400px;
-    max-height: 400px;
+    min-height: 0;  /* Allow shrinking */
+    max-height: calc(80vh - 200px);  /* Dynamic based on viewport */
     overflow-y: auto;
     background: var(--bg-black);
     border-left: 1px solid var(--border-subtle);
@@ -596,6 +603,50 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--accent-border);
+}
+
+/* Landing overlay responsive adjustments */
+@media (max-height: 700px) {
+    #landingOverlay {
+        max-height: 90vh;  /* Use more vertical space on short screens */
+    }
+    
+    #landingContent {
+        max-height: calc(90vh - 100px);  /* Adjust for smaller screens */
+    }
+    
+    #planetVisual {
+        width: 140px;  /* Narrower planet visual */
+    }
+    
+    #tradingPanel, #shopPanel {
+        max-height: calc(90vh - 150px);
+    }
+    
+    #landingButtons button {
+        padding: 6px 12px;  /* Smaller buttons */
+        font-size: 10px;
+    }
+}
+
+@media (max-height: 500px) {
+    #landingOverlay {
+        top: 10px;
+        transform: translateX(-50%);
+        max-height: calc(100vh - 20px);
+    }
+    
+    #landingHeader {
+        padding: 10px;
+    }
+    
+    #landingHeader h3 {
+        font-size: 16px;
+    }
+    
+    #planetVisual {
+        display: none;  /* Hide planet visual on very small screens */
+    }
 }
 
 /* Responsive adjustments */

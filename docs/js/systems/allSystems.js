@@ -1227,8 +1227,8 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             ship.x = planet.x + Math.cos(angle) * (planet.radius + 40);
             ship.y = planet.y + Math.sin(angle) * (planet.radius + 40);
             
-            // Show landing overlay
-            document.getElementById('landingOverlay').style.display = 'block';
+            // Show landing overlay (using flex for proper layout)
+            document.getElementById('landingOverlay').style.display = 'flex';
             document.getElementById('planetName').textContent = planet.name;
             document.getElementById('planetDescription').textContent = planet.description;
             ship.currentPlanet = planet;
@@ -1443,7 +1443,8 @@ export function updateShopPanel(ship, shopInventory) {
 }
 export function drawPlanetVisual() {}
 export function closeLandingOverlay(game) {
-    document.getElementById('landingOverlay').style.display = 'none';
+    const overlay = document.getElementById('landingOverlay');
+    if (overlay) overlay.style.display = 'none';
     game.paused = false;
     
     // Reset landing cooldown so player can land again
