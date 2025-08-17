@@ -402,7 +402,7 @@ body {
     justify-content: center;
     flex-shrink: 0;  /* Prevent shrinking */
     overflow: hidden;  /* Clip overflowing content */
-    position: relative;
+    position: relative;  /* For film grain overlay positioning */
 }
 
 #planetCanvas {

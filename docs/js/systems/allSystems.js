@@ -740,20 +740,28 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
             
             // EVADE PATROL if one is nearby and pursuing
             if (nearbyPatrol && nearbyPatrol.pursuing) {
-                // Evasive maneuvers!
+                // Calculate escape vector
                 const evadeX = npc.x - nearbyPatrol.x;
                 const evadeY = npc.y - nearbyPatrol.y;
                 desiredAngle = Math.atan2(evadeY, evadeX);  // Run away
                 
-                // Add zigzag evasion
-                desiredAngle += Math.sin(npc.lifetime * 0.1) * 0.5;
+                // Mark as fleeing for faster turning
+                npc.isFleeing = true;
                 
                 let angleDiff = desiredAngle - npc.angle;
                 while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                 while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
                 
-                if (Math.abs(angleDiff) < Math.PI * 0.8) {
-                    shouldThrust = true;  // Run!
+                // Only thrust when facing the escape direction (tighter tolerance)
+                if (Math.abs(angleDiff) < Math.PI / 6) {  // 30 degrees
+                    shouldThrust = true;  // Full power escape!
+                } else if (Math.abs(angleDiff) < Math.PI / 3) {  // 60 degrees
+                    // Partial thrust while still turning
+                    shouldThrust = true;
+                    npc.thrustPower = 0.5;  // Half power
+                } else {
+                    // Just turn, don't thrust yet
+                    shouldThrust = false;
                 }
             } else {
                 // Normal pirate behavior - hunt targets
@@ -1005,14 +1013,22 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
             // Check for threats (only if player is alive)
             const playerIsAlive = !ship.isDestroyed;
             if (playerIsAlive && distToPlayer < 300 && (ship.weaponCooldown > 0 || projectiles.some(p => p.isPlayer))) {
-                // Set flee direction if not already fleeing
-                if (!npc.fleeDirection) {
-                    npc.fleeDirection = Math.atan2(-dy, -dx);
-                    npc.fleeTimer = 60; // Flee for 60 frames in this direction
-                }
-                desiredAngle = npc.fleeDirection;
-                shouldThrust = true;
+                // Calculate escape direction away from threat
+                desiredAngle = Math.atan2(-dy, -dx);
                 fleeing = true;
+                npc.isFleeing = true;
+                
+                // Check alignment before thrusting
+                let angleDiff = desiredAngle - npc.angle;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                
+                // Only thrust when properly aligned
+                if (Math.abs(angleDiff) < Math.PI / 6) {  // 30 degrees
+                    shouldThrust = true;
+                } else {
+                    shouldThrust = false;  // Turn first, then flee
+                }
             }
             
             // Check for hostile NPCs nearby
@@ -1022,26 +1038,30 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                     const ody = other.y - npc.y;
                     const distToHostile = Math.sqrt(odx * odx + ody * ody);
                     if (distToHostile < 200) {
-                        // Set flee direction if not already fleeing
-                        if (!npc.fleeDirection) {
-                            npc.fleeDirection = Math.atan2(-ody, -odx);
-                            npc.fleeTimer = 60; // Flee for 60 frames in this direction
-                        }
-                        desiredAngle = npc.fleeDirection;
-                        shouldThrust = true;
+                        // Calculate escape direction
+                        desiredAngle = Math.atan2(-ody, -odx);
                         fleeing = true;
+                        npc.isFleeing = true;
+                        
+                        // Check alignment
+                        let angleDiff = desiredAngle - npc.angle;
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                        
+                        // Only thrust when aligned
+                        if (Math.abs(angleDiff) < Math.PI / 6) {
+                            shouldThrust = true;
+                        } else {
+                            shouldThrust = false;
+                        }
                         break;
                     }
                 }
             }
             
-            // Update flee timer and clear when done
-            if (npc.fleeTimer) {
-                npc.fleeTimer--;
-                if (npc.fleeTimer <= 0) {
-                    npc.fleeDirection = null;
-                    npc.fleeTimer = 0;
-                }
+            // Clear fleeing state when no threats
+            if (!fleeing) {
+                npc.isFleeing = false;
             }
             
             if (!fleeing && npc.targetPlanet) {
@@ -1119,20 +1139,22 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
         
         if (Math.abs(angleDiff) > 0.01) {
             // Turn toward target, but respect turn speed limit
-            // Slightly faster turning when fleeing for quick initial alignment
-            const turnSpeed = npc.fleeTimer && npc.fleeTimer > 50 ? npc.turnSpeed * 1.5 : npc.turnSpeed;
+            // Much faster turning when fleeing for quick escape
+            const turnSpeed = npc.isFleeing ? npc.turnSpeed * 2.5 : npc.turnSpeed;
             const turnAmount = Math.min(Math.abs(angleDiff), turnSpeed) * Math.sign(angleDiff);
             npc.angle += turnAmount;
         }
         
         // Apply thrust/brake based on AI decision
         if (shouldThrust) {
-            // Forward thrust
-            const thrustX = Math.cos(npc.angle) * npc.thrust;
-            const thrustY = Math.sin(npc.angle) * npc.thrust;
+            // Forward thrust - use reduced power if specified
+            const thrustPower = npc.thrustPower || 1.0;
+            const thrustX = Math.cos(npc.angle) * npc.thrust * thrustPower;
+            const thrustY = Math.sin(npc.angle) * npc.thrust * thrustPower;
             npc.vx += thrustX;
             npc.vy += thrustY;
             npc.thrusting = true;
+            npc.thrustPower = 1.0;  // Reset for next frame
         } else if (shouldBrake) {
             // Brake
             npc.vx *= 0.95;
@@ -1202,6 +1224,13 @@ export function updateAsteroids(asteroids, ship, pickups, explosions) {
             if (asteroid.radius > 5) {
                 for (let j = 0; j < 2; j++) {
                     const angle = Math.random() * Math.PI * 2;
+                    
+                    // Generate unique shape for fragment
+                    const shapePoints = [];
+                    for (let k = 0; k < 8; k++) {
+                        shapePoints.push(0.7 + Math.random() * 0.6);
+                    }
+                    
                     asteroids.push({
                         x: asteroid.x + Math.cos(angle) * asteroid.radius,
                         y: asteroid.y + Math.sin(angle) * asteroid.radius,
@@ -1210,9 +1239,11 @@ export function updateAsteroids(asteroids, ship, pickups, explosions) {
                         radius: asteroid.radius * 0.6,
                         color: "#666",
                         rotationSpeed: (Math.random() - 0.5) * 0.02,
+                        rotation: Math.random() * Math.PI * 2,
                         health: 10,
                         maxHealth: 10,
-                        oreContent: 1
+                        oreContent: 1,
+                        shapePoints: shapePoints  // Each fragment gets unique shape
                     });
                 }
             }
@@ -1610,14 +1641,67 @@ export function drawPlanetVisual(planet, planetCanvas, forceReload = false) {
 function loadPlanetLandscape(planet, planetCanvas) {
     console.log('Starting AI landscape generation for', planet.name);
     
-    // Show loading indicator
+    // Add film grain overlay div if it doesn't exist
+    let grainOverlay = planetCanvas.parentElement.querySelector('.film-grain-overlay');
+    if (!grainOverlay) {
+        grainOverlay = document.createElement('div');
+        grainOverlay.className = 'film-grain-overlay';
+        planetCanvas.parentElement.appendChild(grainOverlay);
+        
+        // Style the grain overlay - make it larger than container for movement
+        grainOverlay.style.cssText = `
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            pointer-events: none;
+            z-index: 10;
+            opacity: 1;
+            transition: opacity 1s ease-in-out;
+        `;
+        
+        // Add the animated film grain effect
+        grainOverlay.style.backgroundImage = `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`;
+        grainOverlay.style.backgroundRepeat = 'repeat';
+        grainOverlay.style.animation = 'filmGrain 8s steps(10) infinite';
+        
+        // Add CSS animation if not already present - much smaller movements
+        if (!document.querySelector('#filmGrainKeyframes')) {
+            const style = document.createElement('style');
+            style.id = 'filmGrainKeyframes';
+            style.textContent = `
+                @keyframes filmGrain {
+                    0%, 100% { transform: translate(0, 0); }
+                    10% { transform: translate(-2%, -5%); }
+                    20% { transform: translate(-4%, 3%); }
+                    30% { transform: translate(3%, -8%); }
+                    40% { transform: translate(-2%, 6%); }
+                    50% { transform: translate(-5%, 4%); }
+                    60% { transform: translate(4%, 0%); }
+                    70% { transform: translate(0%, 5%); }
+                    80% { transform: translate(2%, 8%); }
+                    90% { transform: translate(-3%, 3%); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+    
+    // Show loading message
     const ctx = planetCanvas.getContext('2d');
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(0, 0, planetCanvas.width, planetCanvas.height);
+    const width = planetCanvas.width;
+    const height = planetCanvas.height;
+    
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
     ctx.fillStyle = '#00ffff';
     ctx.font = '14px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('GENERATING LANDSCAPE...', planetCanvas.width / 2, planetCanvas.height / 2);
+    ctx.fillText('SCANNING SURFACE...', width / 2, height / 2);
+    
+    // Ensure film grain is visible during loading
+    grainOverlay.style.opacity = '1';
     
     // Generate unique prompt based on planet characteristics
     let prompt = '';
@@ -1658,32 +1742,61 @@ function loadPlanetLandscape(planet, planetCanvas) {
     // Handle successful load
     img.onload = function() {
         const ctx = planetCanvas.getContext('2d');
+        const width = planetCanvas.width;
+        const height = planetCanvas.height;
         
-        // Clear and draw the AI-generated image
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, planetCanvas.width, planetCanvas.height);
+        // Get the grain overlay
+        const grainOverlay = planetCanvas.parentElement.querySelector('.film-grain-overlay');
         
-        // Draw image to fill entire canvas (will crop if aspect ratios don't match)
-        ctx.drawImage(img, 0, 0, planetCanvas.width, planetCanvas.height);
+        // Fade in the image
+        let fadeProgress = 0;
+        const fadeDuration = 60; // frames (about 1 second at 60fps)
         
-        // Add subtle scan line effect overlay
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.03)';
-        ctx.lineWidth = 1;
-        for (let y = 0; y < planetCanvas.height; y += 3) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(planetCanvas.width, y);
-            ctx.stroke();
+        function fadeTransition() {
+            fadeProgress++;
+            const fadeRatio = Math.min(fadeProgress / fadeDuration, 1);
+            
+            // Ease-in-out curve for smoother transition
+            const eased = fadeRatio < 0.5 
+                ? 2 * fadeRatio * fadeRatio 
+                : 1 - Math.pow(-2 * fadeRatio + 2, 2) / 2;
+            
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw the loaded image with increasing opacity
+            ctx.globalAlpha = eased;
+            ctx.drawImage(img, 0, 0, width, height);
+            ctx.globalAlpha = 1;
+            
+            // Fade the grain overlay to a subtle level
+            if (grainOverlay) {
+                // Start at full opacity, fade to 0.15 for subtle ongoing effect
+                grainOverlay.style.opacity = (1 - eased * 0.85).toString();
+            }
+            
+            // Continue transition
+            if (fadeProgress < fadeDuration) {
+                requestAnimationFrame(fadeTransition);
+            }
         }
         
-        // DO NOT add planet name - we don't want text on the images
+        // Start the fade transition
+        fadeTransition();
         
         console.log('AI landscape loaded successfully for', planet.name);
     };
+
     
     // Handle error - draw fallback
     img.onerror = function() {
         console.log('Failed to load AI landscape, using procedural fallback');
+        // Fade grain to subtle level
+        const grainOverlay = planetCanvas.parentElement.querySelector('.film-grain-overlay');
+        if (grainOverlay) {
+            grainOverlay.style.opacity = '0.15';
+        }
         drawCanvasFallback(planet, planetCanvas);
     };
 }

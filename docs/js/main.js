@@ -128,6 +128,12 @@ window.checkLanding = checkLanding;
 
 // Generate asteroids
 for (let i = 0; i < 50; i++) {
+    // Generate unique shape for each asteroid
+    const shapePoints = [];
+    for (let j = 0; j < 8; j++) {
+        shapePoints.push(0.7 + Math.random() * 0.6); // Random variance between 0.7 and 1.3
+    }
+    
     asteroids.push({
         x: (Math.random() - 0.5) * 4000,
         y: (Math.random() - 0.5) * 4000,
@@ -136,9 +142,11 @@ for (let i = 0; i < 50; i++) {
         radius: Math.random() * 8 + 2,
         color: "#666",
         rotationSpeed: (Math.random() - 0.5) * 0.02,
+        rotation: Math.random() * Math.PI * 2,
         health: 20,
         maxHealth: 20,
-        oreContent: Math.floor(Math.random() * 3) + 1
+        oreContent: Math.floor(Math.random() * 3) + 1,
+        shapePoints: shapePoints  // Store unique shape
     });
 }
 
@@ -421,18 +429,31 @@ function render() {
     for (let asteroid of asteroids) {
         ctx.save();
         ctx.translate(asteroid.x, asteroid.y);
-        ctx.rotate((Date.now() * 0.001 * asteroid.rotationSpeed) % (Math.PI * 2));
+        
+        // Use stored rotation or calculate if missing
+        if (!asteroid.rotation) asteroid.rotation = 0;
+        asteroid.rotation += asteroid.rotationSpeed;
+        ctx.rotate(asteroid.rotation);
         
         // Damaged asteroids are redder
         const damage = 1 - (asteroid.health / asteroid.maxHealth);
         const r = 102 + Math.floor(damage * 100);
         ctx.fillStyle = `rgb(${r}, 102, 102)`;
+        ctx.strokeStyle = `rgb(${Math.min(r + 30, 255)}, 102, 102)`;
+        ctx.lineWidth = 1;
         
-        // Irregular asteroid shape
+        // Irregular asteroid shape using stored points or generate if missing
+        if (!asteroid.shapePoints) {
+            asteroid.shapePoints = [];
+            for (let j = 0; j < 8; j++) {
+                asteroid.shapePoints.push(0.7 + Math.random() * 0.6);
+            }
+        }
+        
         ctx.beginPath();
         for (let i = 0; i < 8; i++) {
             const angle = (Math.PI * 2 / 8) * i;
-            const variance = 0.8 + Math.sin(i * 1.5) * 0.2;
+            const variance = asteroid.shapePoints[i];
             const r = asteroid.radius * variance;
             if (i === 0) {
                 ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
@@ -442,6 +463,7 @@ function render() {
         }
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();  // Add outline for better definition
         ctx.restore();
     }
     
