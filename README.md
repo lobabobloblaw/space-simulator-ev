@@ -65,8 +65,16 @@ git push
 - Mission system
 - Cyberpunk UI with particle effects
 
-## Session 7 Updates
+## Latest Updates (Session 12)
 
-- Fixed save/load NPC bug (NPCs no longer saved to prevent frozen enemies)
-- Improved NPC docking behavior (traders/freighters now properly dock at planets)
-- Cleaned up project structure (removed duplicate files, consolidated to `/docs`)
+- **Terra Nova Fix**: Oceanic world now shows ~75% water coverage consistently
+- **Minimap Update**: All elements now render in monochrome white (cleaner design)
+- **UI Improvements**: Landing window aligned with bottom HUD, landscapes fill full width
+- **Polish**: No more black bars on planet images, better responsive design
+
+### Recent Sessions
+- Session 11: Landing UI redesign with fixed window size
+- Session 10: Combat balance and NPC improvements
+- Session 9: Multiple bug fixes and gameplay enhancements
+- Session 8: AI-generated planet landscapes via Pollinations.ai
+- Session 7: Save/load fixes and project structure cleanup
