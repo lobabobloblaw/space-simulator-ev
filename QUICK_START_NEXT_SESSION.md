@@ -6,25 +6,31 @@
 2. **Game is LIVE**: https://lobabobloblaw.github.io/space-simulator-ev/
 3. **User wants BREVITY** - Keep responses concise and focused
 4. **Save/Load WORKS** - Don't let old docs confuse you
-5. **NO MOBILE CONTROLS YET** - Complete game first
+5. **AI LANDSCAPES ARE WORKING** - But UI needs fixing to display them properly
 
-## Latest Updates (Session 8)
-- ✅ Terra Nova has realistic unified ocean (smooth gradient, ~50% water)
-- ✅ Massive starfield with 4800 stars and subtle twinkling
-- ✅ Ships explode dramatically when destroyed (multiple explosions)
-- ✅ Pirates drop loot pickups on death
+## Latest Updates (Session 9)
+- ✅ Fixed Terra Nova regeneration bug (planets now use deterministic seeds)
+- ✅ Added AI-generated landscapes using Pollinations.ai (FREE, no API key)
+- ⚠️ Landing UI needs CSS fixes to accommodate 400x300 images (was 150x150)
+- ✅ Each planet has custom AI prompts for unique landscapes
+
+## IMMEDIATE TASK: Fix Landing UI
+The AI landscapes generate correctly but the landing overlay UI is broken with the larger images. Need to:
+1. Fix CSS layout in `/docs/css/main.css`
+2. Adjust landing overlay structure if needed
+3. Make panels work with 400x300 planetCanvas
 
 ## File Structure (CRITICAL)
 ```
 /docs/              <-- ALL WORK HAPPENS HERE
-├── index.html      <-- Main game
-├── css/main.css    <-- Styles
+├── index.html      <-- Main game (planetCanvas now 400x300)
+├── css/main.css    <-- NEEDS LANDING UI STYLES ADDED
 └── js/
     ├── main.js     <-- Game loop + starfield
     ├── data/gameData.js
     └── systems/
-        ├── allSystems.js  <-- Most game logic + explosions
-        └── proceduralPlanetRenderer.js  <-- Planet visuals
+        ├── allSystems.js  <-- Has AI landscape code
+        └── proceduralPlanetRenderer.js  <-- Fixed deterministic generation
 ```
 
 ## Test Locally
@@ -34,11 +40,13 @@ python3 -m http.server 8000
 # http://localhost:8000/docs/
 ```
 
-## Deploy
-```bash
-git add docs/
-git commit -m "changes"
-git push
+## Quick Test AI Landscapes
+```javascript
+// In browser console
+const planet = window.planets[0]; // Terra Nova
+window.ship.x = planet.x + planet.radius + 40;
+window.ship.y = planet.y;
+// Press L to land - image will generate but UI needs fixing
 ```
 
 ## Current Features Working
@@ -49,8 +57,9 @@ git push
 - Mission system
 - Ship upgrades
 - Visual effects (explosions, warp, particles)
-- Procedural planets with unified water
+- Procedural planets (deterministic generation)
 - Dense parallax starfield
+- AI-generated planet landscapes (Pollinations.ai)
 
 ## User Preferences
 - Be concise
@@ -59,4 +68,4 @@ git push
 - Ask for access rather than assume limitations
 
 ---
-See `/SESSION_8_HANDOFF.md` for full details
+See `/SESSION_9_HANDOFF.md` for full details

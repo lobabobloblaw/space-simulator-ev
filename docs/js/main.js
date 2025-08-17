@@ -120,6 +120,11 @@ const stars = { far: [], mid: [], near: [] };
 window.npcShips = npcShips;
 window.projectiles = projectiles;
 window.warpEffects = warpEffects;
+window.explosions = explosions;
+window.pickups = pickups;
+window.planets = planets;
+window.audioSystem = audioSystem;
+window.checkLanding = checkLanding;
 
 // Generate asteroids
 for (let i = 0; i < 50; i++) {
@@ -1097,6 +1102,7 @@ window.buyCommodity = (type, price) => buyCommodity(type, price, ship, commoditi
 window.sellCommodity = (type, price) => sellCommodity(type, price, ship, commodities);
 window.sellAllCargo = () => sellAllCargo(ship, commodities);
 window.buyUpgrade = (itemId) => buyUpgrade(itemId, ship, shopInventory, updateShopPanel);
+window.drawPlanetVisual = drawPlanetVisual;
 
 // Create a game instance object for easier access
 window.gameInstance = {

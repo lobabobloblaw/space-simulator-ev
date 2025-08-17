@@ -27,9 +27,11 @@ export class ProceduralPlanetRenderer {
             p[i] = i;
         }
         
-        // Shuffle
+        // Deterministic shuffle using a fixed seed
+        let seed = 12345;
         for (let i = 255; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            const j = seed % (i + 1);
             [p[i], p[j]] = [p[j], p[i]];
         }
         
@@ -39,6 +41,22 @@ export class ProceduralPlanetRenderer {
         }
         
         return p;
+    }
+    
+    /**
+     * Generate deterministic seed from planet properties
+     */
+    getDeterministicSeed(planet) {
+        // Create a hash from planet name and position
+        let hash = 0;
+        for (let i = 0; i < planet.name.length; i++) {
+            hash = ((hash << 5) - hash) + planet.name.charCodeAt(i);
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        // Mix in position for uniqueness
+        hash = hash ^ (planet.x * 73856093) ^ (planet.y * 19349663);
+        // Return a positive seed value
+        return Math.abs(hash % 10000) / 10;
     }
     
     /**
@@ -158,7 +176,7 @@ export class ProceduralPlanetRenderer {
         
         // Generate cloud map for applicable planets
         if (cache.features.hasClouds) {
-            this.generateCloudMap(cache, size);
+            this.generateCloudMap(cache, size, planet);
         }
         
         // Apply spherical distortion to make it look 3D
@@ -177,7 +195,8 @@ export class ProceduralPlanetRenderer {
         
         const center = size / 2;
         const radius = planet.radius;
-        const seed = Math.random() * 1000;
+        // Use deterministic seed based on planet name and position
+        const seed = this.getDeterministicSeed(planet);
         
         for (let y = 0; y < size; y++) {
             for (let x = 0; x < size; x++) {
@@ -291,7 +310,8 @@ export class ProceduralPlanetRenderer {
         
         const center = size / 2;
         const radius = planet.radius;
-        const seed = Math.random() * 1000;
+        // Use deterministic seed based on planet name and position
+        const seed = this.getDeterministicSeed(planet);
         
         for (let y = 0; y < size; y++) {
             for (let x = 0; x < size; x++) {
@@ -364,7 +384,8 @@ export class ProceduralPlanetRenderer {
         
         const center = size / 2;
         const radius = planet.radius;
-        const seed = Math.random() * 1000;
+        // Use deterministic seed based on planet name and position
+        const seed = this.getDeterministicSeed(planet);
         
         for (let y = 0; y < size; y++) {
             for (let x = 0; x < size; x++) {
@@ -440,7 +461,8 @@ export class ProceduralPlanetRenderer {
         
         const center = size / 2;
         const radius = planet.radius;
-        const seed = Math.random() * 1000;
+        // Use deterministic seed based on planet name and position
+        const seed = this.getDeterministicSeed(planet);
         
         for (let y = 0; y < size; y++) {
             for (let x = 0; x < size; x++) {
@@ -517,23 +539,30 @@ export class ProceduralPlanetRenderer {
     /**
      * Generate cloud map
      */
-    generateCloudMap(cache, size) {
+    generateCloudMap(cache, size, planet) {
         const ctx = cache.cloudMap.getContext('2d');
         const center = size / 2;
         const radius = size / 2.5;
-        const seed = Math.random() * 1000;
+        // Use deterministic seed for clouds too
+        let seed = this.getDeterministicSeed(planet) * 2;
+        
+        // Simple deterministic random number generator
+        const random = () => {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            return seed / 0x7fffffff;
+        };
         
         ctx.fillStyle = 'rgba(255, 255, 255, 0)';
         ctx.fillRect(0, 0, size, size);
         
         for (let i = 0; i < 50; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * radius * 0.8;
+            const angle = random() * Math.PI * 2;
+            const dist = random() * radius * 0.8;
             const x = center + Math.cos(angle) * dist;
             const y = center + Math.sin(angle) * dist;
             
-            const cloudSize = Math.random() * 20 + 10;
-            const alpha = Math.random() * 0.3 + 0.1;
+            const cloudSize = random() * 20 + 10;
+            const alpha = random() * 0.3 + 0.1;
             
             const gradient = ctx.createRadialGradient(x, y, 0, x, y, cloudSize);
             gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);

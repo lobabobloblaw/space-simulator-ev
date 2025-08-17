@@ -1371,23 +1371,10 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             ship.currentPlanet = planet;
             game.paused = true;
             
-            // Draw the planet visual scene
+            // Draw the planet visual scene (only once)
             const planetCanvas = document.getElementById('planetCanvas');
             if (planetCanvas) {
-                drawPlanetVisual(planet, planetCanvas);
-                
-                // Animate the planet scene continuously while landed
-                if (!window.planetAnimationFrame) {
-                    const animatePlanet = () => {
-                        if (ship.isLanded && game.paused) {
-                            drawPlanetVisual(planet, planetCanvas);
-                            window.planetAnimationFrame = requestAnimationFrame(animatePlanet);
-                        } else {
-                            window.planetAnimationFrame = null;
-                        }
-                    };
-                    animatePlanet();
-                }
+                drawPlanetVisual(planet, planetCanvas, true); // Force reload for new landing
             }
             
             // Show the landing info panel by default
@@ -1597,16 +1584,124 @@ export function updateShopPanel(ship, shopInventory) {
         list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No items available at this station</div>';
     }
 }
-export function drawPlanetVisual(planet, planetCanvas) {
+export function drawPlanetVisual(planet, planetCanvas, forceReload = false) {
     if (!planet || !planetCanvas) return;
+    
+    // Check if we've already loaded this planet's image
+    if (!forceReload && planetCanvas.dataset.planetLoaded === planet.name) {
+        return; // Already loaded, don't reload
+    }
     
     const ctx = planetCanvas.getContext('2d');
     const width = planetCanvas.width;
     const height = planetCanvas.height;
     
-    // Clear canvas
+    // Clear canvas with loading message
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
+    
+    // Mark as loading this planet
+    planetCanvas.dataset.planetLoaded = planet.name;
+    
+    // Try to load AI-generated landscape from Pollinations.ai
+    loadPlanetLandscape(planet, planetCanvas);
+}
+
+function loadPlanetLandscape(planet, planetCanvas) {
+    console.log('Starting AI landscape generation for', planet.name);
+    
+    // Show loading indicator
+    const ctx = planetCanvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, planetCanvas.width, planetCanvas.height);
+    ctx.fillStyle = '#00ffff';
+    ctx.font = '14px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GENERATING LANDSCAPE...', planetCanvas.width / 2, planetCanvas.height / 2);
+    
+    // Generate unique prompt based on planet characteristics
+    let prompt = '';
+    
+    if (planet.name === "Terra Nova") {
+        prompt = 'futuristic floating city on ocean planet, crystalline towers above blue waters, quantum bridges, orbital markets, exotic spice markets, sunset, photorealistic sci-fi landscape, cinematic lighting';
+    } else if (planet.name === "Crimson Moon") {
+        prompt = 'volcanic mining colony, red glowing lava flows, molten ore refineries, industrial structures on volcanic planet, smoke and ash, seismic activity, dark red sky, dystopian sci-fi landscape';
+    } else if (planet.name === "Ice World") {
+        prompt = 'arctic research station, crystalline ice caverns, futuristic domes in snow, aurora borealis, quantum ice formations, frozen alien landscape, blue and white color scheme, sci-fi outpost';
+    } else if (planet.name === "Mining Station") {
+        prompt = 'asteroid mining facility, mechanical arms harvesting space debris, industrial space station, metallic structures, ore processing facility, dark space background with stars, cyberpunk industrial';
+    } else {
+        // Generic space landscape
+        prompt = 'alien planet landscape, futuristic colony, sci-fi environment, otherworldly terrain, space exploration outpost, cinematic lighting';
+    }
+    
+    // Add style modifiers for better results
+    prompt += ', 8k, highly detailed, artstation, concept art, sharp focus, illustration';
+    
+    // Create image element
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    
+    // Encode prompt for URL
+    const encodedPrompt = encodeURIComponent(prompt);
+    
+    // Pollinations.ai URL (free, no API key needed)
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=300&nologo=true`;
+    console.log('Loading AI image from:', imageUrl);
+    img.src = imageUrl;
+    
+    // Handle successful load
+    img.onload = function() {
+        const ctx = planetCanvas.getContext('2d');
+        
+        // Clear and draw the AI-generated image
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, planetCanvas.width, planetCanvas.height);
+        
+        // Scale image to fit canvas
+        const scale = Math.min(planetCanvas.width / img.width, planetCanvas.height / img.height);
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        const x = (planetCanvas.width - scaledWidth) / 2;
+        const y = (planetCanvas.height - scaledHeight) / 2;
+        
+        ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+        
+        // Add subtle scan line effect overlay
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.03)';
+        ctx.lineWidth = 1;
+        for (let y = 0; y < planetCanvas.height; y += 3) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(planetCanvas.width, y);
+            ctx.stroke();
+        }
+        
+        // Add planet name overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, planetCanvas.height - 40, planetCanvas.width, 40);
+        
+        ctx.fillStyle = '#00ffff';
+        ctx.font = 'bold 16px "Orbitron", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(planet.name.toUpperCase(), planetCanvas.width / 2, planetCanvas.height - 15);
+        
+        console.log('AI landscape loaded successfully for', planet.name);
+    };
+    
+    // Handle error - draw fallback
+    img.onerror = function() {
+        console.log('Failed to load AI landscape, using procedural fallback');
+        drawCanvasFallback(planet, planetCanvas);
+    };
+}
+
+function drawCanvasFallback(planet, planetCanvas) {
+    if (!planet || !planetCanvas) return;
+    
+    const ctx = planetCanvas.getContext('2d');
+    const width = planetCanvas.width;
+    const height = planetCanvas.height;
     
     // Create unique visuals for each planet type
     const time = Date.now() * 0.001;
@@ -1908,10 +2003,10 @@ export function closeLandingOverlay(game) {
     if (overlay) overlay.style.display = 'none';
     game.paused = false;
     
-    // Stop planet animation
-    if (window.planetAnimationFrame) {
-        cancelAnimationFrame(window.planetAnimationFrame);
-        window.planetAnimationFrame = null;
+    // Clear the planet canvas data so it reloads next time
+    const planetCanvas = document.getElementById('planetCanvas');
+    if (planetCanvas) {
+        delete planetCanvas.dataset.planetLoaded;
     }
     
     // Reset landing cooldown so player can land again
