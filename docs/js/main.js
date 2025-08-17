@@ -316,7 +316,11 @@ function render() {
     
     // Draw planets with enhanced atmospheric effects
     for (let planet of planets) {
-        ctx.save();
+        ctx.save();  // Critical - save state before each planet
+        
+        // Reset any transforms or clipping
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.translate(canvas.width / 2 - game.camera.x, canvas.height / 2 - game.camera.y);
         
         // Layer 1: Outer atmospheric glow (largest)
         const outerGlow = ctx.createRadialGradient(
@@ -357,7 +361,7 @@ function render() {
         ctx.arc(planet.x, planet.y, planet.radius * 1.3, 0, Math.PI * 2);
         ctx.fill();
         
-        // Planet surface with complex gradient
+        // Planet surface with complex gradient - NO CLIPPING HERE
         const surfaceGradient = ctx.createRadialGradient(
             planet.x - planet.radius * 0.4, 
             planet.y - planet.radius * 0.4, 
@@ -396,13 +400,25 @@ function render() {
             surfaceGradient.addColorStop(1, '#5B3A00');
         }
         
+        // Planet surface - draw as circle, no clipping needed
         ctx.fillStyle = surfaceGradient;
         ctx.beginPath();
         ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
         ctx.fill();
         
-        // Add subtle surface texture with noise pattern
+        // Now draw the planet circle border
+        ctx.strokeStyle = planet.color + '66';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Add subtle surface texture with noise pattern (no interference)
+        ctx.save();
         ctx.globalAlpha = 0.1;
+        ctx.beginPath();
+        ctx.arc(planet.x, planet.y, planet.radius * 0.98, 0, Math.PI * 2);
+        ctx.clip();
         
         // Create a subtle mottled surface texture
         const textureGradient = ctx.createRadialGradient(
@@ -415,18 +431,10 @@ function render() {
         textureGradient.addColorStop(0.7, planet.color + '30');
         textureGradient.addColorStop(1, 'transparent');
         ctx.fillStyle = textureGradient;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius * 0.95, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillRect(planet.x - planet.radius, planet.y - planet.radius, planet.radius * 2, planet.radius * 2);
+        ctx.restore();
         
         ctx.globalAlpha = 1;
-        
-        // Atmospheric rim lighting
-        ctx.strokeStyle = planet.color + '66';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
-        ctx.stroke();
         
         // Cloud layer and city lights for Terra Nova
         if (planet.name === "Terra Nova") {
