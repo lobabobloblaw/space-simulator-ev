@@ -994,20 +994,20 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                         shouldThrust = true;
                     }
                 } else {
-                // Pursue hostile/armed player
-                const interceptTime = distToPlayer / (npc.maxSpeed * 100);
-                const targetX = ship.x + ship.vx * interceptTime * 2;
-                const targetY = ship.y + ship.vy * interceptTime * 2;
-                desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
-                
-                let angleDiff = desiredAngle - npc.angle;
-                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                
-                if (Math.abs(angleDiff) < Math.PI * 1.5) {
-                    shouldThrust = true;
-                }
-                
+                    // Pursue hostile/armed player
+                    const interceptTime = distToPlayer / (npc.maxSpeed * 100);
+                    const targetX = ship.x + ship.vx * interceptTime * 2;
+                    const targetY = ship.y + ship.vy * interceptTime * 2;
+                    desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                    
+                    let angleDiff = desiredAngle - npc.angle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    
+                    if (Math.abs(angleDiff) < Math.PI * 1.5) {
+                        shouldThrust = true;
+                    }
+                    
                     // Fire at hostile player after warning
                     if (distToPlayer < 450 && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0 && npc.weapon) {
                         fireProjectile(npc, npc.angle, false, npc.weapon, projectiles);
@@ -1018,9 +1018,10 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                 // Clear warning if player stops being hostile
                 npc.warnedPlayer = false;
                 npc.warningTimer = 0;
-            } 
+            }
+            
             // PRIORITY 3: AGGRESSIVELY pursue and destroy pirates
-            else if (targetPirate) {
+            if (targetPirate) {
                 // Predict pirate's position for intercept
                 const interceptTime = closestPirateDist / (npc.maxSpeed * 100);
                 const targetX = targetPirate.x + targetPirate.vx * interceptTime * 2;
@@ -1072,9 +1073,10 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                     npc.pursuing = false;
                     npc.pursuitTimer = 0;
                 }
-            } 
-            // PRIORITY 4: Regular patrol
-            else {
+            }
+            
+            // PRIORITY 4: Regular patrol (if not chasing pirates or hostile player)
+            if (!targetPirate && !playerIsHostile) {
                 // No longer pursuing anyone
                 npc.pursuing = false;
                 
