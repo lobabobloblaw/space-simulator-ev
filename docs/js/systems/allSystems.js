@@ -1623,20 +1623,20 @@ function loadPlanetLandscape(planet, planetCanvas) {
     let prompt = '';
     
     if (planet.name === "Terra Nova") {
-        prompt = 'futuristic floating city on ocean planet, crystalline towers above blue waters, quantum bridges, orbital markets, exotic spice markets, sunset, photorealistic sci-fi landscape, cinematic lighting, portrait orientation, tall vertical composition';
+        prompt = 'vast endless ocean planet, water world, floating crystalline city platforms on infinite blue ocean, transparent bridges over water, underwater structures visible beneath waves, ocean planet with 90% water coverage, aquatic alien world, bioluminescent sea life, sunset over endless water horizon, photorealistic sci-fi seascape, no text, no labels, no words, portrait orientation';
     } else if (planet.name === "Crimson Moon") {
-        prompt = 'volcanic mining colony, red glowing lava flows, molten ore refineries, industrial structures on volcanic planet, smoke and ash, seismic activity, dark red sky, dystopian sci-fi landscape, portrait orientation, vertical composition';
+        prompt = 'volcanic mining colony, red glowing lava flows, molten ore refineries, industrial structures on volcanic planet, smoke and ash, seismic activity, dark red sky, dystopian sci-fi landscape, no text, no labels, no words, portrait orientation, vertical composition';
     } else if (planet.name === "Ice World") {
-        prompt = 'arctic research station, crystalline ice caverns, futuristic domes in snow, aurora borealis, quantum ice formations, frozen alien landscape, blue and white color scheme, sci-fi outpost, portrait orientation, tall aspect ratio';
+        prompt = 'arctic research station, crystalline ice caverns, futuristic domes in snow, aurora borealis, quantum ice formations, frozen alien landscape, blue and white color scheme, sci-fi outpost, no text, no labels, no words, portrait orientation, tall aspect ratio';
     } else if (planet.name === "Mining Station") {
-        prompt = 'asteroid mining facility, mechanical arms harvesting space debris, industrial space station, metallic structures, ore processing facility, dark space background with stars, cyberpunk industrial, portrait orientation, vertical view';
+        prompt = 'asteroid mining facility, mechanical arms harvesting space debris, industrial space station, metallic structures, ore processing facility, dark space background with stars, cyberpunk industrial, no text, no labels, no words, portrait orientation, vertical view';
     } else {
         // Generic space landscape
-        prompt = 'alien planet landscape, futuristic colony, sci-fi environment, otherworldly terrain, space exploration outpost, cinematic lighting, portrait orientation';
+        prompt = 'alien planet landscape, futuristic colony, sci-fi environment, otherworldly terrain, space exploration outpost, cinematic lighting, no text, no labels, no words, portrait orientation';
     }
     
     // Add style modifiers for better results
-    prompt += ', 8k, highly detailed, artstation, concept art, sharp focus, illustration, 8:9 aspect ratio';
+    prompt += ', 8k, highly detailed, artstation, concept art, sharp focus, illustration, 8:9 aspect ratio, no text, wordless, no typography';
     
     // Create image element
     const img = new Image();
