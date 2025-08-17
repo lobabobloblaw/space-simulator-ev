@@ -582,7 +582,7 @@ export function spawnNPC(npcShips, ship, planets, npcTypes, warpEffects) {
         angle: Math.atan2(initialVy, initialVx),
         type: type,
         ...template,
-        targetPlanet: type === 'trader' ? 
+        targetPlanet: (type === 'trader' || type === 'freighter') ? 
             planets[Math.floor(Math.random() * planets.length)] : null,
         weaponCooldown: 0,
         lifetime: 0,
@@ -612,6 +612,12 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
     for (let i = npcShips.length - 1; i >= 0; i--) {
         const npc = npcShips[i];
         npc.lifetime++;
+        
+        // Remove NPCs that have docked at planets
+        if (npc.readyToDock) {
+            npcShips.splice(i, 1);
+            continue;
+        }
         
         // Remove dead NPCs
         if (npc.health <= 0) {
@@ -1021,13 +1027,12 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                         }
                     }
                 } else {
-                    // At planet - brake and pick new destination
-                    shouldBrake = true;
+                    // At planet - dock (remove this NPC)
+                    npc.readyToDock = true;  // Mark for removal
                     
-                    if (Math.random() < 0.01) {
-                        // Pick a new planet to visit
-                        const otherPlanets = planets.filter(p => p !== npc.targetPlanet);
-                        npc.targetPlanet = otherPlanets[Math.floor(Math.random() * otherPlanets.length)];
+                    // Create landing effect
+                    if (warpEffects) {
+                        warpEffects.push(createWarpEffect(npc.x, npc.y, 'land'));
                     }
                 }
             }
