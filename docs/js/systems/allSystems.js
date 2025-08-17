@@ -1650,7 +1650,7 @@ function loadPlanetLandscape(planet, planetCanvas) {
     const randomSeed = Math.floor(Math.random() * 1000000);
     
     // Pollinations.ai URL (free, no API key needed)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=450&nologo=true&seed=${randomSeed}`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=420&height=472&nologo=true&seed=${randomSeed}`;
     console.log('Loading AI image from:', imageUrl);
     console.log('Seed:', randomSeed);
     img.src = imageUrl;
@@ -1663,14 +1663,8 @@ function loadPlanetLandscape(planet, planetCanvas) {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, planetCanvas.width, planetCanvas.height);
         
-        // Scale image to fit canvas
-        const scale = Math.min(planetCanvas.width / img.width, planetCanvas.height / img.height);
-        const scaledWidth = img.width * scale;
-        const scaledHeight = img.height * scale;
-        const x = (planetCanvas.width - scaledWidth) / 2;
-        const y = (planetCanvas.height - scaledHeight) / 2;
-        
-        ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+        // Draw image to fill entire canvas (will crop if aspect ratios don't match)
+        ctx.drawImage(img, 0, 0, planetCanvas.width, planetCanvas.height);
         
         // Add subtle scan line effect overlay
         ctx.strokeStyle = 'rgba(0, 255, 255, 0.03)';

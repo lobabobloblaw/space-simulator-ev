@@ -392,20 +392,25 @@ body {
 }
 
 #planetVisual {
-    width: 420px;  /* Accommodate 400px wide canvas + padding */
-    padding: 10px;
+    width: 420px;  /* Fixed width for landscape section */
+    height: 100%;  /* Full height of content area */
+    padding: 0;  /* No padding - use full width */
     background: var(--bg-black);
     border-right: 1px solid var(--border-subtle);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;  /* Prevent shrinking */
+    overflow: hidden;  /* Clip overflowing content */
+    position: relative;
 }
 
 #planetCanvas {
     display: block;
+    width: 420px !important;  /* Force full container width */
+    height: 472.5px !important;  /* Maintain 8:9 aspect ratio */
     image-rendering: crisp-edges;  /* Better scaling for AI images */
-    box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
+    position: relative;
 }
 
 #landingInfo {
@@ -621,12 +626,12 @@ body {
     }
     
     #planetVisual {
-        width: 380px;  /* Adjusted for taller canvas */
+        width: 380px;  /* Adjusted for smaller screens */
     }
     
     #planetCanvas {
-        width: 360px;
-        height: 405px;  /* Maintain 8:9 aspect ratio */
+        width: 380px !important;  /* Match container */
+        height: 427.5px !important;  /* Maintain 8:9 aspect ratio */
     }
     
     #landingButtons button {
@@ -650,12 +655,12 @@ body {
     }
     
     #planetVisual {
-        width: 250px;  /* Adjusted for taller aspect */
+        width: 250px;  /* Adjusted for tiny screens */
     }
     
     #planetCanvas {
-        width: 200px;
-        height: 225px;  /* Maintain 8:9 aspect ratio */
+        width: 250px !important;  /* Match container */
+        height: 281.25px !important;  /* Maintain 8:9 aspect ratio */
     }
 }
 
