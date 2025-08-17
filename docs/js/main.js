@@ -990,12 +990,12 @@ function renderMinimap() {
     const centerY = 50;
     const maxRadius = 45;  // Stay within circle bounds
     
-    // Clear minimap with subtle green tint
-    minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    // Clear minimap with dark background
+    minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.9)';
     minimapCtx.fillRect(0, 0, 100, 100);
     
     // Draw range circles (radar style)
-    minimapCtx.strokeStyle = 'rgba(0, 255, 0, 0.2)';
+    minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
     minimapCtx.lineWidth = 1;
     for (let r = 15; r <= 45; r += 15) {
         minimapCtx.beginPath();
@@ -1003,10 +1003,10 @@ function renderMinimap() {
         minimapCtx.stroke();
     }
     
-    // Draw planets on minimap (holographic green)
-    minimapCtx.fillStyle = '#00ff00';
-    minimapCtx.shadowColor = '#00ff00';
-    minimapCtx.shadowBlur = 5;
+    // Draw planets on minimap (white)
+    minimapCtx.fillStyle = '#ffffff';
+    minimapCtx.shadowColor = '#ffffff';
+    minimapCtx.shadowBlur = 3;
     for (let planet of planets) {
         const dx = (planet.x - ship.x) * minimapScale;
         const dy = (planet.y - ship.y) * minimapScale;
@@ -1018,22 +1018,22 @@ function renderMinimap() {
     }
     minimapCtx.shadowBlur = 0;
     
-    // Draw NPCs on minimap (threat indicators)
+    // Draw NPCs on minimap (white)
+    minimapCtx.fillStyle = '#ffffff';
     for (let npc of npcShips) {
         const dx = (npc.x - ship.x) * minimapScale;
         const dy = (npc.y - ship.y) * minimapScale;
         if (Math.abs(dx) < maxRadius && Math.abs(dy) < maxRadius) {
-            minimapCtx.fillStyle = npc.behavior === 'aggressive' ? '#ff0000' : '#ffff00';
             minimapCtx.fillRect(centerX + dx - 1, centerY + dy - 1, 2, 2);
         }
     }
     
-    // Draw player at center with direction indicator (bright green)
+    // Draw player at center with direction indicator (bright white)
     minimapCtx.save();
     minimapCtx.translate(centerX, centerY);
     minimapCtx.rotate(ship.angle);
-    minimapCtx.fillStyle = '#00ff00';
-    minimapCtx.shadowColor = '#00ff00';
+    minimapCtx.fillStyle = '#ffffff';
+    minimapCtx.shadowColor = '#ffffff';
     minimapCtx.shadowBlur = 5;
     minimapCtx.beginPath();
     minimapCtx.moveTo(4, 0);
