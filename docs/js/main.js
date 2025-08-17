@@ -16,6 +16,8 @@ import {
     AudioSystem,
     createExplosion,
     updateExplosions,
+    createWarpEffect,
+    updateWarpEffects,
     fireProjectile,
     updateProjectiles,
     updateNPCs,
@@ -107,6 +109,7 @@ window.ship = ship;
 const npcShips = [];
 const projectiles = [];
 const explosions = [];
+const warpEffects = [];
 const pickups = [];
 const asteroids = [];
 const stars = { far: [], mid: [], near: [] };
@@ -114,6 +117,7 @@ const stars = { far: [], mid: [], near: [] };
 // Make accessible for debugging
 window.npcShips = npcShips;
 window.projectiles = projectiles;
+window.warpEffects = warpEffects;
 
 // Generate asteroids
 for (let i = 0; i < 50; i++) {
@@ -848,6 +852,128 @@ function render() {
         }
     }
     
+    // Draw warp effects
+    for (let effect of warpEffects) {
+        const progress = effect.lifetime / effect.maxLifetime;
+        
+        if (effect.type === 'arrive') {
+            // Hyperspace arrival - expanding blue-white flash
+            const radius = 5 + (60 * (1 - progress));
+            const alpha = (1 - progress) * 0.8;
+            
+            // Space distortion effect
+            ctx.strokeStyle = `rgba(100, 200, 255, ${alpha * 0.5})`;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, radius * 1.5, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Bright flash
+            const flashGradient = ctx.createRadialGradient(
+                effect.x, effect.y, 0,
+                effect.x, effect.y, radius
+            );
+            flashGradient.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+            flashGradient.addColorStop(0.3, `rgba(100, 200, 255, ${alpha * 0.7})`);
+            flashGradient.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = flashGradient;
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Light streaks
+            if (progress < 0.3) {
+                ctx.strokeStyle = `rgba(255, 255, 255, ${(1 - progress * 3) * 0.5})`;
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 6; i++) {
+                    const angle = (Math.PI * 2 / 6) * i;
+                    ctx.beginPath();
+                    ctx.moveTo(effect.x, effect.y);
+                    ctx.lineTo(
+                        effect.x + Math.cos(angle) * radius * 3,
+                        effect.y + Math.sin(angle) * radius * 3
+                    );
+                    ctx.stroke();
+                }
+            }
+            
+        } else if (effect.type === 'depart') {
+            // Hyperspace departure - collapsing blue flash
+            const radius = 60 * progress;
+            const alpha = (1 - progress) * 0.8;
+            
+            // Collapsing ring
+            ctx.strokeStyle = `rgba(100, 200, 255, ${alpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, radius, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Center flash
+            if (progress > 0.7) {
+                const flashAlpha = (progress - 0.7) * 3;
+                ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha * 0.8})`;
+                ctx.beginPath();
+                ctx.arc(effect.x, effect.y, 10 * (1 - progress), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+        } else if (effect.type === 'land') {
+            // Landing at planet - descending dust cloud
+            const alpha = (1 - progress) * 0.6;
+            
+            // Dust cloud
+            for (let i = 0; i < 5; i++) {
+                const cloudX = effect.x + (Math.random() - 0.5) * 30;
+                const cloudY = effect.y + progress * 20;
+                const size = 10 + i * 3;
+                
+                ctx.fillStyle = `rgba(150, 150, 150, ${alpha * 0.3})`;
+                ctx.beginPath();
+                ctx.arc(cloudX, cloudY, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Landing light
+            ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.5})`;
+            ctx.fillRect(effect.x - 2, effect.y - 30 + progress * 30, 4, 20);
+            
+        } else if (effect.type === 'takeoff') {
+            // Takeoff from planet - ascending thrust plume
+            const alpha = (1 - progress) * 0.8;
+            
+            // Thrust plume
+            const plumeGradient = ctx.createLinearGradient(
+                effect.x, effect.y,
+                effect.x, effect.y + 40
+            );
+            plumeGradient.addColorStop(0, `rgba(255, 200, 100, ${alpha})`);
+            plumeGradient.addColorStop(0.5, `rgba(255, 150, 50, ${alpha * 0.6})`);
+            plumeGradient.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = plumeGradient;
+            ctx.beginPath();
+            ctx.moveTo(effect.x - 5, effect.y);
+            ctx.lineTo(effect.x + 5, effect.y);
+            ctx.lineTo(effect.x + 8, effect.y + 40);
+            ctx.lineTo(effect.x - 8, effect.y + 40);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Smoke rings
+            for (let i = 0; i < 3; i++) {
+                const ringY = effect.y + 10 + i * 10 + progress * 20;
+                const ringSize = 5 + i * 3 + progress * 10;
+                ctx.strokeStyle = `rgba(100, 100, 100, ${alpha * 0.3})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(effect.x, ringY, ringSize, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+    }
+    
     // Draw player ship with detailed effects (only if not destroyed)
     if (!ship.isDestroyed) {
         ctx.save();
@@ -1025,13 +1151,16 @@ function gameLoop() {
         }
         
         // Update NPCs
-        updateNPCs(npcShips, ship, planets, projectiles, audioSystem, npcTypes, npcSpawnState);
+        updateNPCs(npcShips, ship, planets, projectiles, audioSystem, npcTypes, npcSpawnState, warpEffects);
         
         // Update projectiles
         updateProjectiles(projectiles, ship, npcShips, asteroids, explosions, audioSystem);
         
         // Update explosions
         updateExplosions(explosions);
+        
+        // Update warp effects
+        updateWarpEffects(warpEffects);
         
         // Update asteroids
         updateAsteroids(asteroids, ship, pickups, explosions);

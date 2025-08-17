@@ -201,6 +201,28 @@ export function updateExplosions(explosions) {
     }
 }
 
+// Warp effects system
+export function createWarpEffect(x, y, type = 'arrive') {
+    return {
+        x: x,
+        y: y,
+        type: type, // 'arrive', 'depart', 'land', 'takeoff'
+        lifetime: 0,
+        maxLifetime: type === 'arrive' || type === 'depart' ? 30 : 20
+    };
+}
+
+export function updateWarpEffects(warpEffects) {
+    for (let i = warpEffects.length - 1; i >= 0; i--) {
+        const effect = warpEffects[i];
+        effect.lifetime++;
+        
+        if (effect.lifetime >= effect.maxLifetime) {
+            warpEffects.splice(i, 1);
+        }
+    }
+}
+
 // Projectile system
 export function fireProjectile(shooter, angle, isPlayer, weapon = null, projectiles) {
     if (!weapon) {
@@ -347,9 +369,11 @@ export function updateShip(ship, game, audioSystem, projectiles, pickups, explos
             const npcShips = window.npcShips || [];
             const projectiles = window.projectiles || [];
             const explosions = window.explosions || [];
+            const warpEffects = window.warpEffects || [];
             npcShips.length = 0;
             projectiles.length = 0;
             explosions.length = 0;
+            warpEffects.length = 0;
             
             // Clear any game over messages
             const notifications = document.querySelectorAll('.game-notification');
@@ -489,7 +513,7 @@ export function updateShip(ship, game, audioSystem, projectiles, pickups, explos
 }
 
 // NPC system
-export function spawnNPC(npcShips, ship, planets, npcTypes) {
+export function spawnNPC(npcShips, ship, planets, npcTypes, warpEffects) {
     const types = Object.keys(npcTypes);
     const weights = { freighter: 0.25, trader: 0.3, patrol: 0.2, pirate: 0.25 };
     let random = Math.random();
@@ -507,6 +531,7 @@ export function spawnNPC(npcShips, ship, planets, npcTypes) {
     
     // Spawn location based on type
     let spawnX, spawnY, initialVx, initialVy;
+    let spawnEffect = 'arrive'; // Default to hyperspace arrival
     
     if (type === 'trader') {
         const spawnPlanet = planets[Math.floor(Math.random() * planets.length)];
@@ -516,6 +541,7 @@ export function spawnNPC(npcShips, ship, planets, npcTypes) {
         spawnY = spawnPlanet.y + Math.sin(angle) * distance;
         initialVx = Math.cos(angle) * template.maxSpeed * 0.5;
         initialVy = Math.sin(angle) * template.maxSpeed * 0.5;
+        spawnEffect = 'takeoff'; // Departing from planet
     } else if (type === 'pirate') {
         const angle = Math.random() * Math.PI * 2;
         const distance = 1200 + Math.random() * 300;
@@ -523,6 +549,7 @@ export function spawnNPC(npcShips, ship, planets, npcTypes) {
         spawnY = ship.y + Math.sin(angle) * distance;
         initialVx = -Math.cos(angle) * template.maxSpeed * 0.3;
         initialVy = -Math.sin(angle) * template.maxSpeed * 0.3;
+        spawnEffect = 'arrive'; // Warping in from hyperspace
     } else if (type === 'patrol') {
         const angle = Math.random() * Math.PI * 2;
         const distance = 400 + Math.random() * 400;
@@ -530,6 +557,7 @@ export function spawnNPC(npcShips, ship, planets, npcTypes) {
         spawnY = ship.y + Math.sin(angle) * distance;
         initialVx = -Math.cos(angle) * template.maxSpeed * 0.5;
         initialVy = -Math.sin(angle) * template.maxSpeed * 0.5;
+        spawnEffect = 'arrive'; // Warping in from hyperspace
     } else {
         const angle = Math.random() * Math.PI * 2;
         const distance = 600 + Math.random() * 600;
@@ -538,6 +566,12 @@ export function spawnNPC(npcShips, ship, planets, npcTypes) {
         const velAngle = Math.random() * Math.PI * 2;
         initialVx = Math.cos(velAngle) * template.maxSpeed * 0.3;
         initialVy = Math.sin(velAngle) * template.maxSpeed * 0.3;
+        spawnEffect = 'arrive'; // Default to hyperspace
+    }
+    
+    // Create warp effect at spawn location
+    if (warpEffects) {
+        warpEffects.push(createWarpEffect(spawnX, spawnY, spawnEffect));
     }
     
     const npc = {
@@ -558,7 +592,7 @@ export function spawnNPC(npcShips, ship, planets, npcTypes) {
     npcShips.push(npc);
 }
 
-export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, npcTypes, npcSpawnState) {
+export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, npcTypes, npcSpawnState, warpEffects) {
     // Count nearby NPCs
     let nearbyCount = 0;
     for (let npc of npcShips) {
@@ -569,7 +603,7 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
     // Spawn new NPCs periodically
     const maxNearby = 5;
     if (Date.now() > npcSpawnState.nextShipSpawn && nearbyCount < maxNearby && npcShips.length < 12) {
-        spawnNPC(npcShips, ship, planets, npcTypes);
+        spawnNPC(npcShips, ship, planets, npcTypes, warpEffects);
         const spawnDelay = 3000 + (nearbyCount * 2000);
         npcSpawnState.nextShipSpawn = Date.now() + Math.random() * spawnDelay + spawnDelay/2;
     }
@@ -605,6 +639,21 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
         // Remove NPCs that are too far away
         const distFromPlayer = Math.sqrt((npc.x - ship.x) ** 2 + (npc.y - ship.y) ** 2);
         if (distFromPlayer > 3000) {
+            // Check if near a planet (landing) or far (warping out)
+            let nearPlanet = false;
+            for (let planet of planets) {
+                const distToPlanet = Math.sqrt((npc.x - planet.x) ** 2 + (npc.y - planet.y) ** 2);
+                if (distToPlanet < planet.radius + 100) {
+                    nearPlanet = true;
+                    break;
+                }
+            }
+            
+            // Create appropriate departure effect
+            if (warpEffects) {
+                warpEffects.push(createWarpEffect(npc.x, npc.y, nearPlanet ? 'land' : 'depart'));
+            }
+            
             npcShips.splice(i, 1);
             continue;
         }
@@ -1243,6 +1292,7 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             npcShips.length = 0;
             projectiles.length = 0;
             explosions.length = 0;
+            warpEffects.length = 0;
             
             // Landing benefits
             ship.fuel = ship.maxFuel;
@@ -1948,3 +1998,6 @@ export { SaveSystem } from './saveSystem.js';
 
 // Export TouchControls
 export { TouchControls } from './touchControls.js';
+
+// Export warp effects (already defined above)
+// createWarpEffect and updateWarpEffects are exported at their definitions
