@@ -42,6 +42,8 @@ import {
     TouchControls
 } from './systems/allSystems.js';
 
+import { PlanetRenderer } from './systems/planetRenderer.js';
+
 // Get canvas elements
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -172,6 +174,10 @@ const npcSpawnState = {
 // Main game loop
 const audioSystem = new AudioSystem();
 audioSystem.init();
+
+// Initialize planet renderer
+const planetRenderer = new PlanetRenderer();
+planetRenderer.initializePlanets(planets);
 
 // Initialize save system
 const saveSystem = new SaveSystem();
@@ -314,167 +320,13 @@ function render() {
     
     ctx.globalAlpha = 1;
     
-    // Draw planets with enhanced atmospheric effects
+    // Draw planets with advanced rendering system
     for (let planet of planets) {
-        ctx.save();
-        
-        // Layer 1: Outer atmospheric glow (largest)
-        const outerGlow = ctx.createRadialGradient(
-            planet.x, planet.y, planet.radius,
-            planet.x, planet.y, planet.radius * 2.5
-        );
-        outerGlow.addColorStop(0, planet.color + '11');
-        outerGlow.addColorStop(0.5, planet.color + '08');
-        outerGlow.addColorStop(1, 'transparent');
-        ctx.fillStyle = outerGlow;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius * 2.5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Layer 2: Middle atmospheric halo
-        const middleGlow = ctx.createRadialGradient(
-            planet.x, planet.y, planet.radius * 0.9,
-            planet.x, planet.y, planet.radius * 1.8
-        );
-        middleGlow.addColorStop(0, planet.color + '22');
-        middleGlow.addColorStop(0.4, planet.color + '15');
-        middleGlow.addColorStop(1, 'transparent');
-        ctx.fillStyle = middleGlow;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius * 1.8, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Layer 3: Inner atmosphere (dense)
-        const innerAtmosphere = ctx.createRadialGradient(
-            planet.x, planet.y, planet.radius * 0.95,
-            planet.x, planet.y, planet.radius * 1.3
-        );
-        innerAtmosphere.addColorStop(0, planet.color + '44');
-        innerAtmosphere.addColorStop(0.6, planet.color + '25');
-        innerAtmosphere.addColorStop(1, 'transparent');
-        ctx.fillStyle = innerAtmosphere;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius * 1.3, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Planet surface with gradient
-        const surfaceGradient = ctx.createRadialGradient(
-            planet.x - planet.radius * 0.4, 
-            planet.y - planet.radius * 0.4, 
-            planet.radius * 0.2,
-            planet.x, planet.y, planet.radius
-        );
-        
-        // Different color profiles for different planet types
-        if (planet.name === "Terra Nova") {
-            // Blue water world
-            surfaceGradient.addColorStop(0, '#6BA3E5');
-            surfaceGradient.addColorStop(0.3, '#4A90E2');
-            surfaceGradient.addColorStop(0.6, '#3876C8');
-            surfaceGradient.addColorStop(0.9, '#1A4A80');
-            surfaceGradient.addColorStop(1, '#0A2040');
-        } else if (planet.name === "Crimson Moon") {
-            // Volcanic world
-            surfaceGradient.addColorStop(0, '#FF6B6B');
-            surfaceGradient.addColorStop(0.3, '#E74C3C');
-            surfaceGradient.addColorStop(0.6, '#C0392B');
-            surfaceGradient.addColorStop(0.9, '#7B241C');
-            surfaceGradient.addColorStop(1, '#3A0F0A');
-        } else if (planet.name === "Ice World") {
-            // Frozen world
-            surfaceGradient.addColorStop(0, '#E8F4F8');
-            surfaceGradient.addColorStop(0.3, '#85C1E9');
-            surfaceGradient.addColorStop(0.6, '#5DADE2');
-            surfaceGradient.addColorStop(0.9, '#2E86AB');
-            surfaceGradient.addColorStop(1, '#154360');
-        } else {
-            // Mining station/default
-            surfaceGradient.addColorStop(0, '#F8C471');
-            surfaceGradient.addColorStop(0.3, '#F39C12');
-            surfaceGradient.addColorStop(0.6, '#D68910');
-            surfaceGradient.addColorStop(0.9, '#9C640C');
-            surfaceGradient.addColorStop(1, '#5B3A00');
-        }
-        
-        // Draw planet surface
-        ctx.fillStyle = surfaceGradient;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Atmospheric rim lighting
-        ctx.strokeStyle = planet.color + '66';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
-        ctx.stroke();
-        
-        // Special effects for Terra Nova - NO FILLRECT!
-        if (planet.name === "Terra Nova") {
-            ctx.save();
-            
-            // Clip to planet circle
-            ctx.beginPath();
-            ctx.arc(planet.x, planet.y, planet.radius * 0.98, 0, Math.PI * 2);
-            ctx.clip();
-            
-            // Cloud wisps using arcs instead of rectangles
-            ctx.globalAlpha = 0.08;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            
-            // Draw several cloud wisps
-            for (let i = 0; i < 4; i++) {
-                const angle = (Math.PI * 2 / 4) * i + Date.now() * 0.0001;
-                const cloudX = planet.x + Math.cos(angle) * planet.radius * 0.5;
-                const cloudY = planet.y + Math.sin(angle) * planet.radius * 0.5;
-                
-                ctx.beginPath();
-                ctx.arc(cloudX, cloudY, planet.radius * 0.3, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            
-            // Tiny city lights
-            ctx.globalAlpha = 0.6;
-            ctx.fillStyle = 'rgba(100, 200, 255, 0.8)';
-            
-            // City dots scattered on surface
-            for (let i = 0; i < 8; i++) {
-                const angle = (Math.PI * 2 / 8) * i;
-                const dist = planet.radius * (0.6 + Math.random() * 0.3);
-                const cityX = planet.x + Math.cos(angle) * dist;
-                const cityY = planet.y + Math.sin(angle) * dist;
-                
-                ctx.beginPath();
-                ctx.arc(cityX, cityY, 1, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            
-            ctx.restore();
-        }
-        
-        // Lava glow for volcanic worlds
-        if (planet.name === "Crimson Moon") {
-            ctx.save();
-            ctx.globalAlpha = 0.25;
-            
-            // Inner heat glow
-            const heatGradient = ctx.createRadialGradient(
-                planet.x, planet.y + planet.radius * 0.3,
-                0,
-                planet.x, planet.y, planet.radius
-            );
-            heatGradient.addColorStop(0, '#ff6600');
-            heatGradient.addColorStop(0.5, '#ff3300');
-            heatGradient.addColorStop(1, 'transparent');
-            
-            ctx.fillStyle = heatGradient;
-            ctx.beginPath();
-            ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-        }
+        // Use the new planet renderer
+        planetRenderer.renderPlanet(ctx, planet, Date.now());
         
         // Planet name with enhanced visibility
+        ctx.save();
         ctx.shadowColor = planet.color;
         ctx.shadowBlur = 15;
         ctx.fillStyle = '#ffffff';
