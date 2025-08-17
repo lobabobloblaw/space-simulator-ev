@@ -134,7 +134,7 @@ export const shopInventory = {
 
 export const planets = [
     { 
-        x: 500, y: 300, radius: 40, name: "Terra Nova", color: "#4A90E2", landable: true,
+        x: 700, y: 400, radius: 120, name: "Terra Nova", color: "#4A90E2", landable: true,
         description: "A lush oceanic world with floating cities connected by quantum bridges. The atmosphere hums with advanced technology and the scent of exotic spices from the orbital markets.",
         commodityPrices: {
             food: 15,
@@ -147,7 +147,7 @@ export const planets = [
         shopItems: ["weapon1", "shield1", "engine2", "weapon2"]
     },
     { 
-        x: -800, y: -600, radius: 60, name: "Crimson Moon", color: "#E74C3C", landable: true,
+        x: -1200, y: -900, radius: 180, name: "Crimson Moon", color: "#E74C3C", landable: true,
         description: "This volcanic mining colony glows red from the molten ore refineries. Hardy miners extract rare crystals from the unstable crust while dodging frequent seismic tremors.",
         commodityPrices: {
             food: 40,
@@ -160,7 +160,7 @@ export const planets = [
         shopItems: ["weapon1", "weapon2", "weapon3", "cargo1"]
     },
     { 
-        x: 1200, y: -400, radius: 35, name: "Ice World", color: "#85C1E9", landable: true,
+        x: 1600, y: -500, radius: 100, name: "Ice World", color: "#85C1E9", landable: true,
         description: "An arctic research station built into crystalline ice caverns. Scientists here study quantum ice formations that might hold the key to faster-than-light travel.",
         commodityPrices: {
             food: 35,
@@ -173,7 +173,7 @@ export const planets = [
         shopItems: ["shield2", "engine3", "cargo2"]
     },
     { 
-        x: -400, y: 800, radius: 25, name: "Mining Station", color: "#F39C12", landable: true,
+        x: -600, y: 1200, radius: 75, name: "Mining Station", color: "#F39C12", landable: true,
         description: "A bustling asteroid processing facility where fortune-seekers trade rare metals. The station's mechanical arms constantly harvest resources from nearby debris fields.",
         commodityPrices: {
             food: 50,

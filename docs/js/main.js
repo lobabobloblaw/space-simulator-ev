@@ -310,49 +310,185 @@ function render() {
     
     ctx.globalAlpha = 1;
     
-    // Draw planets with atmospheric glow
+    // Draw planets with enhanced atmospheric effects
     for (let planet of planets) {
-        // Atmospheric glow
-        const glowGradient = ctx.createRadialGradient(
-            planet.x, planet.y, planet.radius * 0.8,
-            planet.x, planet.y, planet.radius * 1.5
+        ctx.save();
+        
+        // Layer 1: Outer atmospheric glow (largest)
+        const outerGlow = ctx.createRadialGradient(
+            planet.x, planet.y, planet.radius,
+            planet.x, planet.y, planet.radius * 2.5
         );
-        glowGradient.addColorStop(0, planet.color + '44');
-        glowGradient.addColorStop(1, 'transparent');
-        ctx.fillStyle = glowGradient;
+        outerGlow.addColorStop(0, planet.color + '11');
+        outerGlow.addColorStop(0.5, planet.color + '08');
+        outerGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = outerGlow;
         ctx.beginPath();
-        ctx.arc(planet.x, planet.y, planet.radius * 1.5, 0, Math.PI * 2);
+        ctx.arc(planet.x, planet.y, planet.radius * 2.5, 0, Math.PI * 2);
         ctx.fill();
         
-        // Planet body with gradient
-        const planetGradient = ctx.createRadialGradient(
-            planet.x - planet.radius * 0.3, 
-            planet.y - planet.radius * 0.3, 
-            0,
+        // Layer 2: Middle atmospheric halo
+        const middleGlow = ctx.createRadialGradient(
+            planet.x, planet.y, planet.radius * 0.9,
+            planet.x, planet.y, planet.radius * 1.8
+        );
+        middleGlow.addColorStop(0, planet.color + '22');
+        middleGlow.addColorStop(0.4, planet.color + '15');
+        middleGlow.addColorStop(1, 'transparent');
+        ctx.fillStyle = middleGlow;
+        ctx.beginPath();
+        ctx.arc(planet.x, planet.y, planet.radius * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Layer 3: Inner atmosphere (dense)
+        const innerAtmosphere = ctx.createRadialGradient(
+            planet.x, planet.y, planet.radius * 0.95,
+            planet.x, planet.y, planet.radius * 1.3
+        );
+        innerAtmosphere.addColorStop(0, planet.color + '44');
+        innerAtmosphere.addColorStop(0.6, planet.color + '25');
+        innerAtmosphere.addColorStop(1, 'transparent');
+        ctx.fillStyle = innerAtmosphere;
+        ctx.beginPath();
+        ctx.arc(planet.x, planet.y, planet.radius * 1.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Planet surface with complex gradient
+        const surfaceGradient = ctx.createRadialGradient(
+            planet.x - planet.radius * 0.4, 
+            planet.y - planet.radius * 0.4, 
+            planet.radius * 0.2,
             planet.x, planet.y, planet.radius
         );
-        planetGradient.addColorStop(0, planet.color);
-        planetGradient.addColorStop(0.7, planet.color);
-        planetGradient.addColorStop(1, '#000000');
         
-        ctx.fillStyle = planetGradient;
+        // Different color profiles for different planet types
+        if (planet.name === "Terra Nova") {
+            // Blue water world
+            surfaceGradient.addColorStop(0, '#6BA3E5');
+            surfaceGradient.addColorStop(0.3, '#4A90E2');
+            surfaceGradient.addColorStop(0.6, '#3876C8');
+            surfaceGradient.addColorStop(0.9, '#1A4A80');
+            surfaceGradient.addColorStop(1, '#0A2040');
+        } else if (planet.name === "Crimson Moon") {
+            // Volcanic world
+            surfaceGradient.addColorStop(0, '#FF6B6B');
+            surfaceGradient.addColorStop(0.3, '#E74C3C');
+            surfaceGradient.addColorStop(0.6, '#C0392B');
+            surfaceGradient.addColorStop(0.9, '#7B241C');
+            surfaceGradient.addColorStop(1, '#3A0F0A');
+        } else if (planet.name === "Ice World") {
+            // Frozen world
+            surfaceGradient.addColorStop(0, '#E8F4F8');
+            surfaceGradient.addColorStop(0.3, '#85C1E9');
+            surfaceGradient.addColorStop(0.6, '#5DADE2');
+            surfaceGradient.addColorStop(0.9, '#2E86AB');
+            surfaceGradient.addColorStop(1, '#154360');
+        } else {
+            // Mining station/default
+            surfaceGradient.addColorStop(0, '#F8C471');
+            surfaceGradient.addColorStop(0.3, '#F39C12');
+            surfaceGradient.addColorStop(0.6, '#D68910');
+            surfaceGradient.addColorStop(0.9, '#9C640C');
+            surfaceGradient.addColorStop(1, '#5B3A00');
+        }
+        
+        ctx.fillStyle = surfaceGradient;
         ctx.beginPath();
         ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
         ctx.fill();
         
-        // Planet ring/outline
-        ctx.strokeStyle = planet.color + '88';
-        ctx.lineWidth = 1;
+        // Surface detail patterns (subtle)
+        ctx.globalAlpha = 0.2;
+        
+        // Add some surface features
+        const featureCount = Math.floor(planet.radius / 20);
+        for (let i = 0; i < featureCount; i++) {
+            const angle = (Math.PI * 2 / featureCount) * i + Date.now() * 0.00001;
+            const distance = planet.radius * (0.3 + Math.random() * 0.5);
+            const featureX = planet.x + Math.cos(angle) * distance;
+            const featureY = planet.y + Math.sin(angle) * distance;
+            const featureSize = planet.radius * (0.1 + Math.random() * 0.15);
+            
+            const featureGradient = ctx.createRadialGradient(
+                featureX, featureY, 0,
+                featureX, featureY, featureSize
+            );
+            featureGradient.addColorStop(0, planet.color + '40');
+            featureGradient.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = featureGradient;
+            ctx.beginPath();
+            ctx.arc(featureX, featureY, featureSize, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        ctx.globalAlpha = 1;
+        
+        // Atmospheric rim lighting
+        ctx.strokeStyle = planet.color + '66';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
         ctx.stroke();
         
-        // Planet name with glow
+        // Cloud layer (for habitable worlds)
+        if (planet.name === "Terra Nova") {
+            ctx.globalAlpha = 0.15;
+            const cloudTime = Date.now() * 0.00005;
+            
+            for (let i = 0; i < 8; i++) {
+                const cloudAngle = (Math.PI * 2 / 8) * i + cloudTime;
+                const cloudDist = planet.radius * 0.7;
+                const cloudX = planet.x + Math.cos(cloudAngle) * cloudDist;
+                const cloudY = planet.y + Math.sin(cloudAngle) * cloudDist;
+                
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(cloudX, cloudY, planet.radius * 0.2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+        
+        // Lava glow for volcanic worlds
+        if (planet.name === "Crimson Moon") {
+            ctx.globalAlpha = 0.3;
+            const lavaTime = Date.now() * 0.001;
+            const lavaGlow = Math.sin(lavaTime) * 0.2 + 0.8;
+            
+            ctx.shadowColor = '#ff4400';
+            ctx.shadowBlur = planet.radius * 0.3 * lavaGlow;
+            ctx.fillStyle = '#ff4400';
+            ctx.beginPath();
+            ctx.arc(planet.x, planet.y, planet.radius * 0.9, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
+        }
+        
+        // Planet name with enhanced visibility
         ctx.shadowColor = planet.color;
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 11px Courier New';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.max(12, planet.radius / 8)}px 'Orbitron', monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText(planet.name, planet.x, planet.y - planet.radius - 15);
+        ctx.fillText(planet.name.toUpperCase(), planet.x, planet.y - planet.radius - 25);
+        
+        // Distance indicator when nearby
+        const dx = ship.x - planet.x;
+        const dy = ship.y - planet.y;
+        const distToPlanet = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distToPlanet < planet.radius * 3 && distToPlanet > planet.radius + 50) {
+            ctx.shadowBlur = 5;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = planet.color;
+            const displayDist = Math.round(distToPlanet - planet.radius);
+            ctx.fillText(`[ ${displayDist} ]`, planet.x, planet.y - planet.radius - 10);
+        }
+        
         ctx.shadowBlur = 0;
+        ctx.restore();
     }
     
     // Draw asteroids with rotation

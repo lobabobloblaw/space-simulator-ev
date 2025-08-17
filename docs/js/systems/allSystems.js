@@ -364,7 +364,7 @@ export function updateShip(ship, game, audioSystem, projectiles, pickups, explos
         const dy = ship.y - ship.landedPlanet.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        if (distance > ship.landedPlanet.radius + 80) {
+        if (distance > ship.landedPlanet.radius + 100) {
             ship.isLanded = false;
             ship.landedPlanet = null;
         }
@@ -1133,7 +1133,7 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
         const dy = ship.y - planet.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        if (distance < planet.radius + 30 && planet.landable) {
+        if (distance < planet.radius + 50 && planet.landable) {
             if (ship.isLanded && ship.landedPlanet === planet) {
                 return;
             }
@@ -1158,8 +1158,8 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             
             // Position ship just outside planet
             const angle = Math.atan2(dy, dx);
-            ship.x = planet.x + Math.cos(angle) * (planet.radius + 25);
-            ship.y = planet.y + Math.sin(angle) * (planet.radius + 25);
+            ship.x = planet.x + Math.cos(angle) * (planet.radius + 40);
+            ship.y = planet.y + Math.sin(angle) * (planet.radius + 40);
             
             // Show landing overlay
             document.getElementById('landingOverlay').style.display = 'block';
