@@ -1623,20 +1623,20 @@ function loadPlanetLandscape(planet, planetCanvas) {
     let prompt = '';
     
     if (planet.name === "Terra Nova") {
-        prompt = 'futuristic floating city on ocean planet, crystalline towers above blue waters, quantum bridges, orbital markets, exotic spice markets, sunset, photorealistic sci-fi landscape, cinematic lighting';
+        prompt = 'futuristic floating city on ocean planet, crystalline towers above blue waters, quantum bridges, orbital markets, exotic spice markets, sunset, photorealistic sci-fi landscape, cinematic lighting, portrait orientation, tall vertical composition';
     } else if (planet.name === "Crimson Moon") {
-        prompt = 'volcanic mining colony, red glowing lava flows, molten ore refineries, industrial structures on volcanic planet, smoke and ash, seismic activity, dark red sky, dystopian sci-fi landscape';
+        prompt = 'volcanic mining colony, red glowing lava flows, molten ore refineries, industrial structures on volcanic planet, smoke and ash, seismic activity, dark red sky, dystopian sci-fi landscape, portrait orientation, vertical composition';
     } else if (planet.name === "Ice World") {
-        prompt = 'arctic research station, crystalline ice caverns, futuristic domes in snow, aurora borealis, quantum ice formations, frozen alien landscape, blue and white color scheme, sci-fi outpost';
+        prompt = 'arctic research station, crystalline ice caverns, futuristic domes in snow, aurora borealis, quantum ice formations, frozen alien landscape, blue and white color scheme, sci-fi outpost, portrait orientation, tall aspect ratio';
     } else if (planet.name === "Mining Station") {
-        prompt = 'asteroid mining facility, mechanical arms harvesting space debris, industrial space station, metallic structures, ore processing facility, dark space background with stars, cyberpunk industrial';
+        prompt = 'asteroid mining facility, mechanical arms harvesting space debris, industrial space station, metallic structures, ore processing facility, dark space background with stars, cyberpunk industrial, portrait orientation, vertical view';
     } else {
         // Generic space landscape
-        prompt = 'alien planet landscape, futuristic colony, sci-fi environment, otherworldly terrain, space exploration outpost, cinematic lighting';
+        prompt = 'alien planet landscape, futuristic colony, sci-fi environment, otherworldly terrain, space exploration outpost, cinematic lighting, portrait orientation';
     }
     
     // Add style modifiers for better results
-    prompt += ', 8k, highly detailed, artstation, concept art, sharp focus, illustration';
+    prompt += ', 8k, highly detailed, artstation, concept art, sharp focus, illustration, 8:9 aspect ratio';
     
     // Create image element
     const img = new Image();
@@ -1646,7 +1646,7 @@ function loadPlanetLandscape(planet, planetCanvas) {
     const encodedPrompt = encodeURIComponent(prompt);
     
     // Pollinations.ai URL (free, no API key needed)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=300&nologo=true`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=450&nologo=true`;
     console.log('Loading AI image from:', imageUrl);
     img.src = imageUrl;
     
