@@ -1,7 +1,7 @@
 # SESSION 14 HANDOFF - Patrol AI Improvements & Favicon
 
 ## Session Summary
-This session improved patrol ship AI to be more context-aware and added a favicon for the game.
+This session improved patrol ship AI to be more context-aware, fixed warning spam issues, and added a favicon for the game.
 
 ## Changes Made
 
@@ -21,10 +21,12 @@ This session improved patrol ship AI to be more context-aware and added a favico
    - Only marks player hostile if attacking innocents or patrols
    - Ignores player attacking pirates (good behavior!)
 
-2. **Warning System**:
-   - Gives 2-second warning before attacking hostile players
-   - Shows orange warning message: "⚠️ PATROL WARNING: CEASE FIRE OR BE DESTROYED"
-   - Only fires after warning period expires
+2. **Warning System (FIXED)**:
+   - **Single global warning** - no more spam from multiple patrols
+   - **Cyberpunk styling** - red gradient with yellow warning icon
+   - Shows once then 2-second grace period
+   - "STANDING DOWN" message when player ceases fire
+   - Auto-clears hostility after 5 seconds of no shooting
 
 3. **Reputation System**:
    - Tracks `pirateKills` separately from total `kills`
@@ -35,6 +37,12 @@ This session improved patrol ship AI to be more context-aware and added a favico
    - Patrols HELP friendly players fight pirates
    - Increased detection range for helping good citizens
    - Shows green message: "✅ PATROL: ENGAGING HOSTILE - ASSISTANCE PROVIDED"
+
+## Bug Fixes
+- **Fixed**: Syntax error in patrol AI if/else logic structure
+- **Fixed**: Warning message spam (now uses global tracking on ship object)
+- **Fixed**: Warning color scheme (now cyberpunk red/yellow instead of orange)
+- **Fixed**: Patrols properly clear hostility when player stops shooting
 
 ## Technical Implementation
 
