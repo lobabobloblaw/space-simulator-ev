@@ -335,9 +335,9 @@ body {
 /* Landing Overlay - Cyberpunk Terminal */
 #landingOverlay {
     position: fixed;
-    top: 50%;
+    bottom: 150px;  /* Sit above HUD (110px HUD + 40px padding) */
     left: 50%;
-    transform: translate(-50%, -50%);
+    transform: translateX(-50%);
     background: var(--bg-dark);
     border: 1px solid var(--accent-border);
     color: var(--text-primary);
@@ -347,7 +347,7 @@ body {
     width: 850px;  /* Fixed width */
     height: 600px;  /* Fixed height */
     max-width: 95vw;
-    max-height: 90vh;
+    max-height: calc(100vh - 170px);  /* Screen height minus HUD and margins */
     z-index: 1000;
     box-shadow: 
         0 0 100px var(--accent-subtle),
@@ -622,7 +622,8 @@ body {
 /* Landing overlay responsive adjustments */
 @media (max-height: 700px) {
     #landingOverlay {
-        height: 550px;  /* Slightly smaller on shorter screens */
+        height: 500px;  /* Smaller on shorter screens */
+        max-height: calc(100vh - 170px);  /* Ensure it doesn't overlap HUD */
     }
     
     #planetVisual {
@@ -640,10 +641,11 @@ body {
     }
 }
 
-@media (max-height: 500px) {
+@media (max-height: 550px) {
     #landingOverlay {
-        height: 450px;  /* Even smaller for tiny screens */
+        height: 380px;  /* Much smaller for tiny screens */
         width: 750px;
+        bottom: 120px;  /* Slightly less spacing on very small screens */
     }
     
     #landingHeader {
@@ -685,6 +687,11 @@ body {
 @media (max-width: 768px) {
     #gameHUD {
         height: 80px;
+    }
+    
+    #landingOverlay {
+        bottom: 100px;  /* Adjust for smaller HUD */
+        max-height: calc(100vh - 120px);
     }
     
     .hud-container {
