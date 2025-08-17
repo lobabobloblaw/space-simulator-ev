@@ -622,10 +622,16 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
         // Remove dead NPCs
         if (npc.health <= 0) {
             if (npc.killedBy === 'player') {
-                const bounty = npc.behavior === 'aggressive' ? npc.credits : Math.floor(npc.credits * 0.5);
-                const killBonus = 25;
-                ship.credits += bounty + killBonus;
-                ship.kills++;
+            const bounty = npc.behavior === 'aggressive' ? npc.credits : Math.floor(npc.credits * 0.5);
+            const killBonus = 25;
+            ship.credits += bounty + killBonus;
+            ship.kills++;
+                    
+                    // Track pirate kills separately for reputation
+                    if (npc.behavior === 'aggressive') {
+                        if (!ship.pirateKills) ship.pirateKills = 0;
+                        ship.pirateKills++;
+                    }
                 
                 if (ship.tutorialStage === 'combat' && ship.kills >= 1) {
                     ship.tutorialStage = 'complete';
@@ -838,12 +844,59 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
             
             // Check if player has been aggressive (and is alive)
             const playerIsAlive = !ship.isDestroyed;
-            const playerIsHostile = playerIsAlive && (ship.weaponCooldown > 0 || ship.kills > 2);
             
-            // PRIORITY 1: Find ANY pirate, especially if attacking
+            // Smart hostility detection - check WHO the player is attacking
+            let playerIsHostile = false;
+            
+            if (playerIsAlive && projectiles.length > 0) {
+                // Check recent player projectiles to see who they're targeting
+                for (let proj of projectiles) {
+                    if (proj.isPlayer && proj.lifetime < 30) {  // Recent shots only
+                        // Calculate trajectory to see who player is aiming at
+                        const projAngle = Math.atan2(proj.vy, proj.vx);
+                        
+                        // Check if shooting at THIS patrol
+                        const angleToPatrol = Math.atan2(npc.y - proj.y, npc.x - proj.x);
+                        const angleDiff = Math.abs(angleToPatrol - projAngle);
+                        if (angleDiff < Math.PI / 6 && distToPlayer < 400) {
+                            playerIsHostile = true;  // Player is shooting at us!
+                            break;
+                        }
+                        
+                        // Check if shooting at innocent traders/freighters
+                        for (let victim of npcShips) {
+                            if (victim.behavior === "passive") {
+                                const distToVictim = Math.sqrt((victim.x - proj.x) ** 2 + (victim.y - proj.y) ** 2);
+                                const angleToVictim = Math.atan2(victim.y - proj.y, victim.x - proj.x);
+                                const angleDiff = Math.abs(angleToVictim - projAngle);
+                                
+                                if (distToVictim < 300 && angleDiff < Math.PI / 6) {
+                                    playerIsHostile = true;  // Player attacking innocents!
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (playerIsHostile) break;
+                    }
+                }
+            }
+            
+            // Also hostile if player has killed many innocents (career criminal)
+            if (ship.kills > 5 && ship.pirateKills < ship.kills * 0.5) {
+                playerIsHostile = true;  // More civilian kills than pirate kills = bad
+            }
+            
+            // Check if player is a pirate hunter (good reputation)
+            const playerIsFriendly = ship.pirateKills >= 3 && (!ship.kills || ship.pirateKills >= ship.kills * 0.8);
+            
+            // PRIORITY 1: Find ANY pirate, especially if attacking or near friendly player
             let targetPirate = null;
             let closestPirateDist = 1200;  // Much larger detection range
             let pirateIsAttacking = false;
+            
+            // Increase detection range if player is friendly (we help good citizens)
+            const detectionRange = playerIsFriendly ? 1500 : 1200;
             
             for (let other of npcShips) {
                 if (other.behavior === "aggressive") {
@@ -871,14 +924,26 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                         (other.x - ship.x) ** 2 + (other.y - ship.y) ** 2
                     ) < 500;
                     
+                    // Help friendly players by prioritizing pirates near them
+                    const helpingPlayer = playerIsFriendly && nearPlayer;
+                    
                     // ALWAYS prioritize pirates that are shooting or near victims
-                    if (pirateShootingNow || nearMerchant) {
+                    if (pirateShootingNow || nearMerchant || helpingPlayer) {
                         targetPirate = other;
                         closestPirateDist = dist;
                         pirateIsAttacking = true;
-
+                        
+                        // Show help message to friendly player
+                        if (helpingPlayer && !npc.shownHelpMessage) {
+                            npc.shownHelpMessage = true;
+                            const msg = document.createElement('div');
+                            msg.className = 'game-notification success';
+                            msg.textContent = '✅ PATROL: ENGAGING HOSTILE - ASSISTANCE PROVIDED';
+                            document.body.appendChild(msg);
+                            setTimeout(() => msg.remove(), 2000);
+                        }
                         break;  // Immediately target this pirate!
-                    } else if (dist < closestPirateDist) {
+                    } else if (dist < detectionRange) {
                         // Otherwise target closest pirate
                         targetPirate = other;
                         closestPirateDist = dist;
@@ -896,8 +961,39 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                 npc.pursuitTimer = 0;  // Reset timer
             }
             
-            // PRIORITY 2: Pursue hostile player
+            // PRIORITY 2: Pursue hostile player (but give them a warning first)
             if (!targetPirate && playerIsHostile && distToPlayer < 1000) {
+                // Initialize warning system
+                if (!npc.warnedPlayer) {
+                    npc.warnedPlayer = true;
+                    npc.warningTimer = 120;  // 2 seconds to cease fire
+                    
+                    // Show warning to player
+                    const msg = document.createElement('div');
+                    msg.className = 'game-notification error';
+                    msg.style.cssText = 'background: #ff6600; font-size: 16px;';
+                    msg.textContent = '⚠️ PATROL WARNING: CEASE FIRE OR BE DESTROYED';
+                    document.body.appendChild(msg);
+                    setTimeout(() => msg.remove(), 3000);
+                }
+                
+                // Only attack after warning period
+                if (npc.warningTimer > 0) {
+                    npc.warningTimer--;
+                    // Just approach, don't fire yet
+                    const interceptTime = distToPlayer / (npc.maxSpeed * 100);
+                    const targetX = ship.x + ship.vx * interceptTime * 2;
+                    const targetY = ship.y + ship.vy * interceptTime * 2;
+                    desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+                    
+                    let angleDiff = desiredAngle - npc.angle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    
+                    if (Math.abs(angleDiff) < Math.PI * 1.5) {
+                        shouldThrust = true;
+                    }
+                } else {
                 // Pursue hostile/armed player
                 const interceptTime = distToPlayer / (npc.maxSpeed * 100);
                 const targetX = ship.x + ship.vx * interceptTime * 2;
@@ -912,11 +1008,16 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                     shouldThrust = true;
                 }
                 
-                // Fire at hostile player
-                if (distToPlayer < 450 && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0 && npc.weapon) {
-                    fireProjectile(npc, npc.angle, false, npc.weapon, projectiles);
-                    npc.weaponCooldown = npc.weapon.cooldown;
+                    // Fire at hostile player after warning
+                    if (distToPlayer < 450 && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0 && npc.weapon) {
+                        fireProjectile(npc, npc.angle, false, npc.weapon, projectiles);
+                        npc.weaponCooldown = npc.weapon.cooldown;
+                    }
                 }
+            } else {
+                // Clear warning if player stops being hostile
+                npc.warnedPlayer = false;
+                npc.warningTimer = 0;
             } 
             // PRIORITY 3: AGGRESSIVELY pursue and destroy pirates
             else if (targetPirate) {
