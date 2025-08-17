@@ -253,7 +253,7 @@ export function updateProjectiles(projectiles, ship, npcShips, asteroids, explos
                     explosions.push(createExplosion(proj.x, proj.y, true));
                     audioSystem.playShieldHit();
                 } else {
-                    ship.health -= proj.damage;
+                    ship.health = Math.max(0, ship.health - proj.damage);  // Clamp to 0, not negative
                     explosions.push(createExplosion(proj.x, proj.y, true));
                     audioSystem.playExplosion(true);
                 }
@@ -297,6 +297,69 @@ export function updateProjectiles(projectiles, ship, npcShips, asteroids, explos
 
 // Ship update
 export function updateShip(ship, game, audioSystem, projectiles, pickups, explosions) {
+    // Check if ship is destroyed
+    if (ship.health <= 0) {
+        // Handle ship destruction
+        if (!ship.isDestroyed) {
+            ship.isDestroyed = true;
+            ship.health = 0; // Clamp to 0, not negative
+            
+            // Create big explosion at ship location
+            explosions.push(createExplosion(ship.x, ship.y, false));
+            explosions.push(createExplosion(ship.x + 10, ship.y - 10, true));
+            explosions.push(createExplosion(ship.x - 10, ship.y + 10, true));
+            audioSystem.playExplosion(false);
+            
+            // Show game over message
+            const msg = document.createElement('div');
+            msg.className = 'game-notification error';
+            msg.style.cssText = 'font-size: 24px; padding: 20px; top: 50%; transform: translateY(-50%);';
+            msg.innerHTML = 'SHIP DESTROYED<br><span style="font-size: 14px;">Press R to respawn at last planet</span>';
+            document.body.appendChild(msg);
+            
+            // Stop ship movement
+            ship.vx = 0;
+            ship.vy = 0;
+        }
+        
+        // Check for respawn
+        if (game.keys['KeyR'] && ship.isDestroyed) {
+            // Respawn at last visited planet or default location
+            if (ship.landedPlanet) {
+                ship.x = ship.landedPlanet.x + ship.landedPlanet.radius + 50;
+                ship.y = ship.landedPlanet.y;
+            } else {
+                ship.x = 0;
+                ship.y = 0;
+            }
+            
+            // Reset ship state
+            ship.health = ship.maxHealth;
+            ship.shield = Math.min(50, ship.maxShield); // Half shields
+            ship.fuel = ship.maxFuel;
+            ship.vx = 0;
+            ship.vy = 0;
+            ship.angle = 0;
+            ship.isDestroyed = false;
+            ship.credits = Math.max(0, ship.credits - 100); // Death penalty
+            
+            // Clear any game over messages
+            const notifications = document.querySelectorAll('.game-notification');
+            notifications.forEach(n => {
+                if (n.textContent.includes('DESTROYED')) n.remove();
+            });
+            
+            // Show respawn message
+            const msg = document.createElement('div');
+            msg.className = 'game-notification info';
+            msg.textContent = 'RESPAWNED - DEATH PENALTY: -100 CREDITS';
+            document.body.appendChild(msg);
+            setTimeout(() => msg.remove(), 3000);
+        }
+        
+        return; // Don't process any other ship updates while destroyed
+    }
+    
     // Rotation
     if (game.keys['ArrowLeft'] || game.keys['KeyA']) {
         ship.angle -= 0.012;
@@ -553,6 +616,7 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
         if (npc.behavior === "aggressive") {
             // Pirates hunt player AND merchant vessels, but evade patrols
             const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
+            const playerIsAlive = !ship.isDestroyed;
             
             // Check for nearby patrol threats
             let nearbyPatrol = null;
@@ -592,8 +656,8 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                 let bestTargetDist = 800;
                 let targetIsPlayer = false;
                 
-                // Consider player as target
-                if (distToPlayer < bestTargetDist) {
+                // Consider player as target (only if alive)
+                if (playerIsAlive && distToPlayer < bestTargetDist) {
                     bestTarget = ship;
                     bestTargetDist = distToPlayer;
                     targetIsPlayer = true;
@@ -658,8 +722,9 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
             // Patrol ships - AGGRESSIVELY hunt pirates attacking merchants
             const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
             
-            // Check if player has been aggressive
-            const playerIsHostile = ship.weaponCooldown > 0 || ship.kills > 2;
+            // Check if player has been aggressive (and is alive)
+            const playerIsAlive = !ship.isDestroyed;
+            const playerIsHostile = playerIsAlive && (ship.weaponCooldown > 0 || ship.kills > 2);
             
             // PRIORITY 1: Find ANY pirate, especially if attacking
             let targetPirate = null;
@@ -831,8 +896,9 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
             // Traders navigate between planets
             let fleeing = false;
             
-            // Check for threats
-            if (distToPlayer < 300 && (ship.weaponCooldown > 0 || projectiles.some(p => p.isPlayer))) {
+            // Check for threats (only if player is alive)
+            const playerIsAlive = !ship.isDestroyed;
+            if (playerIsAlive && distToPlayer < 300 && (ship.weaponCooldown > 0 || projectiles.some(p => p.isPlayer))) {
                 // Flee from player threat
                 desiredAngle = Math.atan2(-dy, -dx);
                 shouldThrust = true;
@@ -1040,7 +1106,7 @@ export function updateAsteroids(asteroids, ship, pickups, explosions) {
             if (ship.shield > 0) {
                 ship.shield = Math.max(0, ship.shield - damage);
             } else {
-                ship.health = Math.max(0, ship.health - damage);
+                ship.health = Math.max(0, ship.health - damage);  // Clamp to 0, not negative
             }
             
             // Bounce both objects
@@ -1168,6 +1234,9 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             ship.currentPlanet = planet;
             game.paused = true;
             
+            // Show the landing info panel by default
+            showPanel('landing', ship, null, null, null, null);
+            
             break;
         }
     }
@@ -1214,7 +1283,7 @@ export function updateTutorialHint(ship) {
     }
 }
 export function updateHUD(ship) {
-    document.getElementById('health').textContent = Math.round(ship.health) + '%';
+    document.getElementById('health').textContent = Math.max(0, Math.round(ship.health)) + '%';
     document.getElementById('shield').textContent = ship.shield > 0 ? Math.round(ship.shield) : 'None';
     document.getElementById('fuel').textContent = Math.round(ship.fuel) + '%';
     document.getElementById('speed').textContent = (Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy) * 100).toFixed(1);
@@ -1225,7 +1294,41 @@ export function updateHUD(ship) {
     document.getElementById('kills').textContent = ship.kills;
 }
 export function showLandingOverlay() {}
-export function showPanel() {}
+export function showPanel(panel, ship, updateTradingPanelFunc, updateShopPanelFunc, commodities, shopInventory) {
+    // Get all panels
+    const tradingPanel = document.getElementById('tradingPanel');
+    const shopPanel = document.getElementById('shopPanel');
+    const landingInfo = document.getElementById('landingInfo');
+    
+    // Hide all panels first
+    if (tradingPanel) tradingPanel.style.display = 'none';
+    if (shopPanel) shopPanel.style.display = 'none';
+    if (landingInfo) landingInfo.style.display = 'none';
+    
+    // Show the requested panel
+    if (panel === 'landing') {
+        // Show landing info panel
+        if (landingInfo) {
+            landingInfo.style.display = 'flex';
+        }
+    } else if (panel === 'trading') {
+        // Show trading panel
+        if (tradingPanel) {
+            tradingPanel.style.display = 'flex';  // Use flex instead of block
+            if (updateTradingPanelFunc && ship && commodities) {
+                updateTradingPanelFunc(ship, commodities);
+            }
+        }
+    } else if (panel === 'shop') {
+        // Show shop panel
+        if (shopPanel) {
+            shopPanel.style.display = 'flex';  // Use flex instead of block
+            if (updateShopPanelFunc && ship && shopInventory) {
+                updateShopPanelFunc(ship, shopInventory);
+            }
+        }
+    }
+}
 export function updateTradingPanel(ship, commodities) {
     if (!ship.currentPlanet) return;
     
@@ -1342,6 +1445,11 @@ export function drawPlanetVisual() {}
 export function closeLandingOverlay(game) {
     document.getElementById('landingOverlay').style.display = 'none';
     game.paused = false;
+    
+    // Reset landing cooldown so player can land again
+    if (window.ship) {
+        window.ship.landingCooldown = 0;
+    }
 }
 export function buyCommodity(type, price, ship, commodities) {
     const cargoUsed = ship.cargo.reduce((sum, item) => sum + item.quantity, 0);
@@ -1373,8 +1481,10 @@ export function buyCommodity(type, price, ship, commodities) {
         ship.cargo.push({ type: type, quantity: 1 });
     }
     
+    // Update the trading panel
     updateTradingPanel(ship, commodities);
 }
+
 export function sellCommodity(type, price, ship, commodities) {
     const cargo = ship.cargo.find(c => c.type === type);
     if (!cargo || cargo.quantity === 0) return;
@@ -1388,8 +1498,10 @@ export function sellCommodity(type, price, ship, commodities) {
         ship.cargo.splice(index, 1);
     }
     
+    // Update the trading panel
     updateTradingPanel(ship, commodities);
 }
+
 export function sellAllCargo(ship, commodities) {
     if (!ship.currentPlanet || ship.cargo.length === 0) return;
     
@@ -1412,6 +1524,7 @@ export function sellAllCargo(ship, commodities) {
     document.body.appendChild(msg);
     setTimeout(() => msg.remove(), 2000);
     
+    // Update the trading panel
     updateTradingPanel(ship, commodities);
 }
 export function buyUpgrade(itemId, ship, shopInventory) {

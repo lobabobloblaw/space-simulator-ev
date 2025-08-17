@@ -218,10 +218,10 @@ document.addEventListener('keydown', (e) => {
     game.keys[e.code] = true;
     
     if (game.paused && ship.isLanded) {
-        if (e.code === 'Digit1') closeLandingOverlay();
-        if (e.code === 'Digit2') showPanel('landing');
-        if (e.code === 'Digit3') showPanel('trading');
-        if (e.code === 'Digit4') showPanel('shop');
+        if (e.code === 'Digit1') closeLandingOverlay(game);
+        if (e.code === 'Digit2') showPanel('landing', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+        if (e.code === 'Digit3') showPanel('trading', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+        if (e.code === 'Digit4') showPanel('shop', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
     }
     
     // Save game (KeyS when not typing)
@@ -397,30 +397,23 @@ function render() {
         ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
         ctx.fill();
         
-        // Surface detail patterns (subtle)
-        ctx.globalAlpha = 0.2;
+        // Add subtle surface texture with noise pattern
+        ctx.globalAlpha = 0.1;
         
-        // Add some surface features
-        const featureCount = Math.floor(planet.radius / 20);
-        for (let i = 0; i < featureCount; i++) {
-            const angle = (Math.PI * 2 / featureCount) * i + Date.now() * 0.00001;
-            const distance = planet.radius * (0.3 + Math.random() * 0.5);
-            const featureX = planet.x + Math.cos(angle) * distance;
-            const featureY = planet.y + Math.sin(angle) * distance;
-            const featureSize = planet.radius * (0.1 + Math.random() * 0.15);
-            
-            const featureGradient = ctx.createRadialGradient(
-                featureX, featureY, 0,
-                featureX, featureY, featureSize
-            );
-            featureGradient.addColorStop(0, planet.color + '40');
-            featureGradient.addColorStop(1, 'transparent');
-            
-            ctx.fillStyle = featureGradient;
-            ctx.beginPath();
-            ctx.arc(featureX, featureY, featureSize, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        // Create a subtle mottled surface texture
+        const textureGradient = ctx.createRadialGradient(
+            planet.x + planet.radius * 0.2, 
+            planet.y - planet.radius * 0.2,
+            0,
+            planet.x, planet.y, planet.radius * 0.9
+        );
+        textureGradient.addColorStop(0, 'transparent');
+        textureGradient.addColorStop(0.7, planet.color + '30');
+        textureGradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = textureGradient;
+        ctx.beginPath();
+        ctx.arc(planet.x, planet.y, planet.radius * 0.95, 0, Math.PI * 2);
+        ctx.fill();
         
         ctx.globalAlpha = 1;
         
@@ -431,39 +424,59 @@ function render() {
         ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
         ctx.stroke();
         
-        // Cloud layer (for habitable worlds)
+        // Cloud layer (for habitable worlds) - subtle atmospheric banding
         if (planet.name === "Terra Nova") {
-            ctx.globalAlpha = 0.15;
-            const cloudTime = Date.now() * 0.00005;
+            ctx.save();
+            ctx.globalAlpha = 0.12;
             
-            for (let i = 0; i < 8; i++) {
-                const cloudAngle = (Math.PI * 2 / 8) * i + cloudTime;
-                const cloudDist = planet.radius * 0.7;
-                const cloudX = planet.x + Math.cos(cloudAngle) * cloudDist;
-                const cloudY = planet.y + Math.sin(cloudAngle) * cloudDist;
+            // Clip to planet circle
+            ctx.beginPath();
+            ctx.arc(planet.x, planet.y, planet.radius * 0.98, 0, Math.PI * 2);
+            ctx.clip();
+            
+            // Create horizontal cloud bands
+            for (let i = 0; i < 3; i++) {
+                const cloudOffset = (i - 1) * planet.radius * 0.4;
+                const cloudGradient = ctx.createLinearGradient(
+                    planet.x - planet.radius, planet.y + cloudOffset,
+                    planet.x + planet.radius, planet.y + cloudOffset
+                );
+                cloudGradient.addColorStop(0, 'transparent');
+                cloudGradient.addColorStop(0.2, 'rgba(255,255,255,0.3)');
+                cloudGradient.addColorStop(0.8, 'rgba(255,255,255,0.3)');
+                cloudGradient.addColorStop(1, 'transparent');
                 
-                ctx.fillStyle = '#ffffff';
-                ctx.beginPath();
-                ctx.arc(cloudX, cloudY, planet.radius * 0.2, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.fillStyle = cloudGradient;
+                ctx.fillRect(
+                    planet.x - planet.radius, 
+                    planet.y + cloudOffset - planet.radius * 0.2,
+                    planet.radius * 2,
+                    planet.radius * 0.4
+                );
             }
-            ctx.globalAlpha = 1;
+            ctx.restore();
         }
         
         // Lava glow for volcanic worlds
         if (planet.name === "Crimson Moon") {
-            ctx.globalAlpha = 0.3;
-            const lavaTime = Date.now() * 0.001;
-            const lavaGlow = Math.sin(lavaTime) * 0.2 + 0.8;
+            ctx.save();
+            ctx.globalAlpha = 0.25;
             
-            ctx.shadowColor = '#ff4400';
-            ctx.shadowBlur = planet.radius * 0.3 * lavaGlow;
-            ctx.fillStyle = '#ff4400';
+            // Inner heat glow
+            const heatGradient = ctx.createRadialGradient(
+                planet.x, planet.y + planet.radius * 0.3,
+                0,
+                planet.x, planet.y, planet.radius
+            );
+            heatGradient.addColorStop(0, '#ff6600');
+            heatGradient.addColorStop(0.5, '#ff3300');
+            heatGradient.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = heatGradient;
             ctx.beginPath();
-            ctx.arc(planet.x, planet.y, planet.radius * 0.9, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = 1;
+            ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
         }
         
         // Planet name with enhanced visibility
@@ -835,10 +848,11 @@ function render() {
         }
     }
     
-    // Draw player ship with detailed effects
-    ctx.save();
-    ctx.translate(ship.x, ship.y);
-    ctx.rotate(ship.angle);
+    // Draw player ship with detailed effects (only if not destroyed)
+    if (!ship.isDestroyed) {
+        ctx.save();
+        ctx.translate(ship.x, ship.y);
+        ctx.rotate(ship.angle);
     
     // Engine thrust effect
     if (game.keys['KeyW'] || game.keys['ArrowUp']) {
@@ -912,10 +926,11 @@ function render() {
         ctx.fillRect(ship.size * 0.8, -2, 2, 4);
     }
     
-    ctx.restore();
+        ctx.restore();
+    }
     
-    // Health indicator for damaged player
-    if (ship.health < ship.maxHealth) {
+    // Health indicator for damaged player (only if not destroyed)
+    if (!ship.isDestroyed && ship.health < ship.maxHealth) {
         const barWidth = 40;
         const barHeight = 4;
         ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
@@ -1045,17 +1060,27 @@ function gameLoop() {
 
 // Wire up UI functions
 window.closeLandingOverlay = () => closeLandingOverlay(game);
-window.showPanel = (panel) => showPanel(panel, ship, updateTradingPanel, updateShopPanel);
-window.buyCommodity = (type, price) => buyCommodity(type, price, ship, updateTradingPanel);
-window.sellCommodity = (type, price) => sellCommodity(type, price, ship, updateTradingPanel);
-window.sellAllCargo = () => sellAllCargo(ship, updateTradingPanel);
+window.showPanel = (panel) => showPanel(panel, ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+window.buyCommodity = (type, price) => buyCommodity(type, price, ship, commodities);
+window.sellCommodity = (type, price) => sellCommodity(type, price, ship, commodities);
+window.sellAllCargo = () => sellAllCargo(ship, commodities);
 window.buyUpgrade = (itemId) => buyUpgrade(itemId, ship, shopInventory, updateShopPanel);
+
+// Create a game instance object for easier access
+window.gameInstance = {
+    closeLandingOverlay: () => closeLandingOverlay(game),
+    showPanel: (panel) => showPanel(panel, ship, updateTradingPanel, updateShopPanel, commodities, shopInventory),
+    buyCommodity: (type, price) => buyCommodity(type, price, ship, commodities),
+    sellCommodity: (type, price) => sellCommodity(type, price, ship, commodities),
+    sellAllCargo: () => sellAllCargo(ship, commodities),
+    buyUpgrade: (itemId) => buyUpgrade(itemId, ship, shopInventory, updateShopPanel)
+};
 
 // Wire up landing buttons
 document.getElementById('departBtn').onclick = () => closeLandingOverlay(game);
-document.getElementById('stationBtn').onclick = () => showPanel('landing', ship, updateTradingPanel, updateShopPanel);
-document.getElementById('tradeBtn').onclick = () => showPanel('trading', ship, updateTradingPanel, updateShopPanel);
-document.getElementById('outfitterBtn').onclick = () => showPanel('shop', ship, updateTradingPanel, updateShopPanel);
+document.getElementById('stationBtn').onclick = () => showPanel('landing', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+document.getElementById('tradeBtn').onclick = () => showPanel('trading', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+document.getElementById('outfitterBtn').onclick = () => showPanel('shop', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
 
 // Start first mission
 missionSystem.assignNext();
@@ -1122,7 +1147,7 @@ if (saveSystem.hasSave()) {
 
 // Autosave every 30 seconds
 setInterval(() => {
-    if (!game.paused && ship.health > 0) {
+    if (!game.paused && ship.health > 0 && !ship.isDestroyed) {
         saveSystem.autoSave(ship, game, missionSystem, npcShips, asteroids, pickups);
     }
 }, 30000);

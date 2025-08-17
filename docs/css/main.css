@@ -380,7 +380,8 @@ body {
 
 #landingContent {
     display: flex;
-    min-height: 300px;
+    min-height: 400px;
+    position: relative;
 }
 
 #planetVisual {
@@ -398,6 +399,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
+    min-height: 400px;
 }
 
 #landingMessage {
@@ -446,10 +448,20 @@ body {
 /* Trading and Shop Panels */
 #tradingPanel, #shopPanel {
     display: none;
+    flex: 1;
+    flex-direction: column;
     padding: var(--spacing-md);
+    min-height: 400px;
     max-height: 400px;
     overflow-y: auto;
     background: var(--bg-black);
+    border-left: 1px solid var(--border-subtle);
+}
+
+#commodityList, #shopList {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
 }
 
 .commodity-row, .shop-item {
@@ -457,10 +469,11 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: var(--spacing-sm);
-    margin: var(--spacing-xs) 0;
+    margin-bottom: var(--spacing-xs);
     background: var(--bg-medium);
     border: 1px solid var(--border-subtle);
     transition: all 0.2s;
+    min-height: 40px;
 }
 
 .commodity-row:hover, .shop-item:hover {
