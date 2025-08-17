@@ -343,6 +343,14 @@ export function updateShip(ship, game, audioSystem, projectiles, pickups, explos
             ship.isDestroyed = false;
             ship.credits = Math.max(0, ship.credits - 100); // Death penalty
             
+            // Clear threats from the area (same as landing)
+            const npcShips = window.npcShips || [];
+            const projectiles = window.projectiles || [];
+            const explosions = window.explosions || [];
+            npcShips.length = 0;
+            projectiles.length = 0;
+            explosions.length = 0;
+            
             // Clear any game over messages
             const notifications = document.querySelectorAll('.game-notification');
             notifications.forEach(n => {
@@ -899,8 +907,12 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
             // Check for threats (only if player is alive)
             const playerIsAlive = !ship.isDestroyed;
             if (playerIsAlive && distToPlayer < 300 && (ship.weaponCooldown > 0 || projectiles.some(p => p.isPlayer))) {
-                // Flee from player threat
-                desiredAngle = Math.atan2(-dy, -dx);
+                // Set flee direction if not already fleeing
+                if (!npc.fleeDirection) {
+                    npc.fleeDirection = Math.atan2(-dy, -dx);
+                    npc.fleeTimer = 60; // Flee for 60 frames in this direction
+                }
+                desiredAngle = npc.fleeDirection;
                 shouldThrust = true;
                 fleeing = true;
             }
@@ -912,11 +924,25 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                     const ody = other.y - npc.y;
                     const distToHostile = Math.sqrt(odx * odx + ody * ody);
                     if (distToHostile < 200) {
-                        desiredAngle = Math.atan2(-ody, -odx);
+                        // Set flee direction if not already fleeing
+                        if (!npc.fleeDirection) {
+                            npc.fleeDirection = Math.atan2(-ody, -odx);
+                            npc.fleeTimer = 60; // Flee for 60 frames in this direction
+                        }
+                        desiredAngle = npc.fleeDirection;
                         shouldThrust = true;
                         fleeing = true;
                         break;
                     }
+                }
+            }
+            
+            // Update flee timer and clear when done
+            if (npc.fleeTimer) {
+                npc.fleeTimer--;
+                if (npc.fleeTimer <= 0) {
+                    npc.fleeDirection = null;
+                    npc.fleeTimer = 0;
                 }
             }
             
@@ -996,7 +1022,9 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
         
         if (Math.abs(angleDiff) > 0.01) {
             // Turn toward target, but respect turn speed limit
-            const turnAmount = Math.min(Math.abs(angleDiff), npc.turnSpeed) * Math.sign(angleDiff);
+            // Slightly faster turning when fleeing for quick initial alignment
+            const turnSpeed = npc.fleeTimer && npc.fleeTimer > 50 ? npc.turnSpeed * 1.5 : npc.turnSpeed;
+            const turnAmount = Math.min(Math.abs(angleDiff), turnSpeed) * Math.sign(angleDiff);
             npc.angle += turnAmount;
         }
         
@@ -1234,6 +1262,25 @@ export function checkLanding(ship, planets, audioSystem, npcShips, projectiles, 
             ship.currentPlanet = planet;
             game.paused = true;
             
+            // Draw the planet visual scene
+            const planetCanvas = document.getElementById('planetCanvas');
+            if (planetCanvas) {
+                drawPlanetVisual(planet, planetCanvas);
+                
+                // Animate the planet scene continuously while landed
+                if (!window.planetAnimationFrame) {
+                    const animatePlanet = () => {
+                        if (ship.isLanded && game.paused) {
+                            drawPlanetVisual(planet, planetCanvas);
+                            window.planetAnimationFrame = requestAnimationFrame(animatePlanet);
+                        } else {
+                            window.planetAnimationFrame = null;
+                        }
+                    };
+                    animatePlanet();
+                }
+            }
+            
             // Show the landing info panel by default
             showPanel('landing', ship, null, null, null, null);
             
@@ -1441,11 +1488,322 @@ export function updateShopPanel(ship, shopInventory) {
         list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No items available at this station</div>';
     }
 }
-export function drawPlanetVisual() {}
+export function drawPlanetVisual(planet, planetCanvas) {
+    if (!planet || !planetCanvas) return;
+    
+    const ctx = planetCanvas.getContext('2d');
+    const width = planetCanvas.width;
+    const height = planetCanvas.height;
+    
+    // Clear canvas
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Create unique visuals for each planet type
+    const time = Date.now() * 0.001;
+    
+    if (planet.name === "Terra Nova") {
+        // Oceanic world with floating cities
+        // Sky gradient
+        const skyGradient = ctx.createLinearGradient(0, 0, 0, height * 0.6);
+        skyGradient.addColorStop(0, '#001133');
+        skyGradient.addColorStop(0.5, '#003366');
+        skyGradient.addColorStop(1, '#4A90E2');
+        ctx.fillStyle = skyGradient;
+        ctx.fillRect(0, 0, width, height * 0.6);
+        
+        // Ocean with waves
+        const oceanGradient = ctx.createLinearGradient(0, height * 0.6, 0, height);
+        oceanGradient.addColorStop(0, '#2E86AB');
+        oceanGradient.addColorStop(0.5, '#1A5276');
+        oceanGradient.addColorStop(1, '#0A2040');
+        ctx.fillStyle = oceanGradient;
+        ctx.fillRect(0, height * 0.6, width, height * 0.4);
+        
+        // Animated waves
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 5; i++) {
+            ctx.beginPath();
+            for (let x = 0; x <= width; x += 10) {
+                const y = height * 0.6 + Math.sin((x * 0.01) + time + i) * 10 + i * 15;
+                if (x === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+        
+        // Floating cities (geometric shapes)
+        ctx.fillStyle = 'rgba(100, 200, 255, 0.8)';
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 1;
+        
+        // City 1
+        ctx.save();
+        ctx.translate(width * 0.2, height * 0.4);
+        for (let i = 0; i < 3; i++) {
+            const h = 40 + i * 20;
+            ctx.fillRect(-15 + i * 10, -h, 10, h);
+            ctx.strokeRect(-15 + i * 10, -h, 10, h);
+        }
+        ctx.restore();
+        
+        // City 2
+        ctx.save();
+        ctx.translate(width * 0.7, height * 0.35);
+        ctx.fillRect(-20, -60, 40, 60);
+        ctx.strokeRect(-20, -60, 40, 60);
+        ctx.fillRect(-10, -80, 20, 20);
+        ctx.strokeRect(-10, -80, 20, 20);
+        ctx.restore();
+        
+        // Stars
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        for (let i = 0; i < 30; i++) {
+            const x = (i * 97) % width;
+            const y = (i * 41) % (height * 0.5);
+            ctx.fillRect(x, y, 1, 1);
+        }
+        
+    } else if (planet.name === "Crimson Moon") {
+        // Volcanic mining world
+        // Smoky red sky
+        const skyGradient = ctx.createLinearGradient(0, 0, 0, height * 0.5);
+        skyGradient.addColorStop(0, '#1A0000');
+        skyGradient.addColorStop(0.5, '#3A0F0A');
+        skyGradient.addColorStop(1, '#7B241C');
+        ctx.fillStyle = skyGradient;
+        ctx.fillRect(0, 0, width, height * 0.5);
+        
+        // Volcanic ground
+        const groundGradient = ctx.createLinearGradient(0, height * 0.5, 0, height);
+        groundGradient.addColorStop(0, '#7B241C');
+        groundGradient.addColorStop(0.3, '#3A0F0A');
+        groundGradient.addColorStop(1, '#000000');
+        ctx.fillStyle = groundGradient;
+        ctx.fillRect(0, height * 0.5, width, height * 0.5);
+        
+        // Lava flows
+        ctx.strokeStyle = '#ff6600';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#ff3300';
+        ctx.shadowBlur = 10;
+        
+        for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.moveTo(width * (0.2 + i * 0.3), height * 0.5);
+            ctx.quadraticCurveTo(
+                width * (0.25 + i * 0.3), height * 0.7,
+                width * (0.3 + i * 0.3), height
+            );
+            ctx.stroke();
+        }
+        
+        ctx.shadowBlur = 0;
+        
+        // Mining structures
+        ctx.fillStyle = '#444';
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 1;
+        
+        // Refinery towers
+        for (let i = 0; i < 2; i++) {
+            const x = width * (0.3 + i * 0.4);
+            ctx.fillRect(x - 15, height * 0.3, 30, height * 0.2);
+            ctx.strokeRect(x - 15, height * 0.3, 30, height * 0.2);
+            
+            // Smoke stacks
+            ctx.fillStyle = 'rgba(100, 100, 100, 0.5)';
+            for (let j = 0; j < 20; j++) {
+                const smokeY = height * 0.3 - j * 5;
+                const smokeSize = 5 + j * 0.5;
+                const drift = Math.sin(time + j * 0.5) * 5;
+                ctx.beginPath();
+                ctx.arc(x + drift, smokeY, smokeSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = '#444';
+        }
+        
+        // Volcanic particles
+        ctx.fillStyle = '#ff6600';
+        for (let i = 0; i < 15; i++) {
+            const x = Math.random() * width;
+            const y = height * 0.5 + Math.sin(time * 2 + i) * 50 - i * 3;
+            ctx.fillRect(x, y, 2, 2);
+        }
+        
+    } else if (planet.name === "Ice World") {
+        // Arctic research station
+        // Aurora sky
+        const skyGradient = ctx.createLinearGradient(0, 0, 0, height * 0.6);
+        skyGradient.addColorStop(0, '#000033');
+        skyGradient.addColorStop(0.5, '#003366');
+        skyGradient.addColorStop(1, '#154360');
+        ctx.fillStyle = skyGradient;
+        ctx.fillRect(0, 0, width, height * 0.6);
+        
+        // Aurora borealis effect
+        ctx.globalAlpha = 0.3;
+        const auroraGradient = ctx.createLinearGradient(0, 0, 0, height * 0.4);
+        auroraGradient.addColorStop(0, 'transparent');
+        auroraGradient.addColorStop(0.5, '#00ff88');
+        auroraGradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = auroraGradient;
+        
+        for (let i = 0; i < 3; i++) {
+            ctx.save();
+            ctx.translate(width * (0.2 + i * 0.3), 0);
+            ctx.beginPath();
+            for (let x = -50; x <= 50; x += 5) {
+                const y = height * 0.2 + Math.sin((x * 0.05) + time + i) * 30;
+                if (x === -50) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.lineTo(50, 0);
+            ctx.lineTo(-50, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+        
+        // Ice surface
+        const iceGradient = ctx.createLinearGradient(0, height * 0.6, 0, height);
+        iceGradient.addColorStop(0, '#E8F4F8');
+        iceGradient.addColorStop(0.5, '#85C1E9');
+        iceGradient.addColorStop(1, '#5DADE2');
+        ctx.fillStyle = iceGradient;
+        ctx.fillRect(0, height * 0.6, width, height * 0.4);
+        
+        // Ice formations
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.strokeStyle = '#85C1E9';
+        ctx.lineWidth = 1;
+        
+        for (let i = 0; i < 4; i++) {
+            const x = width * (0.1 + i * 0.25);
+            const h = 30 + Math.random() * 40;
+            ctx.beginPath();
+            ctx.moveTo(x - 20, height * 0.6);
+            ctx.lineTo(x, height * 0.6 - h);
+            ctx.lineTo(x + 20, height * 0.6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+        
+        // Research dome
+        ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(width * 0.5, height * 0.55, 40, Math.PI, 0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        
+        // Dome windows
+        ctx.fillStyle = '#00ffff';
+        for (let i = 0; i < 3; i++) {
+            ctx.fillRect(width * 0.5 - 30 + i * 20, height * 0.53, 8, 12);
+        }
+        
+        // Snow particles
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        for (let i = 0; i < 40; i++) {
+            const x = (Math.random() * width + time * 20 * (i % 2 ? 1 : -1)) % width;
+            const y = (Math.random() * height + time * 30) % height;
+            ctx.fillRect(x, y, 2, 2);
+        }
+        
+    } else {
+        // Mining Station (asteroid/default)
+        // Industrial space view
+        ctx.fillStyle = '#000011';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Starfield
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < 100; i++) {
+            const x = (i * 137) % width;
+            const y = (i * 71) % height;
+            const size = (i % 3) === 0 ? 2 : 1;
+            ctx.fillRect(x, y, size, size);
+        }
+        
+        // Asteroid surface (bottom)
+        const surfaceGradient = ctx.createLinearGradient(0, height * 0.7, 0, height);
+        surfaceGradient.addColorStop(0, '#3A3A3A');
+        surfaceGradient.addColorStop(0.5, '#2A2A2A');
+        surfaceGradient.addColorStop(1, '#1A1A1A');
+        ctx.fillStyle = surfaceGradient;
+        
+        ctx.beginPath();
+        ctx.moveTo(0, height * 0.7);
+        for (let x = 0; x <= width; x += 20) {
+            const y = height * 0.7 + Math.random() * 30;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Mining equipment
+        ctx.strokeStyle = '#F39C12';
+        ctx.lineWidth = 2;
+        ctx.fillStyle = '#666';
+        
+        // Mining rig
+        ctx.fillRect(width * 0.3 - 20, height * 0.6, 40, 60);
+        ctx.strokeRect(width * 0.3 - 20, height * 0.6, 40, 60);
+        
+        // Crane arm
+        ctx.beginPath();
+        ctx.moveTo(width * 0.3, height * 0.6);
+        ctx.lineTo(width * 0.3 + 30, height * 0.5);
+        ctx.lineTo(width * 0.3 + 50, height * 0.55);
+        ctx.stroke();
+        
+        // Storage tanks
+        for (let i = 0; i < 2; i++) {
+            const x = width * 0.6 + i * 30;
+            ctx.beginPath();
+            ctx.arc(x, height * 0.65, 15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+        
+        // Animated lights
+        ctx.fillStyle = '#ffff00';
+        for (let i = 0; i < 5; i++) {
+            if (Math.sin(time * 2 + i) > 0) {
+                ctx.fillRect(width * 0.3 - 15 + i * 7, height * 0.58, 3, 3);
+            }
+        }
+    }
+    
+    // Add scan lines for cyberpunk effect
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < height; y += 3) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+}
 export function closeLandingOverlay(game) {
     const overlay = document.getElementById('landingOverlay');
     if (overlay) overlay.style.display = 'none';
     game.paused = false;
+    
+    // Stop planet animation
+    if (window.planetAnimationFrame) {
+        cancelAnimationFrame(window.planetAnimationFrame);
+        window.planetAnimationFrame = null;
+    }
     
     // Reset landing cooldown so player can land again
     if (window.ship) {
