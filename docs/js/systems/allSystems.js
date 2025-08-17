@@ -632,9 +632,52 @@ export function updateNPCs(npcShips, ship, planets, projectiles, audioSystem, np
                 }
             }
             
+            // Create dramatic explosion effect for destroyed ship
+            if (window.explosions) {
+                // Main explosion at ship center
+                window.explosions.push(createExplosion(npc.x, npc.y, false));
+                
+                // Multiple smaller explosions around the ship for dramatic effect
+                for (let j = 0; j < 4; j++) {
+                    const angle = (Math.PI * 2 / 4) * j;
+                    const dist = npc.size * 0.8;
+                    window.explosions.push(createExplosion(
+                        npc.x + Math.cos(angle) * dist,
+                        npc.y + Math.sin(angle) * dist,
+                        true
+                    ));
+                }
+                
+                // Delayed secondary explosions for bigger ships
+                if (npc.type === 'freighter' || npc.type === 'patrol') {
+                    setTimeout(() => {
+                        if (window.explosions) {
+                            window.explosions.push(createExplosion(npc.x + 10, npc.y - 10, false));
+                            window.explosions.push(createExplosion(npc.x - 10, npc.y + 10, true));
+                        }
+                    }, 100);
+                }
+            }
+            
             // Pirates drop loot
             if (npc.type === 'pirate' && Math.random() < 0.6) {
-                // Would add pickup here
+                // Create credit/ore pickups
+                if (window.pickups) {
+                    for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = Math.random() * 2 + 1;
+                        window.pickups.push({
+                            x: npc.x,
+                            y: npc.y,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed,
+                            type: Math.random() < 0.5 ? 'credits' : 'ore',
+                            value: Math.random() < 0.5 ? 10 : 25,
+                            lifetime: 0,
+                            maxLifetime: 600
+                        });
+                    }
+                }
             }
             
             audioSystem.playExplosion();
@@ -1141,8 +1184,19 @@ export function updateAsteroids(asteroids, ship, pickups, explosions) {
                 });
             }
             
-            // Create small explosion
-            explosions.push(createExplosion(asteroid.x, asteroid.y, true));
+            // Create explosion scaled to asteroid size
+            explosions.push(createExplosion(asteroid.x, asteroid.y, asteroid.radius < 5));
+            
+            // Add debris particles for visual effect
+            for (let j = 0; j < 3; j++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = asteroid.radius * 0.5;
+                explosions.push(createExplosion(
+                    asteroid.x + Math.cos(angle) * dist,
+                    asteroid.y + Math.sin(angle) * dist,
+                    true
+                ));
+            }
             
             // Replace with smaller asteroids if big enough
             if (asteroid.radius > 5) {

@@ -207,23 +207,37 @@ export class ProceduralPlanetRenderer {
                     // Detail noise
                     const detail = this.fbm(px * 8 + seed, py * 8 + seed, 2, 2.0, 0.5);
                     
-                    // Combine noises
-                    const elevation = continental * 0.6 + mountains * 0.3 + detail * 0.1;
+                    // Combine noises - shift down by 0.25 for balanced water/land ratio
+                    const elevation = (continental * 0.6 + mountains * 0.3 + detail * 0.1) - 0.25;
                     
                     const i = (y * size + x) * 4;
                     
-                    if (elevation < -0.1) {
-                        // Deep ocean
-                        data[i] = 20 + elevation * 50;
-                        data[i + 1] = 60 + elevation * 50;
-                        data[i + 2] = 120 + elevation * 30;
-                    } else if (elevation < 0) {
-                        // Shallow ocean
-                        data[i] = 40 + elevation * 100;
-                        data[i + 1] = 100 + elevation * 100;
-                        data[i + 2] = 160 + elevation * 50;
-                    } else if (elevation < 0.1) {
-                        // Beach/sand
+                    if (elevation < 0.08) {
+                        // Unified ocean with smooth gradient based on depth
+                        // Deeper water = darker, shallower = lighter
+                        const waterDepth = Math.max(0, Math.min(1, (elevation + 0.25) / 0.33));
+                        
+                        // Smooth color interpolation from deep to shallow
+                        const deepR = 15;
+                        const deepG = 50;
+                        const deepB = 95;
+                        
+                        const shallowR = 35;
+                        const shallowG = 95;
+                        const shallowB = 155;
+                        
+                        // Interpolate colors based on depth
+                        data[i] = deepR + (shallowR - deepR) * waterDepth;
+                        data[i + 1] = deepG + (shallowG - deepG) * waterDepth;
+                        data[i + 2] = deepB + (shallowB - deepB) * waterDepth;
+                        
+                        // Add subtle variation to prevent banding
+                        const variation = (Math.sin(px * 50) * Math.sin(py * 50)) * 5;
+                        data[i] = Math.max(0, Math.min(255, data[i] + variation));
+                        data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + variation));
+                        data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + variation * 0.5));
+                    } else if (elevation < 0.13) {
+                        // Beach/sand - narrower beach band
                         data[i] = 230 - elevation * 50;
                         data[i + 1] = 210 - elevation * 50;
                         data[i + 2] = 140 - elevation * 50;

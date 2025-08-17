@@ -137,32 +137,40 @@ for (let i = 0; i < 50; i++) {
     });
 }
 
-// Generate stars
-for (let i = 0; i < 500; i++) {
+// Generate stars - MASSIVE expansive star field
+for (let i = 0; i < 3000; i++) {  // Lots of distant stars
     stars.far.push({
+        x: (Math.random() - 0.5) * 12000,  // Wider distribution
+        y: (Math.random() - 0.5) * 12000,
+        brightness: Math.random() * 0.5 + 0.3,
+        size: Math.random() < 0.95 ? 1 : 2,  // Mostly small points
+        color: Math.random() < 0.94 ? '#ffffff' : 
+               Math.random() < 0.5 ? '#ffeeee' :  // Slight red tint
+               Math.random() < 0.7 ? '#eeeeff' :  // Slight blue tint
+               '#ffffee'  // Slight yellow tint
+    });
+}
+
+for (let i = 0; i < 1200; i++) {  // Many mid-range stars
+    stars.mid.push({
         x: (Math.random() - 0.5) * 8000,
         y: (Math.random() - 0.5) * 8000,
-        brightness: Math.random() * 0.6 + 0.2,
-        size: Math.random() < 0.8 ? 1 : 2
+        brightness: Math.random() * 0.6 + 0.4,
+        size: Math.random() < 0.9 ? 1 : 2,
+        twinkle: Math.random() * Math.PI * 2,
+        twinkleSpeed: 0.01 + Math.random() * 0.03,  // Much slower twinkle
+        color: Math.random() < 0.92 ? '#ffffff' : 
+               Math.random() < 0.6 ? '#ffeeee' : '#eeeeff'
     });
 }
 
-for (let i = 0; i < 200; i++) {
-    stars.mid.push({
+for (let i = 0; i < 600; i++) {  // More near stars
+    stars.near.push({
         x: (Math.random() - 0.5) * 6000,
         y: (Math.random() - 0.5) * 6000,
-        brightness: Math.random() * 0.7 + 0.3,
-        size: 1,
-        twinkle: Math.random() * Math.PI * 2
-    });
-}
-
-for (let i = 0; i < 100; i++) {
-    stars.near.push({
-        x: (Math.random() - 0.5) * 4000,
-        y: (Math.random() - 0.5) * 4000,
-        brightness: Math.random() * 0.8 + 0.4,
-        size: Math.random() < 0.7 ? 1 : 2
+        brightness: Math.random() * 0.7 + 0.5,
+        size: Math.random() < 0.8 ? 1 : Math.random() < 0.95 ? 2 : 3,
+        color: '#ffffff'
     });
 }
 
@@ -283,39 +291,91 @@ function render() {
     // Apply camera transform
     ctx.translate(canvas.width / 2 - game.camera.x, canvas.height / 2 - game.camera.y);
     
-    // Draw stars with parallax layers
-    // Far stars (no parallax)
+    // Draw nebula clouds in deep background for atmosphere
+    ctx.globalAlpha = 0.03;
+    const nebulaGradient1 = ctx.createRadialGradient(
+        -game.camera.x * 0.05 + 200, -game.camera.y * 0.05 - 300, 100,
+        -game.camera.x * 0.05 + 200, -game.camera.y * 0.05 - 300, 600
+    );
+    nebulaGradient1.addColorStop(0, 'rgba(200, 100, 255, 0.4)');
+    nebulaGradient1.addColorStop(0.5, 'rgba(100, 50, 200, 0.2)');
+    nebulaGradient1.addColorStop(1, 'transparent');
+    ctx.fillStyle = nebulaGradient1;
+    ctx.fillRect(-2000, -2000, 4000, 4000);
+    
+    const nebulaGradient2 = ctx.createRadialGradient(
+        -game.camera.x * 0.05 - 500, -game.camera.y * 0.05 + 400, 150,
+        -game.camera.x * 0.05 - 500, -game.camera.y * 0.05 + 400, 800
+    );
+    nebulaGradient2.addColorStop(0, 'rgba(100, 200, 255, 0.3)');
+    nebulaGradient2.addColorStop(0.5, 'rgba(50, 100, 200, 0.15)');
+    nebulaGradient2.addColorStop(1, 'transparent');
+    ctx.fillStyle = nebulaGradient2;
+    ctx.fillRect(-2000, -2000, 4000, 4000);
+    
+    // Draw stars with enhanced parallax layers
+    // Far stars (minimal parallax) - like distant galaxies
     for (let star of stars.far) {
-        const screenX = star.x - game.camera.x * 0.1;  // Very slight parallax
-        const screenY = star.y - game.camera.y * 0.1;
+        const screenX = star.x - game.camera.x * 0.05;  // Even less parallax for depth
+        const screenY = star.y - game.camera.y * 0.05;
+        
+        // Wrap stars around for infinite field
+        const wrappedX = ((screenX + 6000) % 12000) - 6000;
+        const wrappedY = ((screenY + 6000) % 12000) - 6000;
         
         ctx.globalAlpha = star.brightness;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(screenX, screenY, star.size, star.size);
+        ctx.fillStyle = star.color || '#ffffff';
+        
+        if (star.size > 2) {
+            // Draw larger stars with a subtle glow
+            ctx.shadowColor = star.color || '#ffffff';
+            ctx.shadowBlur = star.size;
+            ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+            ctx.shadowBlur = 0;
+        } else {
+            ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+        }
     }
     
-    // Mid stars (some parallax and twinkling)
+    // Mid stars (moderate parallax and twinkling)
     for (let star of stars.mid) {
-        const screenX = star.x - game.camera.x * 0.3;  // More parallax
-        const screenY = star.y - game.camera.y * 0.3;
+        const screenX = star.x - game.camera.x * 0.2;  // Adjusted parallax
+        const screenY = star.y - game.camera.y * 0.2;
         
-        // Twinkling effect
-        star.twinkle += 0.05;
-        const twinkle = Math.sin(star.twinkle) * 0.3 + 0.7;
+        // Wrap stars
+        const wrappedX = ((screenX + 4000) % 8000) - 4000;
+        const wrappedY = ((screenY + 4000) % 8000) - 4000;
+        
+        // Very subtle twinkling effect
+        star.twinkle += star.twinkleSpeed || 0.02;
+        const twinkle = Math.sin(star.twinkle) * 0.1 + 0.9;  // Only varies between 0.8 and 1.0
         
         ctx.globalAlpha = star.brightness * twinkle;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(screenX, screenY, star.size, star.size);
+        ctx.fillStyle = star.color || '#ffffff';
+        ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
     }
     
-    // Near stars (more parallax)
+    // Near stars (maximum parallax) - foreground stars
     for (let star of stars.near) {
-        const screenX = star.x - game.camera.x * 0.5;  // Maximum parallax
-        const screenY = star.y - game.camera.y * 0.5;
+        const screenX = star.x - game.camera.x * 0.4;  // Strong parallax
+        const screenY = star.y - game.camera.y * 0.4;
+        
+        // Wrap stars
+        const wrappedX = ((screenX + 3000) % 6000) - 3000;
+        const wrappedY = ((screenY + 3000) % 6000) - 3000;
         
         ctx.globalAlpha = star.brightness;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(screenX, screenY, star.size, star.size);
+        ctx.fillStyle = star.color || '#ffffff';
+        
+        if (star.size > 1) {
+            // Subtle glow for brighter near stars
+            ctx.shadowColor = '#ffffff';
+            ctx.shadowBlur = 2;
+            ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+            ctx.shadowBlur = 0;
+        } else {
+            ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+        }
     }
     
     ctx.globalAlpha = 1;
