@@ -42,7 +42,7 @@ import {
     TouchControls
 } from './systems/allSystems.js';
 
-import { PlanetRenderer } from './systems/planetRenderer2.js';
+import { ProceduralPlanetRenderer } from './systems/proceduralPlanetRenderer.js';
 
 // Get canvas elements
 const canvas = document.getElementById('gameCanvas');
@@ -176,7 +176,7 @@ const audioSystem = new AudioSystem();
 audioSystem.init();
 
 // Initialize planet renderer
-const planetRenderer = new PlanetRenderer();
+const planetRenderer = new ProceduralPlanetRenderer();
 planetRenderer.initializePlanets(planets);
 
 // Initialize save system
