@@ -110,7 +110,14 @@ export class StateManager {
                 },
                 get: (target, property) => {
                     const value = target[property];
-                    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Don't proxy Sets, Maps, Arrays, or other special objects
+                    if (typeof value === 'object' && 
+                        value !== null && 
+                        !Array.isArray(value) &&
+                        !(value instanceof Set) &&
+                        !(value instanceof Map) &&
+                        !(value instanceof Date) &&
+                        !(value instanceof RegExp)) {
                         const fullPath = path ? `${path}.${property}` : property;
                         return createProxy(value, fullPath);
                     }

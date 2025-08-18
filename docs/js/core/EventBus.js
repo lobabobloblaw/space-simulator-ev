@@ -150,6 +150,13 @@ export const GameEvents = {
     NPC_SPAWN: 'npc.spawn',
     NPC_DEATH: 'npc.death',
     NPC_HOSTILE: 'npc.hostile',
+    NPC_DESTROYED: 'npc.destroyed',
+    PATROL_WARNING: 'npc.patrol.warning',
+    PATROL_STAND_DOWN: 'npc.patrol.standDown',
+    PATROL_ASSIST: 'npc.patrol.assist',
+    PROJECTILE_FIRED: 'combat.projectile.fired',
+    EXPLOSION_CREATED: 'combat.explosion.created',
+    WARP_EFFECT_CREATED: 'warp.effect.created',
     
     // Economy events
     TRADE_COMPLETE: 'economy.trade.complete',

@@ -213,7 +213,23 @@ function initializeGameState() {
         nextShipSpawn: Date.now() + Math.random() * 3000 + 2000
     };
     
-    console.log('[EventBus Main] Game state initialized');
+    // HYBRID APPROACH: Bridge to window globals for compatibility
+    // This allows systems that still use window.ship to work
+    window.ship = state.ship;
+    window.planets = state.planets;
+    window.asteroids = state.asteroids;
+    window.npcShips = state.npcShips;
+    window.projectiles = state.projectiles;
+    window.explosions = state.explosions;
+    window.warpEffects = state.warpEffects;
+    window.pickups = state.pickups;
+    window.game = { 
+        camera: state.camera, 
+        paused: state.paused 
+    };
+    window.missionSystem = state.missionSystem;
+    
+    console.log('[EventBus Main] Game state initialized with hybrid window globals');
 }
 
 /**
@@ -398,6 +414,12 @@ function gameLoop(deltaTime) {
     // Update camera to follow ship
     state.camera.x = state.ship.x;
     state.camera.y = state.ship.y;
+    
+    // HYBRID: Keep window globals in sync
+    if (window.game) {
+        window.game.camera = state.camera;
+        window.game.paused = state.paused;
+    }
     
     // Update all systems
     for (const [name, system] of Object.entries(systems)) {

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Pure EventBus Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #141414;
+            font-family: 'JetBrains Mono', monospace;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+            background: #000;
+        }
+        
+        #debugInfo {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            border: 1px solid #00ffff;
+            font-size: 12px;
+            color: #00ffff;
+            font-family: monospace;
+            z-index: 1000;
+        }
+        
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,255,0,0.2);
+            padding: 10px;
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        .game-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 18px;
+            z-index: 10000;
+            animation: fadeOut 2.5s ease-in-out;
+        }
+        
+        .game-notification.success {
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid #00ff00;
+            color: #00ff00;
+        }
+        
+        .game-notification.error {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid #ff0000;
+            color: #ff0000;
+        }
+        
+        .game-notification.info {
+            background: rgba(0, 255, 255, 0.2);
+            border: 1px solid #00ffff;
+            color: #00ffff;
+        }
+        
+        @keyframes fadeOut {
+            0%, 70% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        
+        #hud, #menu, #shop, #tradingPanel, #missionDisplay {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">PURE EVENTBUS - LOADING...</div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="debugInfo">
+        <div>Position: <span id="shipPos">0, 0</span></div>
+        <div>Velocity: <span id="shipVel">0, 0</span></div>
+        <div>Module Loaded: <span id="moduleStatus">❌</span></div>
+        <div>Init Started: <span id="initStatus">❌</span></div>
+        <div>Controls: WASD=Move, F=Fire, L=Land</div>
+    </div>
+    
+    <!-- Hidden UI elements that systems expect -->
+    <div id="hud"></div>
+    <div id="menu"></div>
+    <div id="shop"></div>
+    <div id="tradingPanel"></div>
+    <div id="missionDisplay"></div>
+    
+    <script type="module">
+        console.log('[TEST] Loading pure EventBus module...');
+        
+        // Add debug tracking
+        window.eventBusModuleLoaded = false;
+        window.eventBusInitStarted = false;
+        
+        // Update debug display
+        function updateDebug() {
+            document.getElementById('moduleStatus').textContent = window.eventBusModuleLoaded ? '✅' : '❌';
+            document.getElementById('initStatus').textContent = window.eventBusInitStarted ? '✅' : '❌';
+            
+            // Try to get ship position from StateManager
+            import('./js/core/StateManager.js').then(module => {
+                const stateManager = module.getStateManager();
+                const state = stateManager.state;
+                if (state && state.ship) {
+                    document.getElementById('shipPos').textContent = 
+                        `${Math.round(state.ship.x)}, ${Math.round(state.ship.y)}`;
+                    document.getElementById('shipVel').textContent = 
+                        `${state.ship.vx.toFixed(3)}, ${state.ship.vy.toFixed(3)}`;
+                }
+            }).catch(e => {
+                console.error('[TEST] Failed to get state:', e);
+            });
+        }
+        
+        // Update debug info regularly
+        setInterval(updateDebug, 100);
+        
+        // Load the pure EventBus module
+        import('./js/main_eventbus_pure.js')
+            .then(module => {
+                console.log('[TEST] ✅ Pure EventBus module loaded successfully!');
+                document.getElementById('status').textContent = 'PURE EVENTBUS - WORKING!';
+                document.getElementById('status').style.borderColor = '#00ff00';
+                
+                // Verify systems are accessible
+                if (module.eventBus && module.stateManager && module.systems) {
+                    console.log('[TEST] ✅ All exports available:', {
+                        eventBus: !!module.eventBus,
+                        stateManager: !!module.stateManager,
+                        systems: Object.keys(module.systems)
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('[TEST] ❌ Failed to load pure EventBus:', error);
+                document.getElementById('status').textContent = 'PURE EVENTBUS - FAILED!';
+                document.getElementById('status').style.borderColor = '#ff0000';
+                document.getElementById('status').style.background = 'rgba(255,0,0,0.2)';
+            });
+    </script>
+</body>
+</html>

@@ -26,6 +26,14 @@ export class AudioSystem {
         this.handlePickup = this.handlePickup.bind(this);
         this.handleLanding = this.handleLanding.bind(this);
         
+        // Bind sound methods to preserve context when called through proxy
+        this.playLaser = this.playLaser.bind(this);
+        this.playExplosion = this.playExplosion.bind(this);
+        this.playThrust = this.playThrust.bind(this);
+        this.playShieldHit = this.playShieldHit.bind(this);
+        this.playPickup = this.playPickup.bind(this);
+        this.playLanding = this.playLanding.bind(this);
+        
         console.log('[AudioSystem] Created');
     }
     

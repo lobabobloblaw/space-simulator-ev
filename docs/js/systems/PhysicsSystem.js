@@ -11,7 +11,7 @@ export class PhysicsSystem {
         this.stateManager = getStateManager();
         
         // Physics constants
-        this.SPACE_FRICTION = 0.999;
+        this.SPACE_FRICTION = 1.0;  // No friction in space!
         this.BRAKE_FRICTION = 0.95;
         this.WORLD_BOUNDS = { min: -2000, max: 2000 };
         
@@ -135,7 +135,7 @@ export class PhysicsSystem {
         
         // Handle rotation
         if (this.turnDirection !== 0) {
-            const turnSpeed = 0.012; // radians per frame
+            const turnSpeed = 0.025; // radians per frame
             ship.angle += turnSpeed * this.turnDirection;
             
             // Normalize angle to 0-2π
@@ -145,7 +145,7 @@ export class PhysicsSystem {
         
         // Handle thrust
         if (this.thrustActive && ship.fuel > 0.1) {
-            const thrustPower = ship.thrust || 0.004;
+            const thrustPower = ship.thrust || 0.012;
             const thrustX = Math.cos(ship.angle) * thrustPower;
             const thrustY = Math.sin(ship.angle) * thrustPower;
             
@@ -168,9 +168,9 @@ export class PhysicsSystem {
             ship.vy *= this.BRAKE_FRICTION;
         }
         
-        // Apply space friction (very minimal)
-        ship.vx *= this.SPACE_FRICTION;
-        ship.vy *= this.SPACE_FRICTION;
+        // No friction in space! Ship maintains velocity (Newton's first law)
+        // ship.vx *= this.SPACE_FRICTION;  // Commented out - no friction
+        // ship.vy *= this.SPACE_FRICTION;  // Commented out - no friction
         
         // Apply velocity limits
         const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
@@ -239,9 +239,9 @@ export class PhysicsSystem {
             // NPCs handle their own AI in the old system
             // We'll just apply physics constraints here
             
-            // Apply space friction
-            npc.vx *= this.SPACE_FRICTION;
-            npc.vy *= this.SPACE_FRICTION;
+            // No friction in space for NPCs either!
+            // npc.vx *= this.SPACE_FRICTION;  // Removed - no friction
+            // npc.vy *= this.SPACE_FRICTION;  // Removed - no friction
             
             // Apply velocity limits
             const speed = Math.sqrt(npc.vx * npc.vx + npc.vy * npc.vy);

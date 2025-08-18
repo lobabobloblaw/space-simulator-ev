@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NPC System Test</title>
+    <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameHUD">
+        <div class="tech-line"></div>
+        <div class="hud-container">
+            <div class="hud-left">
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">HULL</span>
+                        <span class="status-value" id="health">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">NPCS</span>
+                        <span class="status-value" id="npcCount">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="landingOverlay"></div>
+    
+    <div style="position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: #0ff; padding: 10px; font-family: monospace;">
+        <h3>NPC Debug</h3>
+        <div id="npcDebug">Loading...</div>
+    </div>
+    
+    <script type="module">
+        import { getEventBus, GameEvents } from '../js/core/EventBus.js';
+        import { getStateManager } from '../js/core/StateManager.js';
+        import NPCSystem from '../js/systems/NPCSystem.js';
+        import SpawnSystem from '../js/systems/SpawnSystem.js';
+        
+        // Get singletons
+        const eventBus = getEventBus();
+        const stateManager = getStateManager();
+        
+        async function init() {
+            console.log('Initializing NPC test...');
+            
+            // Import game data
+            const gameDataModule = await import('../js/data/gameData.js');
+            
+            // Initialize state
+            const state = stateManager.state;
+            
+            state.ship = {
+                x: 0, y: 0, vx: 0, vy: 0,
+                angle: 0, size: 8,
+                health: 100, maxHealth: 100,
+                credits: 250, kills: 0,
+                weaponCooldown: 0,
+                isDestroyed: false,
+                pirateKills: 0
+            };
+            
+            state.planets = gameDataModule.planets;
+            state.npcShips = [];
+            state.projectiles = [];
+            state.npcTypes = gameDataModule.npcTypes;
+            state.npcSpawnState = {
+                nextShipSpawn: Date.now() + 1000
+            };
+            
+            // Initialize systems
+            const npcSystem = new NPCSystem();
+            await npcSystem.init();
+            console.log('NPCSystem initialized');
+            
+            const spawnSystem = new SpawnSystem();
+            await spawnSystem.init();
+            console.log('SpawnSystem initialized');
+            
+            // Update loop
+            setInterval(() => {
+                // Update systems
+                spawnSystem.update(state, 16);
+                npcSystem.update(state, 16);
+                
+                // Update debug display
+                const debugEl = document.getElementById('npcDebug');
+                const npcCountEl = document.getElementById('npcCount');
+                
+                npcCountEl.textContent = state.npcShips.length;
+                
+                let debugText = `NPCs: ${state.npcShips.length}<br>`;
+                state.npcShips.forEach((npc, i) => {
+                    debugText += `${i}: ${npc.type} (${npc.behavior})<br>`;
+                    debugText += `   HP: ${npc.health}/${npc.maxHealth}<br>`;
+                    debugText += `   Pos: (${Math.round(npc.x)}, ${Math.round(npc.y)})<br>`;
+                });
+                
+                debugEl.innerHTML = debugText;
+            }, 100);
+            
+            console.log('NPC test running!');
+        }
+        
+        init();
+    </script>
+</body>
+</html>

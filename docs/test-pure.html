@@ -3,15 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Galaxy Trader - Space Trading & Combat</title>
+    <title>Galaxy Trader - Pure EventBus Test</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/main.css">
+    <style>
+        #debugInfo {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: #0f0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            z-index: 10000;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border: 1px solid #0f0;
+        }
+    </style>
 </head>
 <body>
+    <!-- Debug panel to verify no window globals -->
+    <div id="debugInfo">
+        <h3>🚀 Pure EventBus Test</h3>
+        <div style="color: #ff0; margin: 5px 0; font-size: 10px;">NO WINDOW GLOBALS - CLEAN ARCHITECTURE</div>
+        <div>window.ship: <span id="shipGlobal">checking...</span></div>
+        <div>window.planets: <span id="planetsGlobal">checking...</span></div>
+        <div>window.npcShips: <span id="npcGlobal">checking...</span></div>
+        <div>window.projectiles: <span id="projectilesGlobal">checking...</span></div>
+        <div style="margin-top: 5px; padding-top: 5px; border-top: 1px solid #0f0;">
+            <div>EventBus Active: <span id="eventBusStatus">checking...</span></div>
+            <div>State via Manager: <span id="stateStatus">checking...</span></div>
+        </div>
+        <div style="margin-top: 5px; padding-top: 5px; border-top: 1px solid #0f0; font-size: 10px;">
+            <div>Controls: WASD=Move F=Fire Q=Switch L=Land</div>
+            <div>S=Save O=Load M=Sound</div>
+        </div>
+    </div>
+    
     <!-- Tutorial/Hint System -->
     <div id="tutorialHint"></div>
     
@@ -56,7 +88,7 @@
                 <div id="logo-container">
                     <div id="logo-ascii">GALAXY TRADER</div>
                 </div>
-                <div class="hud-subtitle">/// SYSTEM ONLINE</div>
+                <div class="hud-subtitle">/// PURE EVENTBUS</div>
                 <div class="key-stats">
                     <div class="key-stat">
                         <span class="status-label">CREDITS</span>
@@ -132,7 +164,33 @@
         </div>
     </div>
 
-    <!-- Pure EventBus Architecture - Zero Window Globals -->
+    <!-- Pure EventBus Architecture - No Window Globals -->
     <script type="module" src="./js/main_eventbus_pure.js"></script>
+    
+    <!-- Debug checker script -->
+    <script>
+        // Check for window globals every 500ms
+        setInterval(() => {
+            document.getElementById('shipGlobal').textContent = 
+                window.ship === undefined ? '✅ undefined' : '❌ exists';
+            document.getElementById('planetsGlobal').textContent = 
+                window.planets === undefined ? '✅ undefined' : '❌ exists';
+            document.getElementById('npcGlobal').textContent = 
+                window.npcShips === undefined ? '✅ undefined' : '❌ exists';
+            document.getElementById('projectilesGlobal').textContent = 
+                window.projectiles === undefined ? '✅ undefined' : '❌ exists';
+            document.getElementById('eventBusStatus').textContent = 
+                window.eventBusModuleLoaded ? '✅ loaded' : '❌ not loaded';
+            
+            // Check if we can access state via exported objects
+            if (window.stateManager) {
+                const ship = window.stateManager.state.ship;
+                if (ship) {
+                    document.getElementById('stateStatus').textContent = 
+                        `✅ Ship at (${ship.x.toFixed(1)}, ${ship.y.toFixed(1)})`;
+                }
+            }
+        }, 500);
+    </script>
 </body>
 </html>

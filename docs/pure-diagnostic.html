@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pure EventBus Diagnostic</title>
+    <style>
+        body {
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 20px;
+        }
+        #output {
+            white-space: pre-wrap;
+            background: #111;
+            border: 1px solid #0f0;
+            padding: 10px;
+            margin-top: 20px;
+        }
+        canvas {
+            border: 1px solid #333;
+            display: block;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pure EventBus Diagnostic</h1>
+    <canvas id="gameCanvas" width="400" height="300"></canvas>
+    
+    <!-- Hidden UI elements that systems expect -->
+    <div style="display:none">
+        <div id="hud"></div>
+        <div id="menu"></div>
+        <div id="shop"></div>
+        <div id="tradingPanel"></div>
+        <div id="missionDisplay"></div>
+        <div id="health">100%</div>
+        <div id="shield">None</div>
+        <div id="fuel">100%</div>
+        <div id="speed">0.0</div>
+        <div id="cargo">0/10</div>
+        <div id="location">SPACE</div>
+        <div id="credits">250</div>
+        <div id="weapon">NONE</div>
+        <div id="kills">0</div>
+        <div id="tutorialHint"></div>
+        <div id="landingOverlay"></div>
+        <div id="departBtn"></div>
+        <div id="stationBtn"></div>
+        <div id="tradeBtn"></div>
+        <div id="outfitterBtn"></div>
+    </div>
+    
+    <div id="output">Loading pure EventBus module...</div>
+    
+    <script type="module">
+        const output = document.getElementById('output');
+        const log = (msg) => {
+            output.textContent += '\n' + msg;
+            console.log(msg);
+        };
+        
+        log('Starting diagnostic...');
+        
+        try {
+            // Import core modules first
+            log('Importing EventBus...');
+            const { getEventBus, GameEvents } = await import('./js/core/EventBus.js');
+            log('✅ EventBus imported');
+            
+            log('Importing StateManager...');
+            const { getStateManager } = await import('./js/core/StateManager.js');
+            log('✅ StateManager imported');
+            
+            log('Importing GameLoop...');
+            const { GameLoop } = await import('./js/core/GameLoop.js');
+            log('✅ GameLoop imported');
+            
+            // Import systems one by one
+            log('\nImporting Systems:');
+            
+            log('  InputSystem...');
+            const InputSystem = (await import('./js/systems/InputSystem.js')).default;
+            log('  ✅ InputSystem');
+            
+            log('  PhysicsSystem...');
+            const PhysicsSystem = (await import('./js/systems/PhysicsSystem.js')).default;
+            log('  ✅ PhysicsSystem');
+            
+            log('  RenderSystem...');
+            const RenderSystem = (await import('./js/systems/RenderSystem.js')).default;
+            log('  ✅ RenderSystem');
+            
+            log('  AudioSystem...');
+            const AudioSystem = (await import('./js/systems/AudioSystem.js')).default;
+            log('  ✅ AudioSystem');
+            
+            log('  UISystem...');
+            const UISystem = (await import('./js/systems/UISystem.js')).default;
+            log('  ✅ UISystem');
+            
+            log('  WeaponSystem...');
+            const WeaponSystem = (await import('./js/systems/WeaponSystem.js')).default;
+            log('  ✅ WeaponSystem');
+            
+            log('  SpawnSystem...');
+            const SpawnSystem = (await import('./js/systems/SpawnSystem.js')).default;
+            log('  ✅ SpawnSystem');
+            
+            log('  SaveSystem...');
+            const { SaveSystem } = await import('./js/systems/saveSystem.js');
+            log('  ✅ SaveSystem');
+            
+            log('\nImporting game data...');
+            const { planets, npcTypes, commodities, shopInventory, missions } = await import('./js/data/gameData.js');
+            log('✅ Game data imported');
+            
+            // Now try to initialize
+            log('\n=== INITIALIZATION ===');
+            
+            const eventBus = getEventBus();
+            const stateManager = getStateManager();
+            log('Got singletons');
+            
+            // Initialize minimal state
+            const state = stateManager.state;
+            state.ship = {
+                x: 0, y: 0, vx: 0, vy: 0,
+                angle: 0, thrust: 0.004, maxSpeed: 0.45,
+                fuel: 100, maxFuel: 100,
+                health: 100, maxHealth: 100,
+                size: 8,
+                weapons: [{type: 'laser', damage: 10, cooldown: 20}],
+                currentWeapon: 0,
+                weaponCooldown: 0,
+                credits: 250,
+                cargo: [],
+                cargoCapacity: 10,
+                kills: 0
+            };
+            state.camera = {x: 0, y: 0};
+            state.paused = false;
+            state.planets = planets || [];
+            state.npcShips = [];
+            state.asteroids = [];
+            state.projectiles = [];
+            state.explosions = [];
+            state.warpEffects = [];
+            state.pickups = [];
+            state.stars = {far: [], mid: [], near: []};
+            state.missionSystem = {active: null, completed: [], available: []};
+            state.npcSpawnState = {nextShipSpawn: Date.now() + 5000};
+            state.audio = {enabled: true, masterVolume: 0.3};
+            state.input = {
+                keys: new Set(),
+                mouse: { x: 0, y: 0, pressed: false },
+                touch: { x: 0, y: 0, active: false }
+            };
+            state.physics = {entities: [], collisions: []};
+            
+            log('State initialized');
+            
+            // Try to create systems
+            log('\nCreating systems...');
+            const systems = {};
+            
+            try {
+                systems.input = new InputSystem();
+                await systems.input.init();
+                log('✅ Input system created');
+            } catch (e) {
+                log('❌ Input failed: ' + e.message);
+            }
+            
+            try {
+                systems.physics = new PhysicsSystem();
+                await systems.physics.init();
+                log('✅ Physics system created');
+            } catch (e) {
+                log('❌ Physics failed: ' + e.message);
+            }
+            
+            try {
+                const canvas = document.getElementById('gameCanvas');
+                systems.render = new RenderSystem(canvas);
+                await systems.render.init();
+                log('✅ Render system created');
+            } catch (e) {
+                log('❌ Render failed: ' + e.message);
+            }
+            
+            // Create simple game loop
+            log('\nCreating game loop...');
+            const loop = new GameLoop({
+                onUpdate: (deltaTime) => {
+                    // Update ship position for testing
+                    state.ship.x += state.ship.vx;
+                    state.ship.y += state.ship.vy;
+                    
+                    // Update camera
+                    state.camera.x = state.ship.x;
+                    state.camera.y = state.ship.y;
+                    
+                    // Update systems
+                    for (const system of Object.values(systems)) {
+                        if (system.update) {
+                            try {
+                                system.update(state, deltaTime);
+                            } catch (e) {
+                                log('Update error in system: ' + e.message);
+                            }
+                        }
+                    }
+                },
+                onRender: (interpolation, deltaTime) => {
+                    if (systems.render && systems.render.render) {
+                        systems.render.render(state, deltaTime);
+                    }
+                }
+            });
+            
+            log('✅ Game loop created');
+            
+            // Start the loop
+            loop.start();
+            log('✅ Game loop started!');
+            
+            // Test movement
+            log('\n=== TESTING MOVEMENT ===');
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyW') {
+                    state.ship.vy = -0.1;
+                    log('W pressed - ship.vy = ' + state.ship.vy);
+                }
+                if (e.code === 'KeyS') {
+                    state.ship.vy = 0.1;
+                    log('S pressed - ship.vy = ' + state.ship.vy);
+                }
+                if (e.code === 'KeyA') {
+                    state.ship.vx = -0.1;
+                    log('A pressed - ship.vx = ' + state.ship.vx);
+                }
+                if (e.code === 'KeyD') {
+                    state.ship.vx = 0.1;
+                    log('D pressed - ship.vx = ' + state.ship.vx);
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                if (e.code === 'KeyW' || e.code === 'KeyS') {
+                    state.ship.vy = 0;
+                    log('Vertical key released');
+                }
+                if (e.code === 'KeyA' || e.code === 'KeyD') {
+                    state.ship.vx = 0;
+                    log('Horizontal key released');
+                }
+            });
+            
+            log('\n✅ PURE EVENTBUS WORKING!');
+            log('Use WASD to move the ship');
+            
+            // Make accessible for debugging
+            window.pureEventBus = eventBus;
+            window.pureStateManager = stateManager;
+            window.pureSystems = systems;
+            window.pureState = state;
+            
+        } catch (error) {
+            log('\n❌ FATAL ERROR: ' + error.message);
+            log('Stack: ' + error.stack);
+        }
+    </script>
+</body>
+</html>

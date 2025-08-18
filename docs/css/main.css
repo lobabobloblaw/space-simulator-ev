@@ -479,6 +479,110 @@ body {
     min-width: 350px;  /* Ensure readability */
 }
 
+/* Trading System Styles */
+.commodity-header {
+    font-family: 'Orbitron', monospace;
+    font-size: 14px;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-xs);
+    border-bottom: 1px solid var(--accent-border);
+}
+
+.commodity-section {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin: var(--spacing-md) 0 var(--spacing-sm) 0;
+    padding-left: var(--spacing-xs);
+}
+
+.commodity-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+    background: var(--bg-medium);
+    border: 1px solid var(--border-subtle);
+    transition: all 0.2s;
+}
+
+.commodity-item:hover {
+    border-color: var(--accent-border);
+    background: var(--accent-subtle);
+}
+
+.commodity-icon {
+    font-size: 18px;
+    margin-right: var(--spacing-sm);
+}
+
+.commodity-name {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.commodity-price {
+    font-size: 12px;
+    color: var(--accent-primary);
+    font-weight: 600;
+    margin-right: var(--spacing-md);
+    font-variant-numeric: tabular-nums;
+}
+
+.commodity-price.profit {
+    color: var(--status-success);
+}
+
+.commodity-price.loss {
+    color: var(--status-danger);
+}
+
+.trade-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    padding: 6px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    min-width: 80px;
+}
+
+.trade-btn:hover:not(:disabled) {
+    background: var(--accent-subtle);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.trade-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    color: var(--text-dim);
+}
+
+.trade-btn.buy-btn:hover:not(:disabled) {
+    background: rgba(0, 255, 136, 0.1);
+    border-color: var(--status-success);
+    color: var(--status-success);
+}
+
+.trade-btn.sell-btn:hover:not(:disabled) {
+    background: rgba(255, 170, 0, 0.1);
+    border-color: var(--status-warning);
+    color: var(--status-warning);
+}
+
 #commodityList, #shopList {
     display: flex;
     flex-direction: column;

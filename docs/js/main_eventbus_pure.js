@@ -15,10 +15,12 @@ import AudioSystem from './systems/AudioSystem.js';
 import UISystem from './systems/UISystem.js';
 import WeaponSystem from './systems/WeaponSystem.js';
 import SpawnSystem from './systems/SpawnSystem.js';
-// import { SaveSystem } from './systems/saveSystem.js';  // Commented out for now
+import { SaveSystem } from './systems/saveSystem.js';
+import TradingSystem from './systems/TradingSystem.js';
+import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personalities
 
-// Import game data
-import { planets, npcTypes, commodities, shopInventory, missions } from './data/gameData.js';
+// We'll import game data dynamically in the initialization function
+// to ensure it's available when needed
 
 console.log('[EventBus] Module loaded - Starting pure EventBus game initialization...');
 window.eventBusModuleLoaded = true;
@@ -33,13 +35,21 @@ const systems = {};
 /**
  * Initialize complete game state in StateManager
  */
-function initializeGameState() {
+async function initializeGameState() {
     const state = stateManager.state;
+    
+    // Import game data dynamically
+    const gameDataModule = await import('./data/gameData.js');
+    const planetsData = gameDataModule.planets;
+    const missionsData = gameDataModule.missions;
+    
+    console.log('[EventBus] initializeGameState called');
+    console.log('[EventBus] planets loaded:', planetsData?.length || 'NO');
     
     // Initialize ship
     state.ship = {
         x: 0, y: 0, vx: 0, vy: 0,
-        angle: 0, thrust: 0.004, maxSpeed: 0.45,
+        angle: 0, thrust: 0.012, maxSpeed: 0.8,
         fuel: 100, maxFuel: 100,
         credits: 250,
         tutorialStage: 'start',
@@ -52,7 +62,7 @@ function initializeGameState() {
         weaponSwitchPressed: false,
         kills: 0,
         cargo: [], cargoCapacity: 10,
-        weapons: [{ type: 'laser', damage: 5, cooldown: 20 }], 
+        weapons: [], 
         currentWeapon: 0,
         shield: 0, maxShield: 0,
         engineLevel: 1, weaponLevel: 1,
@@ -67,7 +77,8 @@ function initializeGameState() {
     state.gameTime = 0;
     
     // Initialize entities
-    state.planets = planets;
+    state.planets = planetsData;
+    console.log('[EventBus] Assigned planets to state:', state.planets?.length);
     state.npcShips = [];
     state.asteroids = [];
     state.projectiles = [];
@@ -142,7 +153,7 @@ function initializeGameState() {
     state.missionSystem = {
         active: null,
         completed: [],
-        available: missions
+        available: missionsData
     };
     
     // Initialize spawn state
@@ -168,6 +179,11 @@ function initializeGameState() {
         entities: [],
         collisions: []
     };
+    
+    // Add compatibility property for audioSystem
+    state.audioSystem = null;       // Will be set after systems init
+    // Note: DO NOT create state.keys reference - it causes Proxy issues
+    // Systems should use state.input.keys directly
     
     console.log('[EventBus] Game state initialized in StateManager');
 }
@@ -241,22 +257,8 @@ function setupEventHandlers() {
         }
     });
     
-    // Combat events
-    eventBus.on(GameEvents.INPUT_FIRE, (data) => {
-        const state = stateManager.state;
-        if (data && data.active && state.ship.weaponCooldown <= 0 && state.ship.weapons.length > 0) {
-            const weapon = state.ship.weapons[state.ship.currentWeapon];
-            
-            eventBus.emit(GameEvents.WEAPON_FIRE, {
-                shooter: state.ship,
-                angle: state.ship.angle,
-                isPlayer: true,
-                weapon: weapon
-            });
-            
-            state.ship.weaponCooldown = weapon.cooldown;
-        }
-    });
+    // Combat events - handled by WeaponSystem now
+    // The WeaponSystem listens to INPUT_FIRE and processes it
     
     // Weapon switching
     eventBus.on(GameEvents.INPUT_SWITCH_WEAPON, () => {
@@ -367,13 +369,32 @@ async function initializeSystems() {
         console.error('❌ SpawnSystem failed:', e);
     }
     
-    // SaveSystem temporarily disabled due to import issue
-    // try {
-    //     systems.save = new SaveSystem();
-    //     console.log('✅ SaveSystem initialized');
-    // } catch (e) {
-    //     console.error('❌ SaveSystem failed:', e);
-    // }
+    try {
+        systems.save = new SaveSystem();
+        console.log('✅ SaveSystem initialized');
+    } catch (e) {
+        console.error('❌ SaveSystem failed:', e);
+    }
+    
+    try {
+        systems.trading = new TradingSystem();
+        await systems.trading.init();
+        window.tradingSystem = systems.trading; // For onclick handlers
+        console.log('✅ TradingSystem initialized');
+    } catch (e) {
+        console.error('❌ TradingSystem failed:', e);
+    }
+    
+    try {
+        systems.npc = new NPCSystem();
+        await systems.npc.init();
+        console.log('✅ NPCSystem initialized with full AI');
+    } catch (e) {
+        console.error('❌ NPCSystem failed:', e);
+    }
+    
+    // Set audioSystem reference in state for compatibility
+    stateManager.state.audioSystem = systems.audio;
     
     return systems;
 }
@@ -385,13 +406,20 @@ async function initGame() {
     console.log('[EventBus] initGame() called - Initializing pure EventBus game...');
     window.eventBusInitStarted = true;
     
+    // Import and verify game data
+    const gameDataModule = await import('./data/gameData.js');
+    console.log('[EventBus] Verifying imports:');
+    console.log('  - planets:', gameDataModule.planets?.length || 'MISSING');
+    console.log('  - missions:', gameDataModule.missions?.length || 'MISSING');
+    console.log('  - npcTypes:', Object.keys(gameDataModule.npcTypes || {}).length || 'MISSING');
+    
     // Set canvas size
     const canvas = document.getElementById('gameCanvas');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight - 150;
     
     // Initialize game state
-    initializeGameState();
+    await initializeGameState();
     
     // Initialize systems
     await initializeSystems();
@@ -428,7 +456,7 @@ async function initGame() {
     });
     
     // Check for saved game
-    if (false && systems.save && systems.save.hasSave()) {  // Temporarily disabled
+    if (systems.save && systems.save.hasSave()) {
         const loadPrompt = document.createElement('div');
         loadPrompt.style.cssText = `
             position: fixed;
@@ -542,3 +570,10 @@ if (document.readyState === 'loading') {
 
 // Export for debugging (but not required for operation)
 export { eventBus, stateManager, systems };
+
+// Also expose globally for debugging in test environment
+if (window.location.pathname.includes('test-pure')) {
+    window.eventBus = eventBus;
+    window.stateManager = stateManager;
+    window.systems = systems;
+}

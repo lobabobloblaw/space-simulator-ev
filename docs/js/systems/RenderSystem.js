@@ -1,5 +1,6 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { ProceduralPlanetRenderer } from './proceduralPlanetRenderer.js';
 
 /**
  * RenderSystem - Handles all visual rendering for the game
@@ -30,6 +31,9 @@ export class RenderSystem {
         this.minimapCtx = this.minimapCanvas ? this.minimapCanvas.getContext('2d') : null;
         this.minimapScale = 0.018;
         
+        // Initialize procedural planet renderer
+        this.planetRenderer = new ProceduralPlanetRenderer();
+        
         // Generate stars on creation (reduced for performance)
         this.generateStars();
         
@@ -48,6 +52,16 @@ export class RenderSystem {
         
         // Set initial canvas size
         this.resizeCanvas();
+        
+        // Initialize planets with procedural generation
+        // We'll do this after a small delay to ensure state is ready
+        setTimeout(() => {
+            const state = this.stateManager.state;
+            if (state.planets && state.planets.length > 0) {
+                console.log('[RenderSystem] Initializing procedural planets:', state.planets.length);
+                this.planetRenderer.initializePlanets(state.planets);
+            }
+        }, 100);
         
         console.log('[RenderSystem] Initialized');
     }
@@ -273,24 +287,12 @@ export class RenderSystem {
         const planets = state.planets || [];
         
         for (let planet of planets) {
-            // Use procedural planet renderer if available
-            if (window.planetRenderer) {
-                window.planetRenderer.renderPlanet(this.ctx, planet, Date.now());
-            } else {
-                // Fallback simple planet rendering
-                const gradient = this.ctx.createRadialGradient(
-                    planet.x, planet.y, 0,
-                    planet.x, planet.y, planet.radius
-                );
-                gradient.addColorStop(0, planet.color || '#888');
-                gradient.addColorStop(0.7, planet.color || '#888');
-                gradient.addColorStop(1, '#000');
-                
-                this.ctx.fillStyle = gradient;
-                this.ctx.beginPath();
-                this.ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
-                this.ctx.fill();
+            // Use procedural planet renderer
+            // Check if planet has been initialized, if not, initialize it now
+            if (!this.planetRenderer.planetCache.has(planet.name)) {
+                this.planetRenderer.generateProceduralPlanet(planet);
             }
+            this.planetRenderer.renderPlanet(this.ctx, planet, Date.now());
             
             // Planet name
             this.ctx.save();
@@ -437,22 +439,201 @@ export class RenderSystem {
                 this.ctx.fill();
             }
             
+            // State glow effect based on NPC state
+            if (npc.state && this.showEffects) {
+                this.ctx.save();
+                let glowColor = null;
+                let glowIntensity = 0.3;
+                
+                switch(npc.state) {
+                    case 'pursuing':
+                        glowColor = 'rgba(255, 100, 100, ';
+                        glowIntensity = 0.4;
+                        break;
+                    case 'fleeing':
+                        glowColor = 'rgba(255, 255, 100, ';
+                        glowIntensity = 0.3;
+                        break;
+                    case 'warning':
+                        glowColor = 'rgba(255, 165, 0, ';
+                        glowIntensity = 0.5 + Math.sin(Date.now() * 0.01) * 0.2;
+                        break;
+                    case 'patrolling':
+                        glowColor = 'rgba(100, 200, 255, ';
+                        glowIntensity = 0.2;
+                        break;
+                }
+                
+                if (glowColor) {
+                    const glowGradient = this.ctx.createRadialGradient(
+                        0, 0, npc.size,
+                        0, 0, npc.size * 2
+                    );
+                    glowGradient.addColorStop(0, glowColor + glowIntensity + ')');
+                    glowGradient.addColorStop(1, 'transparent');
+                    
+                    this.ctx.fillStyle = glowGradient;
+                    this.ctx.beginPath();
+                    this.ctx.arc(0, 0, npc.size * 2, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
+                this.ctx.restore();
+            }
+            
             // Ship body
             this.renderNPCShip(npc);
             
             this.ctx.restore();
             
+            // State indicator icon
+            if (npc.state) {
+                this.renderNPCStateIndicator(npc);
+            }
+            
+            // Communication bubble
+            if (npc.message && npc.messageTime) {
+                this.renderNPCMessage(npc);
+            }
+            
             // Health bar
             if (npc.health < npc.maxHealth) {
                 const barWidth = 30;
                 const barHeight = 3;
+                const barY = npc.message ? npc.y - npc.size - 45 : npc.y - npc.size - 10;
                 this.ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-                this.ctx.fillRect(npc.x - barWidth/2, npc.y - npc.size - 10, barWidth, barHeight);
+                this.ctx.fillRect(npc.x - barWidth/2, barY, barWidth, barHeight);
                 this.ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-                this.ctx.fillRect(npc.x - barWidth/2, npc.y - npc.size - 10, 
+                this.ctx.fillRect(npc.x - barWidth/2, barY, 
                                 barWidth * (npc.health / npc.maxHealth), barHeight);
             }
         }
+    }
+    
+    /**
+     * Render NPC state indicator
+     */
+    renderNPCStateIndicator(npc) {
+        const iconY = npc.y + npc.size + 15;
+        const iconSize = 8;
+        
+        this.ctx.save();
+        this.ctx.translate(npc.x, iconY);
+        
+        switch(npc.state) {
+            case 'pursuing':
+                // Exclamation mark in red
+                this.ctx.fillStyle = '#ff4444';
+                this.ctx.fillRect(-1, -iconSize/2, 2, iconSize * 0.6);
+                this.ctx.beginPath();
+                this.ctx.arc(0, iconSize/2 - 1, 1.5, 0, Math.PI * 2);
+                this.ctx.fill();
+                break;
+                
+            case 'fleeing':
+                // Arrows pointing away
+                this.ctx.strokeStyle = '#ffff44';
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(-iconSize, 0);
+                this.ctx.lineTo(-iconSize/2, -iconSize/2);
+                this.ctx.moveTo(-iconSize, 0);
+                this.ctx.lineTo(-iconSize/2, iconSize/2);
+                this.ctx.moveTo(iconSize, 0);
+                this.ctx.lineTo(iconSize/2, -iconSize/2);
+                this.ctx.moveTo(iconSize, 0);
+                this.ctx.lineTo(iconSize/2, iconSize/2);
+                this.ctx.stroke();
+                break;
+                
+            case 'warning':
+                // Warning triangle
+                this.ctx.strokeStyle = '#ff8800';
+                this.ctx.fillStyle = 'rgba(255, 136, 0, 0.3)';
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, -iconSize);
+                this.ctx.lineTo(-iconSize, iconSize);
+                this.ctx.lineTo(iconSize, iconSize);
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+                break;
+                
+            case 'patrolling':
+                // Small rotating circle segments
+                const angle = Date.now() * 0.002;
+                this.ctx.strokeStyle = '#4488ff';
+                this.ctx.lineWidth = 2;
+                this.ctx.rotate(angle);
+                for (let i = 0; i < 3; i++) {
+                    this.ctx.beginPath();
+                    this.ctx.arc(0, 0, iconSize/2, i * Math.PI * 2/3, i * Math.PI * 2/3 + Math.PI/4);
+                    this.ctx.stroke();
+                }
+                break;
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render NPC communication bubble
+     */
+    renderNPCMessage(npc) {
+        const fadeTime = 3000; // Match NPCSystem message duration
+        const timeSinceMessage = Date.now() - npc.messageTime;
+        const alpha = Math.max(0, 1 - (timeSinceMessage / fadeTime));
+        
+        if (alpha <= 0) return;
+        
+        this.ctx.save();
+        
+        // Measure text
+        this.ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        const textWidth = this.ctx.measureText(npc.message).width;
+        const bubbleWidth = textWidth + 16;
+        const bubbleHeight = 20;
+        const bubbleX = npc.x - bubbleWidth / 2;
+        const bubbleY = npc.y - npc.size - 35;
+        
+        // Draw speech bubble
+        this.ctx.globalAlpha = alpha;
+        
+        // Bubble background
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.strokeStyle = npc.color;
+        this.ctx.lineWidth = 1.5;
+        
+        // Rounded rectangle for bubble
+        const radius = 4;
+        this.ctx.beginPath();
+        this.ctx.moveTo(bubbleX + radius, bubbleY);
+        this.ctx.lineTo(bubbleX + bubbleWidth - radius, bubbleY);
+        this.ctx.quadraticCurveTo(bubbleX + bubbleWidth, bubbleY, bubbleX + bubbleWidth, bubbleY + radius);
+        this.ctx.lineTo(bubbleX + bubbleWidth, bubbleY + bubbleHeight - radius);
+        this.ctx.quadraticCurveTo(bubbleX + bubbleWidth, bubbleY + bubbleHeight, bubbleX + bubbleWidth - radius, bubbleY + bubbleHeight);
+        
+        // Tail pointing to NPC
+        this.ctx.lineTo(npc.x + 5, bubbleY + bubbleHeight);
+        this.ctx.lineTo(npc.x, bubbleY + bubbleHeight + 5);
+        this.ctx.lineTo(npc.x - 5, bubbleY + bubbleHeight);
+        
+        this.ctx.lineTo(bubbleX + radius, bubbleY + bubbleHeight);
+        this.ctx.quadraticCurveTo(bubbleX, bubbleY + bubbleHeight, bubbleX, bubbleY + bubbleHeight - radius);
+        this.ctx.lineTo(bubbleX, bubbleY + radius);
+        this.ctx.quadraticCurveTo(bubbleX, bubbleY, bubbleX + radius, bubbleY);
+        this.ctx.closePath();
+        
+        this.ctx.fill();
+        this.ctx.stroke();
+        
+        // Text
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(npc.message, npc.x, bubbleY + bubbleHeight / 2);
+        
+        this.ctx.restore();
     }
     
     /**

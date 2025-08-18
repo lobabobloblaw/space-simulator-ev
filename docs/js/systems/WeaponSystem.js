@@ -45,6 +45,9 @@ export class WeaponSystem {
      * Subscribe to game events
      */
     subscribeToEvents() {
+        // Input events - WeaponSystem directly handles weapon input through update()
+        // No need to subscribe to INPUT_FIRE as we handle it in update()
+        
         // Weapon events
         this.eventBus.on(GameEvents.WEAPON_FIRE, this.handleWeaponFire);
         this.eventBus.on(GameEvents.INPUT_SWITCH_WEAPON, this.handleWeaponSwitch);
@@ -349,8 +352,19 @@ export class WeaponSystem {
     processWeaponInput(ship, keys, audioSystem) {
         if (!ship || !keys) return;
         
+        // Keys should always be a Set in Pure EventBus
+        const hasKey = (key) => {
+            const checkKey = key.toLowerCase();
+            // Now that StateManager doesn't proxy Sets, this should work
+            if (keys instanceof Set) {
+                return keys.has(checkKey);
+            }
+            // Fallback for object-based keys (shouldn't happen in Pure EventBus)
+            return keys[checkKey] || keys['Key' + checkKey.toUpperCase()];
+        };
+        
         // Fire weapon
-        if (keys['KeyF'] && ship.weaponCooldown <= 0 && ship.weapons && ship.weapons.length > 0) {
+        if (hasKey('f') && ship.weaponCooldown <= 0 && ship.weapons && ship.weapons.length > 0) {
             const weapon = ship.weapons[ship.currentWeapon];
             
             // Fire projectile
@@ -359,8 +373,8 @@ export class WeaponSystem {
             // Set cooldown
             ship.weaponCooldown = weapon.cooldown;
             
-            // Play sound
-            if (audioSystem) {
+            // Play sound (with proper context binding)
+            if (audioSystem && audioSystem.playLaser) {
                 audioSystem.playLaser(weapon.type);
             }
             
@@ -373,7 +387,7 @@ export class WeaponSystem {
         }
         
         // Switch weapons
-        if (keys['KeyQ'] && !ship.weaponSwitchPressed && ship.weapons && ship.weapons.length > 1) {
+        if (hasKey('q') && !ship.weaponSwitchPressed && ship.weapons && ship.weapons.length > 1) {
             ship.currentWeapon = (ship.currentWeapon + 1) % ship.weapons.length;
             ship.weaponSwitchPressed = true;
             
@@ -382,7 +396,7 @@ export class WeaponSystem {
                 ship: ship,
                 newWeapon: ship.weapons[ship.currentWeapon]
             });
-        } else if (!keys['KeyQ']) {
+        } else if (!hasKey('q')) {
             ship.weaponSwitchPressed = false;
         }
         
@@ -450,6 +464,11 @@ export class WeaponSystem {
      * Update weapon system (called each frame)
      */
     update(state, deltaTime) {
+        // Sync projectiles from state if they exist
+        if (state && state.projectiles) {
+            this.projectiles = state.projectiles;
+        }
+        
         // Update projectiles if we have access to game state
         if (state) {
             this.updateProjectiles(
@@ -462,8 +481,9 @@ export class WeaponSystem {
         }
         
         // Process weapon input for player
-        if (state && state.ship && state.keys) {
-            this.processWeaponInput(state.ship, state.keys, state.audioSystem);
+        if (state && state.ship && state.input && state.input.keys) {
+            // Always use state.input.keys directly to avoid Proxy issues
+            this.processWeaponInput(state.ship, state.input.keys, state.audioSystem);
         }
     }
     
@@ -473,9 +493,7 @@ export class WeaponSystem {
     syncState() {
         // Store projectiles in state
         const state = this.stateManager.state;
-        if (state.weapons) {
-            state.weapons.projectiles = this.projectiles;
-        }
+        state.projectiles = this.projectiles;
     }
     
     /**

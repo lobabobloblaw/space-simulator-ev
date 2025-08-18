@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Module Test</title>
+</head>
+<body>
+    <h1>Module Loading Test</h1>
+    <div id="status">Loading...</div>
+    
+    <script type="module">
+        console.log('Module script running');
+        document.getElementById('status').textContent = 'Module loaded successfully!';
+        window.moduleTest = true;
+    </script>
+    
+    <script>
+        setTimeout(() => {
+            const nonModule = document.createElement('div');
+            nonModule.textContent = 'Non-module check: ' + (window.moduleTest ? 'Module worked' : 'Module failed');
+            document.body.appendChild(nonModule);
+        }, 1000);
+    </script>
+</body>
+</html>

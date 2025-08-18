@@ -1,70 +1,83 @@
-# QUICK REFERENCE - Galaxy Trader Current State
+# GALAXY TRADER - QUICK REFERENCE
 
-## Current Status: August 18, 2025
-- **Game Status**: STABLE & PLAYABLE on old architecture ✅
-- **EventBus Migration**: COMPLETE but deployment blocked ⚠️
-- **Pure StateManager**: Implemented in PhysicsSystem & RenderSystem ✅
-- **Production**: Using `main.js` (old architecture)
+## 🎮 Game URLs
+- **Production**: http://localhost:8000/docs/
+- **GitHub Pages**: https://lobabobloblaw.github.io/space-simulator-ev/
+- **Original Backup**: http://localhost:8000/docs/index_old_backup.html
 
-## Quick Commands
+## 📁 Project Structure
+```
+/Users/alexvoigt/Documents/Claude/space-simulator-ev/
+├── docs/                       # Game files (served via GitHub Pages)
+│   ├── index.html             # Main game (Pure EventBus)
+│   ├── index_old_backup.html  # Original version backup
+│   ├── css/main.css           # Game styles
+│   └── js/
+│       ├── main_eventbus_pure.js  # Pure EventBus entry point
+│       ├── main.js                # Original entry point
+│       ├── core/              # EventBus architecture
+│       │   ├── EventBus.js
+│       │   ├── StateManager.js
+│       │   └── GameLoop.js
+│       ├── systems/           # Game systems
+│       │   ├── NPCSystem.js      # Full NPC AI
+│       │   ├── PhysicsSystem.js  # Movement & collision
+│       │   ├── RenderSystem.js   # Graphics
+│       │   ├── WeaponSystem.js   # Combat
+│       │   ├── TradingSystem.js  # Economy
+│       │   └── allSystems.js     # Legacy (original code)
+│       └── data/
+│           └── gameData.js    # Planets, NPCs, items
+```
+
+## 🚀 Current Ship Stats
+```javascript
+// Player ship (balanced for fun gameplay)
+thrust: 0.012      // 3x original value
+maxSpeed: 0.8      // 78% faster than original
+turnSpeed: 0.025   // 2x faster turning
+weapons: []        // Starts empty - must buy!
+credits: 250       // Starting money
+```
+
+## 🎯 Key Commands
 ```bash
-# Start development
+# Start local server
 cd /Users/alexvoigt/Documents/Claude/space-simulator-ev
 python3 -m http.server 8000
 
-# Test PRODUCTION version (stable)
+# Deploy to GitHub Pages
+git add .
+git commit -m "Update message"
+git push origin main
+
+# Test locally
 open http://localhost:8000/docs/
-
-# Test EventBus with globals (WORKS)
-open http://localhost:8000/docs/eventbus-working.html
-
-# View live site
-open https://lobabobloblaw.github.io/space-simulator-ev/
 ```
 
-## Architecture Status
+## ⚙️ System Architecture
+- **Pure EventBus**: All communication via events
+- **StateManager**: Single source of truth
+- **No Window Globals**: Clean architecture
+- **Module Pattern**: ES6 modules throughout
 
-### Three Versions:
-1. **OLD** (`main.js`) - IN PRODUCTION ✅
-2. **HYBRID** (EventBus + globals) - WORKS ✅
-3. **PURE** (EventBus only) - COMPLETE BUT WON'T LOAD ⚠️
+## 🐛 Common Issues & Fixes
 
-## The Issue
-- Pure EventBus (`main_eventbus_pure.js`) won't initialize
-- Likely cause: SaveSystem import case sensitivity
-- Hybrid approach works perfectly
+### Ship Too Slow?
+Check `thrust` (should be 0.012) and `maxSpeed` (should be 0.8)
 
-## File Structure
-```
-/docs/
-├── index.html              # Uses main.js (stable)
-├── eventbus-working.html   # Hybrid approach (WORKS)
-├── js/
-│   ├── main.js            # OLD architecture (current)
-│   ├── main_eventbus_pure.js  # PURE (has loading issue)
-│   ├── core/              # EventBus infrastructure ✅
-│   └── systems/           
-│       ├── PhysicsSystem.js  # Updated for pure ✅
-│       ├── RenderSystem.js   # Updated for pure ✅
-│       └── [others]          # Need updating for pure
-```
+### Player Has Weapon at Start?
+Check line 64 of `main_eventbus_pure.js` - should be `weapons: []`
 
-## Next Session Priority
-1. Fix SaveSystem import case issue (5 min)
-2. OR deploy hybrid approach (5 min)
-3. OR keep current stable version (0 min)
+### NPCs Not Spawning?
+Check `SpawnSystem.js` is initialized in `main_eventbus_pure.js`
 
-## Controls
-- **WASD** - Move ship
-- **F** - Fire weapon
-- **L** - Land on planet
-- **Q** - Switch weapons
-- **S** - Save game
-- **O** - Load game
-- **M** - Toggle sound
+### Can't Save/Load?
+LocalStorage must be enabled, check browser console for errors
 
-## Remember
-- EventBus architecture is COMPLETE
-- All systems are converted
-- Just need to fix module loading
-- Game is stable and playable now
+## 📝 Session Handoffs
+Latest: SESSION_33_HANDOFF.md
+Previous: SESSION_31_HANDOFF.md, SESSION_30_HANDOFF.md
+
+---
+*Quick reference for Galaxy Trader development*

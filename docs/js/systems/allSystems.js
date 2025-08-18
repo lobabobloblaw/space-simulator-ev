@@ -397,10 +397,10 @@ export function updateShip(ship, game, audioSystem, projectiles, pickups, explos
     
     // Rotation
     if (game.keys['ArrowLeft'] || game.keys['KeyA']) {
-        ship.angle -= 0.012;
+        ship.angle -= 0.025;
     }
     if (game.keys['ArrowRight'] || game.keys['KeyD']) {
-        ship.angle += 0.012;
+        ship.angle += 0.025;
     }
     
     // Thrust
@@ -2355,11 +2355,11 @@ export function buyUpgrade(itemId, ship, shopInventory) {
         
         // Apply engine upgrades
         if (item.value === 2) {
-            ship.thrust = 0.007 * 1.5;  // 50% boost
-            ship.maxSpeed = 0.45 * 1.3; // 30% boost
+        ship.thrust = 0.012 * 1.5;  // 50% boost
+        ship.maxSpeed = 0.8 * 1.3; // 30% boost
         } else if (item.value === 3) {
-            ship.thrust = 0.007 * 2;    // 100% boost
-            ship.maxSpeed = 0.45 * 1.6; // 60% boost
+        ship.thrust = 0.012 * 2;    // 100% boost
+        ship.maxSpeed = 0.8 * 1.6; // 60% boost
         }
         
     } else if (item.type === 'cargo') {

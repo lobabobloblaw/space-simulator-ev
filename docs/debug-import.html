@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Game Debug</title>
+    <link rel="stylesheet" href="./css/main.css">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameHUD" style="display:none"></div>
+    <div id="landingOverlay" style="display:none"></div>
+    
+    <div id="debug" style="position:fixed; top:0; left:0; background:black; color:lime; padding:10px; font-family:monospace; z-index:9999; max-width:600px; max-height:400px; overflow:auto;">
+        <h3>Debug Console</h3>
+        <div id="debugLog"></div>
+    </div>
+    
+    <script type="module">
+        const log = (msg, type = 'info') => {
+            const debugLog = document.getElementById('debugLog');
+            const entry = document.createElement('div');
+            entry.style.color = type === 'error' ? 'red' : type === 'warn' ? 'yellow' : 'lime';
+            entry.textContent = `[${type.toUpperCase()}] ${msg}`;
+            debugLog.appendChild(entry);
+            console.log(msg);
+        };
+        
+        window.onerror = (msg, source, lineno, colno, error) => {
+            log(`Error: ${msg} at ${source}:${lineno}:${colno}`, 'error');
+            log(`Stack: ${error?.stack || 'no stack'}`, 'error');
+        };
+        
+        log('Starting import of main.js...');
+        
+        import('./js/main.js')
+            .then(module => {
+                log('✓ main.js imported successfully');
+                log(`Module keys: ${Object.keys(module).join(', ')}`);
+                
+                // Check what was initialized
+                setTimeout(() => {
+                    log(`window.ship: ${window.ship ? 'exists' : 'missing'}`);
+                    log(`window.game: ${window.game ? 'exists' : 'missing'}`);
+                    log(`window.planets: ${window.planets ? 'exists' : 'missing'}`);
+                }, 1000);
+            })
+            .catch(error => {
+                log(`✗ Failed to import main.js: ${error.message}`, 'error');
+                log(`Stack trace: ${error.stack}`, 'error');
+            });
+    </script>
+</body>
+</html>

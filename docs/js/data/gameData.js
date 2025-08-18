@@ -196,7 +196,11 @@ export const missions = [
         target: 'pirate',
         count: 1,
         reward: 200,
-        isComplete: function() { return window.ship.kills >= 1; }
+        isComplete: function(ship) { 
+            // Support both window.ship (hybrid) and passed ship (pure)
+            const s = ship || window.ship;
+            return s ? s.kills >= 1 : false;
+        }
     },
     {
         id: 'trader',
@@ -205,7 +209,10 @@ export const missions = [
         description: 'Earn 500 credits from trading',
         targetCredits: 750,
         reward: 300,
-        isComplete: function() { return window.ship.credits >= 750; }
+        isComplete: function(ship) { 
+            const s = ship || window.ship;
+            return s ? s.credits >= 750 : false;
+        }
     },
     {
         id: 'bounty_hunter',
@@ -215,6 +222,9 @@ export const missions = [
         target: 'pirate',
         count: 3,
         reward: 500,
-        isComplete: function() { return window.ship.kills >= 3; }
+        isComplete: function(ship) { 
+            const s = ship || window.ship;
+            return s ? s.kills >= 3 : false;
+        }
     }
 ];
