@@ -2382,7 +2382,7 @@ export function buyUpgrade(itemId, ship, shopInventory) {
 }
 
 // Export SaveSystem
-export { SaveSystem } from './SaveSystem.js';
+export { SaveSystem } from './saveSystem.js';
 
 // Export TouchControls
 export { TouchControls } from './touchControls.js';
