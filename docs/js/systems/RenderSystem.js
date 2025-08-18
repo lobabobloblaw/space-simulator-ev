@@ -269,8 +269,8 @@ export class RenderSystem {
      * Render planets
      */
     renderPlanets(state) {
-        // Get planets from window or state (temporary during migration)
-        const planets = window.planets || state.planets || [];
+        // Get planets from state
+        const planets = state.planets || [];
         
         for (let planet of planets) {
             // Use procedural planet renderer if available
@@ -322,7 +322,7 @@ export class RenderSystem {
      * Render asteroids
      */
     renderAsteroids(state) {
-        const asteroids = window.asteroids || state.asteroids || [];
+        const asteroids = state.asteroids || [];
         
         for (let asteroid of asteroids) {
             this.ctx.save();
@@ -372,7 +372,7 @@ export class RenderSystem {
      * Render pickups
      */
     renderPickups(state) {
-        const pickups = window.pickups || state.pickups || [];
+        const pickups = state.pickups || [];
         
         for (let pickup of pickups) {
             const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
@@ -410,7 +410,7 @@ export class RenderSystem {
      * Render NPC ships
      */
     renderNPCs(state) {
-        const npcShips = window.npcShips || state.npcs || [];
+        const npcShips = state.npcShips || [];
         
         for (let npc of npcShips) {
             this.ctx.save();
@@ -640,7 +640,7 @@ export class RenderSystem {
      * Render projectiles
      */
     renderProjectiles(state) {
-        const projectiles = window.projectiles || state.projectiles || [];
+        const projectiles = state.projectiles || [];
         
         for (let proj of projectiles) {
             // Trail effect
@@ -696,7 +696,20 @@ export class RenderSystem {
         this.ctx.rotate(ship.angle);
         
         // Engine thrust effect
-        if (state.input.keys.has('w') || state.input.keys.has('arrowup')) {
+        // Check if thrust keys are pressed (handle proxy-wrapped Set)
+        let isThrusting = false;
+        try {
+            const keys = state.input?.keys;
+            if (keys) {
+                // Convert to array to avoid proxy issues with Set methods
+                const keyArray = Array.from(keys);
+                isThrusting = keyArray.includes('w') || keyArray.includes('arrowup');
+            }
+        } catch (e) {
+            // Silently fail if there's an issue with key checking
+        }
+        
+        if (isThrusting) {
             if (this.showEffects) {
                 const flicker = Math.random();
                 const thrustGradient = this.ctx.createLinearGradient(
@@ -787,7 +800,7 @@ export class RenderSystem {
      * Render explosions
      */
     renderExplosions(state) {
-        const explosions = window.explosions || state.explosions || [];
+        const explosions = state.explosions || [];
         
         for (let exp of explosions) {
             const progress = exp.lifetime / exp.maxLifetime;
@@ -832,7 +845,7 @@ export class RenderSystem {
      * Render warp effects
      */
     renderWarpEffects(state) {
-        const warpEffects = window.warpEffects || state.warpEffects || [];
+        const warpEffects = state.warpEffects || [];
         
         for (let effect of warpEffects) {
             const progress = effect.lifetime / effect.maxLifetime;
@@ -975,7 +988,7 @@ export class RenderSystem {
         }
         
         // Planets
-        const planets = window.planets || state.planets || [];
+        const planets = state.planets || [];
         this.minimapCtx.fillStyle = '#ffffff';
         this.minimapCtx.shadowColor = '#ffffff';
         this.minimapCtx.shadowBlur = 3;
@@ -992,7 +1005,7 @@ export class RenderSystem {
         this.minimapCtx.shadowBlur = 0;
         
         // NPCs
-        const npcShips = window.npcShips || state.npcs || [];
+        const npcShips = state.npcShips || [];
         this.minimapCtx.fillStyle = '#ffffff';
         for (let npc of npcShips) {
             const dx = (npc.x - state.ship.x) * this.minimapScale;

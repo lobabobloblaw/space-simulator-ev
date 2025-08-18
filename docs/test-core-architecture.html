@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Core Architecture Test</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: #0a0a0a;
+            color: #00ffff;
+            font-family: 'JetBrains Mono', monospace;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .test-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .test-panel {
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            padding: 20px;
+            border-radius: 4px;
+        }
+        
+        .test-panel h3 {
+            margin-top: 0;
+            color: #00ffff;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        
+        .test-result {
+            margin: 5px 0;
+            padding: 8px;
+            border-left: 3px solid #333;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .test-result.pass {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+        
+        .test-result.fail {
+            border-color: #ff0040;
+            color: #ff0040;
+        }
+        
+        .test-result.info {
+            border-color: #ffaa00;
+            color: #ffaa00;
+        }
+        
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .btn {
+            background: transparent;
+            color: #00ffff;
+            border: 1px solid #00ffff;
+            padding: 10px 20px;
+            margin: 0 10px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            background: rgba(0, 255, 255, 0.1);
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .stat {
+            text-align: center;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00ffff;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+        }
+        
+        pre {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+            padding: 10px;
+            overflow: auto;
+            font-size: 12px;
+            max-height: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 GALAXY TRADER</h1>
+        <h2>Core Architecture Test</h2>
+        <p>Testing the refactored modular architecture components</p>
+    </div>
+    
+    <div class="controls">
+        <button class="btn" onclick="runCoreTests()">Run Core Tests</button>
+        <button class="btn" onclick="runUtilityTests()">Run Utility Tests</button>
+        <button class="btn" onclick="runEventTest()">Demo Events</button>
+        <button class="btn" onclick="runStateTest()">Demo State</button>
+        <button class="btn" onclick="clearResults()">Clear Results</button>
+    </div>
+    
+    <div class="stats" id="stats">
+        <div class="stat">
+            <div class="stat-value" id="testsRun">0</div>
+            <div class="stat-label">Tests Run</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="testsPassed">0</div>
+            <div class="stat-label">Passed</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="testsFailed">0</div>
+            <div class="stat-label">Failed</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="coverage">0%</div>
+            <div class="stat-label">Coverage</div>
+        </div>
+    </div>
+    
+    <div class="test-grid">
+        <div class="test-panel">
+            <h3>Core Infrastructure Tests</h3>
+            <div id="coreResults"></div>
+        </div>
+        
+        <div class="test-panel">
+            <h3>Utility Tests</h3>
+            <div id="utilityResults"></div>
+        </div>
+        
+        <div class="test-panel">
+            <h3>Event System Demo</h3>
+            <div id="eventResults"></div>
+        </div>
+        
+        <div class="test-panel">
+            <h3>State Management Demo</h3>
+            <div id="stateResults"></div>
+        </div>
+    </div>
+    
+    <div class="test-panel" style="margin-top: 20px;">
+        <h3>Debug Output</h3>
+        <pre id="debugOutput"></pre>
+    </div>
+
+    <script type="module">
+        // Import the refactored modules
+        import { getEventBus, GameEvents } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        import { getGameLoop } from './js/core/GameLoop.js';
+        import { Vector2D } from './js/utils/Vector2D.js';
+        import { MathUtils } from './js/utils/MathUtils.js';
+        import { CollisionUtils } from './js/utils/CollisionUtils.js';
+        import { GameConstants } from './js/utils/Constants.js';
+
+        // Global test state
+        window.testState = {
+            testsRun: 0,
+            testsPassed: 0,
+            testsFailed: 0,
+            results: []
+        };
+
+        // Get instances
+        const eventBus = getEventBus();
+        const stateManager = getStateManager();
+        const gameLoop = getGameLoop();
+
+        // Enable debug mode
+        eventBus.setDebugMode(true);
+
+        // Log successful module loading
+        addDebugOutput('✅ All refactored modules loaded successfully!');
+        addDebugOutput(`📊 EventBus: ${eventBus.constructor.name}`);
+        addDebugOutput(`📊 StateManager: ${stateManager.constructor.name}`);
+        addDebugOutput(`📊 GameLoop: ${gameLoop.constructor.name}`);
+
+        // Make available for debugging
+        window.refactorDebug = {
+            eventBus,
+            stateManager,
+            gameLoop,
+            Vector2D,
+            MathUtils,
+            CollisionUtils,
+            GameConstants
+        };
+
+        // Test functions
+        window.runCoreTests = function() {
+            const tests = [
+                testEventBusBasics,
+                testEventBusAdvanced,
+                testStateManagerBasics,
+                testStateManagerShipState,
+                testStateManagerEntities,
+                testGameLoopBasics
+            ];
+
+            runTestSuite('Core Infrastructure', tests, 'coreResults');
+        };
+
+        window.runUtilityTests = function() {
+            const tests = [
+                testVector2DBasics,
+                testVector2DOperations,
+                testMathUtilsBasics,
+                testMathUtilsAdvanced,
+                testCollisionUtilsBasics,
+                testConstants
+            ];
+
+            runTestSuite('Utilities', tests, 'utilityResults');
+        };
+
+        window.runEventTest = function() {
+            clearPanel('eventResults');
+            
+            // Set up event listeners
+            let eventCount = 0;
+            eventBus.on('test.demo', (data) => {
+                eventCount++;
+                addResult('eventResults', `Event ${eventCount}: ${data.message}`, 'info');
+            });
+
+            // Emit some events
+            setTimeout(() => eventBus.emit('test.demo', { message: 'First event fired!' }), 100);
+            setTimeout(() => eventBus.emit('test.demo', { message: 'Second event fired!' }), 300);
+            setTimeout(() => eventBus.emit('test.demo', { message: 'Third event fired!' }), 500);
+            
+            addResult('eventResults', 'Event demo started...', 'info');
+        };
+
+        window.runStateTest = function() {
+            clearPanel('stateResults');
+            
+            // Test state changes
+            const ship = stateManager.getShip();
+            const originalCredits = ship.credits;
+            
+            addResult('stateResults', `Original credits: ${originalCredits}`, 'info');
+            
+            stateManager.updateShip('credits', 500);
+            addResult('stateResults', `Updated credits to: ${ship.credits}`, 'pass');
+            
+            stateManager.updateShip('health', 75);
+            addResult('stateResults', `Updated health to: ${ship.health}`, 'pass');
+            
+            // Test entities
+            const npcShips = stateManager.getEntities('npcShips');
+            stateManager.addEntity('npcShips', { x: 100, y: 200, type: 'pirate' });
+            addResult('stateResults', `Added NPC. Count: ${npcShips.length}`, 'pass');
+            
+            // Restore
+            stateManager.updateShip('credits', originalCredits);
+            stateManager.updateShip('health', 100);
+            stateManager.clearEntities('npcShips');
+            addResult('stateResults', 'State restored', 'info');
+        };
+
+        window.clearResults = function() {
+            clearPanel('coreResults');
+            clearPanel('utilityResults');
+            clearPanel('eventResults');
+            clearPanel('stateResults');
+            clearPanel('debugOutput');
+            resetStats();
+        };
+
+        // Test implementations
+        function testEventBusBasics() {
+            let eventFired = false;
+            let eventData = null;
+            
+            eventBus.on('test.basic', (data) => {
+                eventFired = true;
+                eventData = data;
+            });
+            
+            eventBus.emit('test.basic', { test: 'data' });
+            
+            if (!eventFired) throw new Error('Event not fired');
+            if (eventData.test !== 'data') throw new Error('Event data incorrect');
+            
+            return 'Event subscription and emission working';
+        }
+
+        function testEventBusAdvanced() {
+            let callCount = 0;
+            
+            const handler = () => callCount++;
+            
+            // Test multiple listeners
+            eventBus.on('test.multi', handler);
+            eventBus.on('test.multi', handler);
+            
+            eventBus.emit('test.multi');
+            
+            if (callCount !== 2) throw new Error('Multiple listeners not working');
+            
+            // Test once
+            eventBus.once('test.once', handler);
+            eventBus.emit('test.once');
+            eventBus.emit('test.once');
+            
+            if (callCount !== 3) throw new Error('Once listener fired multiple times');
+            
+            return 'Advanced event features working';
+        }
+
+        function testStateManagerBasics() {
+            const game = stateManager.getGame();
+            const ship = stateManager.getShip();
+            
+            if (!game || !ship) throw new Error('Basic state objects not available');
+            if (typeof game.camera !== 'object') throw new Error('Game camera not initialized');
+            if (typeof ship.x !== 'number') throw new Error('Ship position not initialized');
+            
+            return 'Basic state structure correct';
+        }
+
+        function testStateManagerShipState() {
+            const ship = stateManager.getShip();
+            const originalX = ship.x;
+            
+            stateManager.updateShip('x', 123);
+            if (ship.x !== 123) throw new Error('Ship state update failed');
+            
+            stateManager.updateShip('x', originalX);
+            if (ship.x !== originalX) throw new Error('Ship state restoration failed');
+            
+            return 'Ship state management working';
+        }
+
+        function testStateManagerEntities() {
+            const entities = stateManager.getEntities();
+            if (!entities.npcShips || !Array.isArray(entities.npcShips)) {
+                throw new Error('Entity arrays not initialized');
+            }
+            
+            const testEntity = { id: 'test', type: 'test' };
+            stateManager.addEntity('npcShips', testEntity);
+            
+            if (!entities.npcShips.includes(testEntity)) {
+                throw new Error('Entity addition failed');
+            }
+            
+            stateManager.removeEntity('npcShips', testEntity);
+            
+            if (entities.npcShips.includes(testEntity)) {
+                throw new Error('Entity removal failed');
+            }
+            
+            return 'Entity management working';
+        }
+
+        function testGameLoopBasics() {
+            if (typeof gameLoop.start !== 'function') throw new Error('GameLoop start method missing');
+            if (typeof gameLoop.stop !== 'function') throw new Error('GameLoop stop method missing');
+            if (typeof gameLoop.registerSystem !== 'function') throw new Error('GameLoop registerSystem method missing');
+            
+            // Test system registration
+            const mockSystem = { 
+                update: () => {},
+                name: 'MockSystem'
+            };
+            
+            gameLoop.registerSystem(mockSystem, 50);
+            const systems = gameLoop.getRegisteredSystems();
+            
+            if (!systems.some(s => s.name === 'MockSystem')) {
+                throw new Error('System registration failed');
+            }
+            
+            return 'GameLoop basic functionality working';
+        }
+
+        function testVector2DBasics() {
+            const v = new Vector2D(3, 4);
+            const magnitude = v.magnitude();
+            
+            if (Math.abs(magnitude - 5) > 0.001) throw new Error('Vector magnitude calculation incorrect');
+            
+            const v2 = new Vector2D(1, 1);
+            v2.normalize();
+            
+            if (Math.abs(v2.magnitude() - 1) > 0.001) throw new Error('Vector normalization failed');
+            
+            return 'Vector2D basic operations working';
+        }
+
+        function testVector2DOperations() {
+            const v1 = new Vector2D(2, 3);
+            const v2 = new Vector2D(1, 1);
+            
+            const result = Vector2D.add(v1, v2);
+            if (result.x !== 3 || result.y !== 4) throw new Error('Vector addition failed');
+            
+            const distance = v1.distanceTo(v2);
+            if (Math.abs(distance - Math.sqrt(5)) > 0.001) throw new Error('Distance calculation failed');
+            
+            return 'Vector2D advanced operations working';
+        }
+
+        function testMathUtilsBasics() {
+            if (MathUtils.clamp(15, 0, 10) !== 10) throw new Error('Clamp function failed');
+            if (MathUtils.lerp(0, 10, 0.5) !== 5) throw new Error('Lerp function failed');
+            if (Math.abs(MathUtils.degToRad(180) - Math.PI) > 0.001) throw new Error('Degree to radian conversion failed');
+            
+            return 'MathUtils basic functions working';
+        }
+
+        function testMathUtilsAdvanced() {
+            const angle1 = 0;
+            const angle2 = Math.PI * 1.5;
+            const diff = MathUtils.angleDifference(angle1, angle2);
+            
+            if (Math.abs(diff - (-Math.PI / 2)) > 0.001) throw new Error('Angle difference calculation failed');
+            
+            const smoothed = MathUtils.smoothStep(0.5);
+            if (Math.abs(smoothed - 0.5) > 0.001) throw new Error('Smooth step failed');
+            
+            return 'MathUtils advanced functions working';
+        }
+
+        function testCollisionUtilsBasics() {
+            const circle1 = { x: 0, y: 0, radius: 5 };
+            const circle2 = { x: 3, y: 4, radius: 5 };
+            const circle3 = { x: 20, y: 20, radius: 5 };
+            
+            if (!CollisionUtils.circleCircle(circle1, circle2)) throw new Error('Circle collision detection failed');
+            if (CollisionUtils.circleCircle(circle1, circle3)) throw new Error('False positive collision detected');
+            
+            const point = { x: 2, y: 2 };
+            if (!CollisionUtils.pointCircle(point, circle1)) throw new Error('Point in circle detection failed');
+            
+            return 'CollisionUtils basic functions working';
+        }
+
+        function testConstants() {
+            if (typeof GameConstants.SHIP.DEFAULT_SIZE !== 'number') throw new Error('Constants not loaded');
+            if (GameConstants.SHIP.DEFAULT_SIZE !== 8) throw new Error('Constant value incorrect');
+            if (!GameConstants.COLORS.SHIP_COLORS.player) throw new Error('Nested constants not available');
+            
+            return 'Constants properly loaded and accessible';
+        }
+
+        // Utility functions
+        function runTestSuite(suiteName, tests, resultElementId) {
+            clearPanel(resultElementId);
+            addResult(resultElementId, `Running ${suiteName} tests...`, 'info');
+            
+            let passed = 0;
+            let failed = 0;
+            
+            for (const test of tests) {
+                try {
+                    const result = test();
+                    addResult(resultElementId, `✅ ${test.name}: ${result}`, 'pass');
+                    passed++;
+                    window.testState.testsPassed++;
+                } catch (error) {
+                    addResult(resultElementId, `❌ ${test.name}: ${error.message}`, 'fail');
+                    failed++;
+                    window.testState.testsFailed++;
+                }
+                window.testState.testsRun++;
+            }
+            
+            addResult(resultElementId, `${suiteName} Results: ${passed} passed, ${failed} failed`, passed === tests.length ? 'pass' : 'fail');
+            updateStats();
+        }
+
+        function addResult(elementId, text, type) {
+            const element = document.getElementById(elementId);
+            const result = document.createElement('div');
+            result.className = `test-result ${type}`;
+            result.textContent = text;
+            element.appendChild(result);
+        }
+
+        function clearPanel(elementId) {
+            document.getElementById(elementId).innerHTML = '';
+        }
+
+        function addDebugOutput(text) {
+            const element = document.getElementById('debugOutput');
+            element.textContent += new Date().toLocaleTimeString() + ': ' + text + '\n';
+            element.scrollTop = element.scrollHeight;
+        }
+
+        function updateStats() {
+            document.getElementById('testsRun').textContent = window.testState.testsRun;
+            document.getElementById('testsPassed').textContent = window.testState.testsPassed;
+            document.getElementById('testsFailed').textContent = window.testState.testsFailed;
+            
+            const coverage = window.testState.testsRun > 0 ? 
+                Math.round((window.testState.testsPassed / window.testState.testsRun) * 100) : 0;
+            document.getElementById('coverage').textContent = coverage + '%';
+        }
+
+        function resetStats() {
+            window.testState = { testsRun: 0, testsPassed: 0, testsFailed: 0 };
+            updateStats();
+        }
+
+        // Initial status
+        addDebugOutput('🚀 Core Architecture Test Ready');
+        addDebugOutput('💡 Click buttons above to run tests');
+        addDebugOutput('🔧 Debug objects available at window.refactorDebug');
+
+        console.log('🚀 Galaxy Trader Core Architecture Test');
+        console.log('Available at window.refactorDebug:', window.refactorDebug);
+    </script>
+</body>
+</html>

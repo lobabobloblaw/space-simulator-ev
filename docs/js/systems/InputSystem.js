@@ -20,7 +20,6 @@ export class InputSystem {
             // Movement
             'w': 'thrust',
             'arrowup': 'thrust',
-            's': 'brake',
             'arrowdown': 'brake',
             ' ': 'brake',
             'a': 'turnLeft',
@@ -167,17 +166,17 @@ export class InputSystem {
             }
         }
         
-        // Special cases for save/load (uses actual keys, not mapped)
-        if (key === 's' && e.ctrlKey) {
+        // Special handling for save/load keys (S and O without modifiers)
+        if (key === 's' && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             this.eventBus.emit(GameEvents.GAME_SAVE);
-        } else if (key === 'o' && e.ctrlKey) {
+        } else if (key === 'o' && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             this.eventBus.emit(GameEvents.GAME_LOAD);
         }
         
         // Emit raw key event for systems that need it
-        this.eventBus.emit(GameEvents.INPUT_KEY_DOWN, { key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });
+        this.eventBus.emit(GameEvents.INPUT_KEY_DOWN, { key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
     }
     
     /**

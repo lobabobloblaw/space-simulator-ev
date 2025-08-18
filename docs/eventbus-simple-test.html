@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>EventBus Test</title>
+</head>
+<body>
+    <h1>EventBus Architecture Test</h1>
+    <div id="status">Loading...</div>
+    
+    <script type="module">
+        // Test if EventBus loads
+        import { getEventBus, GameEvents } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        
+        try {
+            const eventBus = getEventBus();
+            const stateManager = getStateManager();
+            
+            // Make globally accessible
+            window.eventBus = eventBus;
+            window.stateManager = stateManager;
+            
+            document.getElementById('status').innerHTML = `
+                <p style="color: green;">✅ EventBus loaded successfully!</p>
+                <p>EventBus: ${typeof eventBus}</p>
+                <p>StateManager: ${typeof stateManager}</p>
+            `;
+            
+            console.log('EventBus test successful!', eventBus);
+        } catch (error) {
+            document.getElementById('status').innerHTML = `
+                <p style="color: red;">❌ Error loading EventBus:</p>
+                <pre>${error.message}</pre>
+            `;
+            console.error('EventBus load error:', error);
+        }
+    </script>
+</body>
+</html>

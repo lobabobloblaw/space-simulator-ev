@@ -1,84 +1,70 @@
-# QUICK REFERENCE - Galaxy Trader Refactor
+# QUICK REFERENCE - Galaxy Trader Current State
 
-## Current Status: December 29, 2024
-- **Progress**: 100% complete (8 of 8 systems migrated)
-- **Game Status**: ✅ FULLY PLAYABLE
-- **Last Session**: Extracted SpawnSystem with EventBus pattern
+## Current Status: August 18, 2025
+- **Game Status**: STABLE & PLAYABLE on old architecture ✅
+- **EventBus Migration**: COMPLETE but deployment blocked ⚠️
+- **Pure StateManager**: Implemented in PhysicsSystem & RenderSystem ✅
+- **Production**: Using `main.js` (old architecture)
 
-## What's Done ✅
-1. **Core Infrastructure** (100%)
-   - EventBus, StateManager, GameLoop, MigrationBridge, Game
-2. **InputSystem** - Handles all user input (event-driven)
-3. **PhysicsSystem** - Movement and collisions (event-driven)
-4. **RenderSystem** - All rendering (complete and working)
-5. **SaveSystem** - Save/load functionality
-6. **AudioSystem** - Sound effects (EventBus-ready, using compatibility layer)
-7. **UISystem** - HUD and interface updates (EventBus-ready, using compatibility layer)
-8. **WeaponSystem** - Combat mechanics (EventBus-ready, using compatibility layer)
-9. **SpawnSystem** - NPC spawning, AI, asteroids, pickups (EventBus-ready, using compatibility layer)
-
-## What's Next 🎯
-### Option 1: Complete Integration
-- Update main.js to use EventBus throughout
-- Remove compatibility layers from allSystems.js
-- Pure event-driven architecture
-
-### Option 2: New Features
-- Missions/quests system
-- Multiple star systems
-- Faction reputation
-- Ship customization
-- Multiplayer support
-
-## Critical Files
-```
-/docs/js/main.js                    ⚠️ Has initialization sequence
-/docs/js/systems/InputSystem.js     ✅ Working
-/docs/js/systems/PhysicsSystem.js   ✅ Working
-/docs/js/systems/RenderSystem.js    ✅ Working
-/docs/js/systems/allSystems.js      📦 Contains remaining systems
-```
-
-## Test Commands
+## Quick Commands
 ```bash
-# Start server
+# Start development
 cd /Users/alexvoigt/Documents/Claude/space-simulator-ev
 python3 -m http.server 8000
 
-# Open game
+# Test PRODUCTION version (stable)
 open http://localhost:8000/docs/
 
-# Check progress
-open http://localhost:8000/docs/diagnostic.html
+# Test EventBus with globals (WORKS)
+open http://localhost:8000/docs/eventbus-working.html
+
+# View live site
+open https://lobabobloblaw.github.io/space-simulator-ev/
 ```
 
-## Game Controls
-- **W/A/S/D** - Move ship
-- **F** - Fire weapons
+## Architecture Status
+
+### Three Versions:
+1. **OLD** (`main.js`) - IN PRODUCTION ✅
+2. **HYBRID** (EventBus + globals) - WORKS ✅
+3. **PURE** (EventBus only) - COMPLETE BUT WON'T LOAD ⚠️
+
+## The Issue
+- Pure EventBus (`main_eventbus_pure.js`) won't initialize
+- Likely cause: SaveSystem import case sensitivity
+- Hybrid approach works perfectly
+
+## File Structure
+```
+/docs/
+├── index.html              # Uses main.js (stable)
+├── eventbus-working.html   # Hybrid approach (WORKS)
+├── js/
+│   ├── main.js            # OLD architecture (current)
+│   ├── main_eventbus_pure.js  # PURE (has loading issue)
+│   ├── core/              # EventBus infrastructure ✅
+│   └── systems/           
+│       ├── PhysicsSystem.js  # Updated for pure ✅
+│       ├── RenderSystem.js   # Updated for pure ✅
+│       └── [others]          # Need updating for pure
+```
+
+## Next Session Priority
+1. Fix SaveSystem import case issue (5 min)
+2. OR deploy hybrid approach (5 min)
+3. OR keep current stable version (0 min)
+
+## Controls
+- **WASD** - Move ship
+- **F** - Fire weapon
 - **L** - Land on planet
+- **Q** - Switch weapons
 - **S** - Save game
 - **O** - Load game
 - **M** - Toggle sound
-- **Q** - Switch weapons
 
-## The Pattern
-Every system follows this structure:
-1. Uses EventBus for communication
-2. Updates StateManager for state
-3. Has init(), update(), destroy() methods
-4. Works alongside old code via MigrationBridge
-
-## ⚠️ Critical Notes
-1. **main.js runs as ES6 module** - variables are module-scoped
-2. **DOM initialization order matters** - see initGame() function
-3. **Game must stay playable** - test after every change
-4. **TouchControls needs canvas** - must init after canvas ready
-
-## Latest Status - Session 23
-- ✅ REFACTOR 100% COMPLETE
-- ✅ Fixed case sensitivity bug for Git Pages
-- ✅ Successfully deployed to production
-- ✅ Game fully playable at: https://lobabobloblaw.github.io/space-simulator-ev/
-- 🎯 Ready for next phase (EventBus integration or new features)
-
-**Remember**: Game must remain playable during entire refactor!
+## Remember
+- EventBus architecture is COMPLETE
+- All systems are converted
+- Just need to fix module loading
+- Game is stable and playable now

@@ -129,8 +129,8 @@ export class PhysicsSystem {
      * Update player ship physics
      */
     updateShipPhysics(state, deltaTime) {
-        // Access the ship from window (temporary until fully migrated)
-        const ship = window.ship;
+        // Access the ship from state
+        const ship = state.ship;
         if (!ship || ship.isDestroyed) return;
         
         // Handle rotation
@@ -231,8 +231,8 @@ export class PhysicsSystem {
      * Update NPC physics
      */
     updateNPCPhysics(state, deltaTime) {
-        // Access NPCs from window (temporary)
-        const npcShips = window.npcShips;
+        // Access NPCs from state
+        const npcShips = state.npcShips;
         if (!npcShips) return;
         
         for (let npc of npcShips) {
@@ -259,8 +259,8 @@ export class PhysicsSystem {
      * Update projectile physics
      */
     updateProjectilePhysics(state, deltaTime) {
-        // Access projectiles from window (temporary)
-        const projectiles = window.projectiles;
+        // Access projectiles from state
+        const projectiles = state.projectiles;
         if (!projectiles) return;
         
         for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -287,8 +287,8 @@ export class PhysicsSystem {
      * Update asteroid physics
      */
     updateAsteroidPhysics(state, deltaTime) {
-        // Access asteroids from window (temporary)
-        const asteroids = window.asteroids;
+        // Access asteroids from state
+        const asteroids = state.asteroids;
         if (!asteroids) return;
         
         for (let asteroid of asteroids) {
@@ -323,8 +323,8 @@ export class PhysicsSystem {
      * Update pickup physics
      */
     updatePickupPhysics(state, deltaTime) {
-        // Access pickups from window (temporary)
-        const pickups = window.pickups;
+        // Access pickups from state
+        const pickups = state.pickups;
         if (!pickups) return;
         
         for (let i = pickups.length - 1; i >= 0; i--) {
@@ -355,13 +355,13 @@ export class PhysicsSystem {
      * Check all collisions
      */
     checkCollisions(state) {
-        const ship = window.ship;
+        const ship = state.ship;
         if (!ship || ship.isDestroyed) return;
         
-        const projectiles = window.projectiles || [];
-        const asteroids = window.asteroids || [];
-        const pickups = window.pickups || [];
-        const npcShips = window.npcShips || [];
+        const projectiles = state.projectiles || [];
+        const asteroids = state.asteroids || [];
+        const pickups = state.pickups || [];
+        const npcShips = state.npcShips || [];
         
         // Clear previous collisions
         state.physics.collisions = [];
@@ -570,7 +570,7 @@ export class PhysicsSystem {
      * Sync physics state to StateManager
      */
     syncPhysicsState(state) {
-        const ship = window.ship;
+        const ship = state.ship;
         if (!ship) return;
         
         // Update physics state
@@ -582,10 +582,10 @@ export class PhysicsSystem {
         
         // Update entity counts
         state.physics.entityCounts = {
-            npcs: (window.npcShips || []).length,
-            projectiles: (window.projectiles || []).length,
-            asteroids: (window.asteroids || []).length,
-            pickups: (window.pickups || []).length
+            npcs: (state.npcShips || []).length,
+            projectiles: (state.projectiles || []).length,
+            asteroids: (state.asteroids || []).length,
+            pickups: (state.pickups || []).length
         };
     }
     

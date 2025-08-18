@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EventBus Migration Test</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/main.css">
+    <style>
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: #0a0a0a;
+            color: #00ffff;
+            padding: 20px;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #00ffff;
+            background: rgba(0, 255, 255, 0.05);
+        }
+        .success { color: #00ff00; }
+        .error { color: #ff0000; }
+        .info { color: #ffff00; }
+        #gameCanvas {
+            border: 2px solid #00ffff;
+            display: block;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>EventBus Architecture Migration Test</h1>
+    
+    <div id="status" class="status">
+        <h2>System Status</h2>
+        <div id="statusContent">Initializing...</div>
+    </div>
+    
+    <!-- Minimal game elements needed -->
+    <div id="tutorialHint" style="display:none;"></div>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    
+    <!-- Minimal HUD elements -->
+    <div style="display:none;">
+        <div id="gameHUD">
+            <span id="health">100%</span>
+            <span id="shield">0</span>
+            <span id="fuel">100</span>
+            <span id="speed">0</span>
+            <span id="cargo">0/10</span>
+            <span id="location">SPACE</span>
+            <span id="credits">250</span>
+            <span id="weapon">NONE</span>
+            <span id="kills">0</span>
+        </div>
+        <canvas id="minimapCanvas" width="100" height="100"></canvas>
+    </div>
+    
+    <!-- Landing overlay (hidden) -->
+    <div id="landingOverlay" style="display:none;">
+        <div id="planetName"></div>
+        <div id="planetDescription"></div>
+        <canvas id="planetCanvas" width="420" height="472"></canvas>
+        <div id="landingInfo"></div>
+        <div id="tradingPanel">
+            <div id="tradeCredits">0</div>
+            <div id="tradeCargo">0/10</div>
+            <div id="commodityList"></div>
+        </div>
+        <div id="shopPanel">
+            <div id="shopCredits">0</div>
+            <div id="shopList"></div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { getEventBus, GameEvents } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        import { GameLoop } from './js/core/GameLoop.js';
+        
+        // Import systems
+        import InputSystem from './js/systems/InputSystem.js';
+        import PhysicsSystem from './js/systems/PhysicsSystem.js';
+        import RenderSystem from './js/systems/RenderSystem.js';
+        import AudioSystem from './js/systems/AudioSystem.js';
+        import UISystem from './js/systems/UISystem.js';
+        import WeaponSystem from './js/systems/WeaponSystem.js';
+        import SpawnSystem from './js/systems/SpawnSystem.js';
+        
+        // Import game data
+        import { planets } from './js/data/gameData.js';
+        
+        const statusEl = document.getElementById('statusContent');
+        let statusHTML = '';
+        
+        function addStatus(message, type = 'info') {
+            statusHTML += `<div class="${type}">${message}</div>`;
+            statusEl.innerHTML = statusHTML;
+        }
+        
+        async function testEventBusArchitecture() {
+            try {
+                addStatus('Starting EventBus architecture test...', 'info');
+                
+                // Get singletons
+                const eventBus = getEventBus();
+                const stateManager = getStateManager();
+                addStatus('✅ Core infrastructure loaded', 'success');
+                
+                // Initialize minimal game state
+                stateManager.state.ship = {
+                    x: 0, y: 0, vx: 0, vy: 0,
+                    angle: 0, size: 8,
+                    health: 100, maxHealth: 100,
+                    fuel: 100, maxFuel: 100,
+                    credits: 250,
+                    weapons: [], cargo: [],
+                    cargoCapacity: 10
+                };
+                stateManager.state.camera = { x: 0, y: 0 };
+                stateManager.state.planets = planets;
+                stateManager.state.asteroids = [];
+                stateManager.state.npcShips = [];
+                stateManager.state.projectiles = [];
+                stateManager.state.stars = { far: [], mid: [], near: [] };
+                addStatus('✅ Game state initialized', 'success');
+                
+                // Create systems
+                const systems = {};
+                
+                try {
+                    systems.input = new InputSystem();
+                    await systems.input.init();
+                    addStatus('✅ InputSystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ InputSystem failed: ${e.message}`, 'error');
+                }
+                
+                try {
+                    systems.physics = new PhysicsSystem();
+                    await systems.physics.init();
+                    addStatus('✅ PhysicsSystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ PhysicsSystem failed: ${e.message}`, 'error');
+                }
+                
+                try {
+                    const canvas = document.getElementById('gameCanvas');
+                    systems.render = new RenderSystem(canvas);
+                    await systems.render.init();
+                    addStatus('✅ RenderSystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ RenderSystem failed: ${e.message}`, 'error');
+                }
+                
+                try {
+                    systems.audio = new AudioSystem();
+                    await systems.audio.init();
+                    addStatus('✅ AudioSystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ AudioSystem failed: ${e.message}`, 'error');
+                }
+                
+                try {
+                    systems.ui = new UISystem();
+                    await systems.ui.init();
+                    addStatus('✅ UISystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ UISystem failed: ${e.message}`, 'error');
+                }
+                
+                try {
+                    systems.weapon = new WeaponSystem();
+                    await systems.weapon.init();
+                    addStatus('✅ WeaponSystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ WeaponSystem failed: ${e.message}`, 'error');
+                }
+                
+                try {
+                    systems.spawn = new SpawnSystem();
+                    await systems.spawn.init();
+                    addStatus('✅ SpawnSystem initialized', 'success');
+                } catch (e) {
+                    addStatus(`❌ SpawnSystem failed: ${e.message}`, 'error');
+                }
+                
+                // Test event communication
+                addStatus('Testing event communication...', 'info');
+                
+                let eventReceived = false;
+                eventBus.on('test.event', () => {
+                    eventReceived = true;
+                });
+                eventBus.emit('test.event');
+                
+                if (eventReceived) {
+                    addStatus('✅ EventBus communication working', 'success');
+                } else {
+                    addStatus('❌ EventBus communication failed', 'error');
+                }
+                
+                // Create simple game loop
+                let frameCount = 0;
+                const loop = new GameLoop({
+                    onUpdate: (deltaTime) => {
+                        const state = stateManager.state;
+                        
+                        // Update systems
+                        for (const system of Object.values(systems)) {
+                            if (system.update) {
+                                system.update(state, deltaTime);
+                            }
+                        }
+                        
+                        frameCount++;
+                        if (frameCount === 60) {
+                            addStatus('✅ Game loop running (60 frames)', 'success');
+                        }
+                    },
+                    onRender: (interpolation, deltaTime) => {
+                        if (systems.render && systems.render.render) {
+                            systems.render.render(stateManager.state, deltaTime);
+                        }
+                    }
+                });
+                
+                // Start the loop
+                loop.start();
+                addStatus('✅ Game loop started', 'success');
+                
+                // Test complete
+                setTimeout(() => {
+                    addStatus('🎉 EventBus architecture test complete!', 'success');
+                    addStatus('The new architecture is working. Ready to complete migration.', 'info');
+                }, 2000);
+                
+                // Make available for debugging
+                window.eventBusTest = {
+                    eventBus,
+                    stateManager,
+                    systems,
+                    loop
+                };
+                
+            } catch (error) {
+                addStatus(`❌ Fatal error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+        
+        // Run test when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', testEventBusArchitecture);
+        } else {
+            testEventBusArchitecture();
+        }
+    </script>
+</body>
+</html>

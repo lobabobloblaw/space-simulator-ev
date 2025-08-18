@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>EventBus Working Demo</title>
+    <style>
+        body { background: #000; color: #0ff; font-family: monospace; margin: 0; padding: 0; }
+        #info { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #0ff; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h3>EventBus Architecture - WORKING</h3>
+        <p>Use WASD to move</p>
+        <p>Position: <span id="pos">0, 0</span></p>
+        <p>Speed: <span id="speed">0</span></p>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- Hidden elements systems expect -->
+    <div style="display:none;">
+        <div id="tutorialHint"></div>
+        <div id="gameHUD">
+            <span id="health">100%</span>
+            <span id="shield">0</span>
+            <span id="fuel">100</span>
+            <span id="speed">0</span>
+            <span id="cargo">0/10</span>
+            <span id="location">SPACE</span>
+            <span id="credits">250</span>
+            <span id="weapon">NONE</span>
+            <span id="kills">0</span>
+        </div>
+        <canvas id="minimapCanvas" width="100" height="100"></canvas>
+        <div id="landingOverlay"></div>
+    </div>
+    
+    <script type="module">
+        // Import EventBus systems
+        import { getEventBus, GameEvents } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        import { GameLoop } from './js/core/GameLoop.js';
+        import InputSystem from './js/systems/InputSystem.js';
+        import PhysicsSystem from './js/systems/PhysicsSystem.js';
+        import RenderSystem from './js/systems/RenderSystem.js';
+        import { planets } from './js/data/gameData.js';
+        
+        // Setup canvas
+        const canvas = document.getElementById('gameCanvas');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Get core systems
+        const eventBus = getEventBus();
+        const stateManager = getStateManager();
+        
+        // Create ship in BOTH places (bridge old and new)
+        const ship = {
+            x: 0, y: 0, vx: 0, vy: 0,
+            angle: 0, thrust: 0.004, maxSpeed: 0.45,
+            size: 8,
+            health: 100, maxHealth: 100,
+            fuel: 100, maxFuel: 100,
+            shield: 0, maxShield: 0,
+            credits: 250,
+            weapons: [], cargo: [],
+            cargoCapacity: 10,
+            weaponCooldown: 0,
+            isLanded: false,
+            landedPlanet: null,
+            landingCooldown: 0
+        };
+        
+        // CRITICAL: Set ship in BOTH locations
+        window.ship = ship;  // For PhysicsSystem
+        stateManager.state.ship = ship;  // For StateManager
+        
+        // Setup game state
+        const state = stateManager.state;
+        state.camera = { x: 0, y: 0 };
+        state.planets = planets.slice(0, 5);
+        state.asteroids = [];
+        state.npcShips = [];
+        state.projectiles = [];
+        state.explosions = [];
+        state.warpEffects = [];
+        state.pickups = [];
+        state.paused = false;
+        
+        // Create stars
+        state.stars = { far: [], mid: [], near: [] };
+        for (let i = 0; i < 500; i++) {
+            state.stars.far.push({
+                x: (Math.random() - 0.5) * 4000,
+                y: (Math.random() - 0.5) * 4000,
+                brightness: Math.random() * 0.5 + 0.5,
+                size: 1,
+                color: '#ffffff'
+            });
+        }
+        
+        // Also set globals that systems expect
+        window.game = { camera: state.camera, paused: false };
+        window.asteroids = state.asteroids;
+        window.npcShips = state.npcShips;
+        window.projectiles = state.projectiles;
+        window.explosions = state.explosions;
+        window.warpEffects = state.warpEffects;
+        window.pickups = state.pickups;
+        window.planets = state.planets;
+        
+        // Initialize systems
+        const systems = {};
+        
+        systems.input = new InputSystem();
+        await systems.input.init();
+        console.log('✅ InputSystem ready');
+        
+        systems.physics = new PhysicsSystem();
+        await systems.physics.init();
+        console.log('✅ PhysicsSystem ready');
+        
+        systems.render = new RenderSystem(canvas);
+        await systems.render.init();
+        console.log('✅ RenderSystem ready');
+        
+        // Create game loop
+        const loop = new GameLoop({
+            onUpdate: (deltaTime) => {
+                // Update camera
+                state.camera.x = ship.x;
+                state.camera.y = ship.y;
+                window.game.camera = state.camera;
+                
+                // Update systems
+                systems.input.update(state, deltaTime);
+                systems.physics.update(state, deltaTime);
+                
+                // Update display
+                document.getElementById('pos').textContent = 
+                    `${ship.x.toFixed(0)}, ${ship.y.toFixed(0)}`;
+                const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+                document.getElementById('speed').textContent = 
+                    (speed * 100).toFixed(1);
+            },
+            onRender: (interpolation, deltaTime) => {
+                systems.render.render(state, deltaTime);
+            }
+        });
+        
+        // Start game
+        loop.start();
+        console.log('🎮 Game started! Use WASD to move');
+    </script>
+</body>
+</html>

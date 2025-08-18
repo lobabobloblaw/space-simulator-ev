@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal EventBus Test</title>
+</head>
+<body>
+    <h1>Minimal EventBus Test</h1>
+    <div id="status">Loading...</div>
+    
+    <script type="module" src="./js/main_eventbus_minimal.js"></script>
+    
+    <script type="module">
+        setTimeout(() => {
+            if (window.eventBus) {
+                document.getElementById('status').innerHTML = '✅ EventBus LOADED!';
+                console.log('✅ EventBus is available globally');
+                
+                // Test it
+                window.eventBus.emit('test', { source: 'HTML' });
+            } else {
+                document.getElementById('status').innerHTML = '❌ EventBus not found';
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

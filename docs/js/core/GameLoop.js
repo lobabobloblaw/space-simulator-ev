@@ -253,4 +253,18 @@ export class SimpleGameLoop {
     }
 }
 
+// Singleton instance
+let gameLoopInstance = null;
+
+/**
+ * Get the global GameLoop instance
+ * @returns {GameLoop} Singleton GameLoop instance
+ */
+export function getGameLoop() {
+    if (!gameLoopInstance) {
+        gameLoopInstance = new GameLoop();
+    }
+    return gameLoopInstance;
+}
+
 export default GameLoop;

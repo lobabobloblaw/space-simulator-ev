@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple EventBus Test</title>
+    <style>
+        body {
+            background: #000;
+            color: #0ff;
+            font-family: monospace;
+            padding: 20px;
+        }
+        canvas {
+            border: 2px solid #0ff;
+            display: block;
+            margin: 20px 0;
+        }
+        #status {
+            border: 1px solid #0ff;
+            padding: 10px;
+            margin: 20px 0;
+            background: rgba(0, 255, 255, 0.1);
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+    </style>
+</head>
+<body>
+    <h1>Simple EventBus Game Test</h1>
+    
+    <div id="status">
+        <h2>Status:</h2>
+        <div id="log"></div>
+    </div>
+    
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    
+    <div id="controls">
+        <h3>Controls:</h3>
+        <p>WASD - Move ship</p>
+        <p>Ship Position: <span id="shipPos">0, 0</span></p>
+        <p>Ship Velocity: <span id="shipVel">0, 0</span></p>
+    </div>
+    
+    <!-- Hidden elements the game needs -->
+    <div style="display:none;">
+        <div id="tutorialHint"></div>
+        <div id="gameHUD">
+            <span id="health">100%</span>
+            <span id="shield">0</span>
+            <span id="fuel">100</span>
+            <span id="speed">0</span>
+            <span id="cargo">0/10</span>
+            <span id="location">SPACE</span>
+            <span id="credits">250</span>
+            <span id="weapon">NONE</span>
+            <span id="kills">0</span>
+        </div>
+        <canvas id="minimapCanvas" width="100" height="100"></canvas>
+        <div id="landingOverlay">
+            <div id="planetName"></div>
+            <div id="planetDescription"></div>
+            <canvas id="planetCanvas" width="420" height="472"></canvas>
+            <div id="landingInfo"></div>
+            <div id="tradingPanel">
+                <div id="tradeCredits">0</div>
+                <div id="tradeCargo">0/10</div>
+                <div id="commodityList"></div>
+            </div>
+            <div id="shopPanel">
+                <div id="shopCredits">0</div>
+                <div id="shopList"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        const log = document.getElementById('log');
+        function addLog(msg, type = '') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = msg;
+            log.appendChild(div);
+            console.log(msg);
+        }
+        
+        addLog('Loading EventBus modules...');
+        
+        import { getEventBus, GameEvents } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        import { GameLoop } from './js/core/GameLoop.js';
+        import InputSystem from './js/systems/InputSystem.js';
+        import PhysicsSystem from './js/systems/PhysicsSystem.js';
+        import RenderSystem from './js/systems/RenderSystem.js';
+        import { planets } from './js/data/gameData.js';
+        
+        async function startGame() {
+            try {
+                // Get core systems
+                const eventBus = getEventBus();
+                const stateManager = getStateManager();
+                addLog('✓ Core systems loaded', 'success');
+                
+                // Initialize game state
+                const state = stateManager.state;
+                state.ship = {
+                    x: 0, y: 0, vx: 0, vy: 0,
+                    angle: 0, thrust: 0.3, maxSpeed: 5,
+                    size: 8,
+                    health: 100, maxHealth: 100,
+                    fuel: 100, maxFuel: 100,
+                    credits: 250,
+                    weapons: [], cargo: [],
+                    cargoCapacity: 10,
+                    weaponCooldown: 0,
+                    isLanded: false,
+                    landedPlanet: null
+                };
+                state.camera = { x: 0, y: 0 };
+                state.planets = planets.slice(0, 3); // Just a few planets
+                state.asteroids = [];
+                state.npcShips = [];
+                state.projectiles = [];
+                state.explosions = [];
+                state.warpEffects = [];
+                state.pickups = [];
+                state.paused = false;
+                
+                // Simple stars
+                state.stars = { 
+                    far: [], 
+                    mid: [], 
+                    near: [] 
+                };
+                for (let i = 0; i < 100; i++) {
+                    state.stars.far.push({
+                        x: (Math.random() - 0.5) * 2000,
+                        y: (Math.random() - 0.5) * 2000,
+                        brightness: Math.random() * 0.5 + 0.5,
+                        size: 1
+                    });
+                }
+                
+                addLog('✓ Game state initialized', 'success');
+                
+                // Create systems
+                const systems = {};
+                
+                // Input System
+                systems.input = new InputSystem();
+                await systems.input.init();
+                addLog('✓ InputSystem ready', 'success');
+                
+                // Physics System
+                systems.physics = new PhysicsSystem();
+                await systems.physics.init();
+                addLog('✓ PhysicsSystem ready', 'success');
+                
+                // Render System
+                const canvas = document.getElementById('gameCanvas');
+                systems.render = new RenderSystem(canvas);
+                await systems.render.init();
+                addLog('✓ RenderSystem ready', 'success');
+                
+                // Make systems global for debugging
+                window.gameSystems = systems;
+                window.gameState = state;
+                window.eventBus = eventBus;
+                
+                // Set up keyboard display
+                document.addEventListener('keydown', (e) => {
+                    addLog(`Key down: ${e.code}`);
+                });
+                
+                // Create game loop
+                const loop = new GameLoop({
+                    onUpdate: (deltaTime) => {
+                        // Update camera to follow ship
+                        state.camera.x = state.ship.x;
+                        state.camera.y = state.ship.y;
+                        
+                        // Update all systems
+                        systems.input.update(state, deltaTime);
+                        systems.physics.update(state, deltaTime);
+                        
+                        // Update position display
+                        document.getElementById('shipPos').textContent = 
+                            `${state.ship.x.toFixed(1)}, ${state.ship.y.toFixed(1)}`;
+                        document.getElementById('shipVel').textContent = 
+                            `${state.ship.vx.toFixed(2)}, ${state.ship.vy.toFixed(2)}`;
+                    },
+                    onRender: (interpolation, deltaTime) => {
+                        systems.render.render(state, deltaTime);
+                    }
+                });
+                
+                // Start the game loop
+                loop.start();
+                addLog('✓ Game loop started!', 'success');
+                addLog('Press WASD to move the ship');
+                
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+        
+        startGame();
+    </script>
+</body>
+</html>
