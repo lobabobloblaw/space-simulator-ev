@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Refactored Architecture Test</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/main.css">
+    <style>
+        /* Test-specific styles */
+        .test-overlay {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ffff;
+            padding: 20px;
+            border: 1px solid #00ffff;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            max-width: 300px;
+            z-index: 10000;
+        }
+        
+        .test-status {
+            margin-bottom: 10px;
+            padding: 5px;
+            border-left: 3px solid #00ffff;
+            padding-left: 10px;
+        }
+        
+        .test-status.success {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+        
+        .test-status.error {
+            border-color: #ff0040;
+            color: #ff0040;
+        }
+        
+        .test-controls {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+        }
+        
+        .test-button {
+            background: transparent;
+            color: #00ffff;
+            border: 1px solid #00ffff;
+            padding: 5px 10px;
+            margin: 2px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 10px;
+        }
+        
+        .test-button:hover {
+            background: rgba(0, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <!-- Test overlay -->
+    <div class="test-overlay">
+        <h3>REFACTOR TEST</h3>
+        <div id="testStatus">
+            <div class="test-status">Loading architecture...</div>
+        </div>
+        <div class="test-controls">
+            <button class="test-button" onclick="runTests()">Run Tests</button>
+            <button class="test-button" onclick="toggleDebug()">Toggle Debug</button>
+            <button class="test-button" onclick="showStats()">Show Stats</button>
+        </div>
+    </div>
+
+    <!-- Tutorial/Hint System -->
+    <div id="tutorialHint"></div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- 90s Space Sim HUD -->
+    <div id="gameHUD">
+        <div class="tech-line"></div>
+        <div class="hud-container">
+            <!-- Left Panel: Ship Systems -->
+            <div class="hud-left">
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">HULL</span>
+                        <span class="status-value" id="health">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SHIELD</span>
+                        <span class="status-value" id="shield">NONE</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">FUEL</span>
+                        <span class="status-value" id="fuel">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SPEED</span>
+                        <span class="status-value" id="speed">0.0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">CARGO</span>
+                        <span class="status-value" id="cargo">0/10</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SECTOR</span>
+                        <span class="status-value" id="location">SPACE</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Center Panel: Cyberpunk Logo -->
+            <div class="hud-center">
+                <div id="logo-container">
+                    <div id="logo-ascii">GALAXY TRADER</div>
+                    <div style="font-size: 10px; color: #888; margin-top: 5px;">REFACTORED</div>
+                </div>
+                <div class="hud-subtitle">/// SYSTEM ONLINE</div>
+                <div class="key-stats">
+                    <div class="key-stat">
+                        <span class="status-label">CREDITS</span>
+                        <span class="status-value credits-value" id="credits">250</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">WEAPON</span>
+                        <span class="status-value weapon-value" id="weapon">NONE</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">KILLS</span>
+                        <span class="status-value" id="kills">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Controls & Radar -->
+            <div class="hud-right">
+                <div class="controls-panel">
+                    <div class="controls">
+                        <span class="control-key">W</span>
+                        <span class="control-action">THR</span>
+                        <span class="control-key">A/D</span>
+                        <span class="control-action">TURN</span>
+                        <span class="control-key">F</span>
+                        <span class="control-action">FIRE</span>
+                        <span class="control-key">L</span>
+                        <span class="control-action">LAND</span>
+                        <span class="control-key">S/O</span>
+                        <span class="control-action">SAVE</span>
+                    </div>
+                </div>
+                <div id="minimap">
+                    <canvas id="minimapCanvas" width="100" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Landing/Station Interface -->
+    <div id="landingOverlay">
+        <div id="landingHeader">
+            <h3 id="planetName">Planet Name</h3>
+        </div>
+        <div id="landingContent">
+            <div id="planetVisual">
+                <canvas id="planetCanvas" width="420" height="472"></canvas>
+            </div>
+            <div id="landingInfo">
+                <div id="landingMessage">DOCKING SUCCESSFUL</div>
+                <div id="planetDescription">Planet description goes here...</div>
+                <div id="landingDetails"></div>
+            </div>
+            <div id="tradingPanel">
+                <div class="cargo-status">
+                    <strong>CREDITS:</strong> <span id="tradeCredits">0</span> | 
+                    <strong>CARGO:</strong> <span id="tradeCargo">0/10</span>
+                </div>
+                <div id="commodityList"></div>
+            </div>
+            <div id="shopPanel">
+                <div class="cargo-status">
+                    <strong>CREDITS:</strong> <span id="shopCredits">0</span>
+                </div>
+                <div id="shopList"></div>
+            </div>
+        </div>
+        <div id="landingButtons">
+            <button id="departBtn">[1] DEPART</button>
+            <button id="stationBtn">[2] STATION</button>
+            <button id="tradeBtn">[3] TRADE</button>
+            <button id="outfitterBtn">[4] OUTFITTER</button>
+        </div>
+    </div>
+
+    <script type="module">
+        // Test the refactored architecture
+        import { Game } from './js/core/Game.js';
+        import { getEventBus, GameEvents } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        import { getGameLoop } from './js/core/GameLoop.js';
+        import { Vector2D } from './js/utils/Vector2D.js';
+        import { MathUtils } from './js/utils/MathUtils.js';
+        import { CollisionUtils } from './js/utils/CollisionUtils.js';
+        import { GameConstants } from './js/utils/Constants.js';
+
+        // Global test objects
+        window.testFramework = {
+            game: null,
+            eventBus: getEventBus(),
+            stateManager: getStateManager(),
+            gameLoop: getGameLoop(),
+            tests: [],
+            results: []
+        };
+
+        // Test functions
+        window.runTests = function() {
+            const tests = [
+                testEventBus,
+                testStateManager,
+                testVector2D,
+                testMathUtils,
+                testCollisionUtils,
+                testConstants,
+                testGameInitialization
+            ];
+
+            const results = [];
+            for (const test of tests) {
+                try {
+                    const result = test();
+                    results.push({ name: test.name, success: true, result });
+                } catch (error) {
+                    results.push({ name: test.name, success: false, error: error.message });
+                }
+            }
+
+            displayTestResults(results);
+        };
+
+        window.toggleDebug = function() {
+            if (window.testFramework.game) {
+                const currentDebug = window.testFramework.game.debugMode;
+                window.testFramework.game.setDebugMode(!currentDebug);
+                addStatusMessage(`Debug mode ${!currentDebug ? 'enabled' : 'disabled'}`, 'success');
+            }
+        };
+
+        window.showStats = function() {
+            if (window.testFramework.game) {
+                const stats = window.testFramework.game.getDebugInfo();
+                console.log('Game Stats:', stats);
+                addStatusMessage(`Stats logged to console. FPS: ${stats.fps}`, 'success');
+            }
+        };
+
+        // Individual test functions
+        function testEventBus() {
+            const eventBus = getEventBus();
+            let eventFired = false;
+            
+            eventBus.on('test.event', () => { eventFired = true; });
+            eventBus.emit('test.event');
+            
+            if (!eventFired) throw new Error('Event not fired');
+            return 'EventBus working correctly';
+        }
+
+        function testStateManager() {
+            const stateManager = getStateManager();
+            const ship = stateManager.getShip();
+            
+            const originalCredits = ship.credits;
+            stateManager.updateShip('credits', 500);
+            
+            if (ship.credits !== 500) throw new Error('State not updated');
+            
+            stateManager.updateShip('credits', originalCredits);
+            return 'StateManager working correctly';
+        }
+
+        function testVector2D() {
+            const v1 = new Vector2D(3, 4);
+            const magnitude = v1.magnitude();
+            
+            if (Math.abs(magnitude - 5) > 0.001) throw new Error('Vector magnitude incorrect');
+            
+            const v2 = Vector2D.add(new Vector2D(1, 2), new Vector2D(3, 4));
+            if (v2.x !== 4 || v2.y !== 6) throw new Error('Vector addition incorrect');
+            
+            return 'Vector2D working correctly';
+        }
+
+        function testMathUtils() {
+            const clamped = MathUtils.clamp(15, 0, 10);
+            if (clamped !== 10) throw new Error('Clamp function incorrect');
+            
+            const lerped = MathUtils.lerp(0, 10, 0.5);
+            if (lerped !== 5) throw new Error('Lerp function incorrect');
+            
+            return 'MathUtils working correctly';
+        }
+
+        function testCollisionUtils() {
+            const circle1 = { x: 0, y: 0, radius: 5 };
+            const circle2 = { x: 3, y: 4, radius: 5 };
+            
+            const collision = CollisionUtils.circleCircle(circle1, circle2);
+            if (!collision) throw new Error('Collision detection incorrect');
+            
+            return 'CollisionUtils working correctly';
+        }
+
+        function testConstants() {
+            if (typeof GameConstants.SHIP.DEFAULT_SIZE !== 'number') {
+                throw new Error('Constants not loaded correctly');
+            }
+            
+            if (GameConstants.SHIP.DEFAULT_SIZE !== 8) {
+                throw new Error('Constant value incorrect');
+            }
+            
+            return 'Constants working correctly';
+        }
+
+        function testGameInitialization() {
+            if (!window.testFramework.game) {
+                throw new Error('Game not initialized');
+            }
+            
+            return 'Game initialization successful';
+        }
+
+        // Utility functions
+        function addStatusMessage(message, type = 'info') {
+            const statusDiv = document.getElementById('testStatus');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `test-status ${type}`;
+            messageDiv.textContent = message;
+            statusDiv.appendChild(messageDiv);
+            
+            // Remove old messages
+            const messages = statusDiv.children;
+            if (messages.length > 8) {
+                statusDiv.removeChild(messages[0]);
+            }
+        }
+
+        function displayTestResults(results) {
+            const statusDiv = document.getElementById('testStatus');
+            statusDiv.innerHTML = '<h4>Test Results:</h4>';
+            
+            let passed = 0;
+            for (const result of results) {
+                const div = document.createElement('div');
+                div.className = `test-status ${result.success ? 'success' : 'error'}`;
+                div.textContent = `${result.name}: ${result.success ? 'PASS' : 'FAIL'}`;
+                if (!result.success) {
+                    div.textContent += ` (${result.error})`;
+                }
+                statusDiv.appendChild(div);
+                
+                if (result.success) passed++;
+            }
+            
+            const summary = document.createElement('div');
+            summary.className = 'test-status';
+            summary.textContent = `${passed}/${results.length} tests passed`;
+            statusDiv.appendChild(summary);
+        }
+
+        // Initialize the refactored game
+        async function initRefactoredGame() {
+            try {
+                addStatusMessage('Initializing refactored architecture...', 'info');
+                
+                // Create game instance
+                const game = new Game('gameCanvas', 'minimapCanvas', 'planetCanvas');
+                window.testFramework.game = game;
+                
+                // Enable debug mode automatically for testing
+                game.setDebugMode(true);
+                
+                addStatusMessage('Core systems created', 'success');
+                
+                // Initialize game (this will fail gracefully since not all systems are implemented yet)
+                try {
+                    await game.init();
+                    addStatusMessage('Game initialization complete', 'success');
+                } catch (error) {
+                    addStatusMessage(`Init partial: ${error.message}`, 'info');
+                    console.log('Expected initialization error (not all systems implemented yet):', error);
+                }
+                
+                // Start the game loop anyway to test the core systems
+                try {
+                    game.start();
+                    addStatusMessage('Game started (core systems only)', 'success');
+                } catch (error) {
+                    addStatusMessage(`Start partial: ${error.message}`, 'info');
+                }
+                
+                addStatusMessage('Refactored architecture ready for testing', 'success');
+                addStatusMessage('Click "Run Tests" to validate systems', 'info');
+                
+            } catch (error) {
+                addStatusMessage(`Initialization failed: ${error.message}`, 'error');
+                console.error('Refactored game initialization error:', error);
+            }
+        }
+
+        // Start when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initRefactoredGame);
+        } else {
+            initRefactoredGame();
+        }
+
+        // Show architecture info
+        console.log('%c🚀 Galaxy Trader - Refactored Architecture Test', 'font-size: 16px; color: #00ffff; font-weight: bold;');
+        console.log('Available test objects:', window.testFramework);
+        console.log('Run tests with: runTests()');
+        console.log('Toggle debug with: toggleDebug()');
+        console.log('Show stats with: showStats()');
+    </script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Input System Test</title>
+    <style>
+        body {
+            background: #000;
+            color: #0ff;
+            font-family: monospace;
+            padding: 20px;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #0ff;
+        }
+        #canvas {
+            border: 1px solid #0ff;
+            display: block;
+            margin: 20px 0;
+        }
+        .log {
+            margin: 5px 0;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .event { color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>Input System Test</h1>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    
+    <div id="status">
+        <h2>Status:</h2>
+        <div id="logs"></div>
+    </div>
+    
+    <div>
+        <h2>Instructions:</h2>
+        <ul>
+            <li>Press W/Arrow Up - Should emit thrust event</li>
+            <li>Press A/D or Arrow Left/Right - Should emit turn events</li>
+            <li>Press Space - Should emit brake event</li>
+            <li>Press F - Should emit fire event</li>
+            <li>Press Q - Should emit switch weapon event</li>
+            <li>Press L - Should emit land event</li>
+            <li>Press ESC - Should emit pause toggle event</li>
+            <li>Click on canvas - Should emit mouse/fire events</li>
+        </ul>
+    </div>
+    
+    <script type="module">
+        const logs = document.getElementById('logs');
+        
+        function log(message, type = '') {
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logs.appendChild(div);
+            
+            // Keep only last 20 logs
+            while (logs.children.length > 20) {
+                logs.removeChild(logs.firstChild);
+            }
+        }
+        
+        try {
+            // Import core systems
+            log('Loading core systems...');
+            const { getEventBus, GameEvents } = await import('./js/core/EventBus.js');
+            log('✓ EventBus loaded', 'success');
+            
+            const { getStateManager } = await import('./js/core/StateManager.js');
+            log('✓ StateManager loaded', 'success');
+            
+            const InputSystemModule = await import('./js/systems/InputSystem.js');
+            const InputSystem = InputSystemModule.default;
+            log('✓ InputSystem loaded', 'success');
+            
+            // Initialize systems
+            const eventBus = getEventBus();
+            const stateManager = getStateManager();
+            const inputSystem = new InputSystem();
+            
+            log('Initializing InputSystem...');
+            inputSystem.init();
+            log('✓ InputSystem initialized', 'success');
+            
+            // Enable event debugging
+            eventBus.debug = true;
+            
+            // Subscribe to all input events
+            const inputEvents = [
+                GameEvents.INPUT_THRUST,
+                GameEvents.INPUT_BRAKE,
+                GameEvents.INPUT_TURN,
+                GameEvents.INPUT_FIRE,
+                GameEvents.INPUT_SWITCH_WEAPON,
+                GameEvents.INPUT_LAND,
+                GameEvents.INPUT_INTERACT,
+                GameEvents.GAME_PAUSE_TOGGLE,
+                GameEvents.AUDIO_TOGGLE,
+                GameEvents.DEBUG_TOGGLE,
+                GameEvents.GAME_SAVE,
+                GameEvents.GAME_LOAD,
+                GameEvents.INPUT_MOUSE_DOWN,
+                GameEvents.INPUT_MOUSE_UP,
+                GameEvents.INPUT_KEY_DOWN,
+                GameEvents.INPUT_KEY_UP
+            ];
+            
+            inputEvents.forEach(eventName => {
+                eventBus.on(eventName, (data) => {
+                    log(`EVENT: ${eventName} - ${JSON.stringify(data)}`, 'event');
+                });
+            });
+            
+            log('✓ Event listeners attached', 'success');
+            log('Ready! Try pressing keys or clicking the canvas.', 'success');
+            
+            // Expose for debugging
+            window.testSystem = {
+                eventBus,
+                stateManager,
+                inputSystem,
+                getInputState: () => stateManager.state.input
+            };
+            
+        } catch (error) {
+            log(`Error: ${error.message}`, 'error');
+            console.error(error);
+        }
+    </script>
+</body>
+</html>

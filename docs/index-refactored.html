@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Refactored Architecture Test</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <style>
+        #debug-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #0ff;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            border: 1px solid #0ff;
+            max-width: 300px;
+            z-index: 10000;
+        }
+        #debug-panel h3 {
+            margin: 0 0 10px 0;
+            color: #ff0;
+        }
+        #debug-panel .status {
+            margin: 5px 0;
+        }
+        #debug-panel .migrated { color: #0f0; }
+        #debug-panel .pending { color: #f80; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- Debug Panel -->
+    <div id="debug-panel">
+        <h3>🔧 Refactor Status</h3>
+        <div id="migration-status">Loading...</div>
+        <div id="fps-status">FPS: --</div>
+        <div id="event-status">Events: 0</div>
+        <hr style="border-color: #0ff; margin: 10px 0;">
+        <button onclick="toggleEventDebug()">Toggle Event Log</button>
+        <button onclick="showMigrationDetails()">Migration Details</button>
+    </div>
+    
+    <!-- HUD Elements (from original) -->
+    <div id="hud">
+        <div id="stats">
+            <div>Health: <span id="health">100</span>/<span id="maxHealth">100</span></div>
+            <div>Shield: <span id="shield">0</span>/<span id="maxShield">0</span></div>
+            <div>Credits: <span id="credits">1000</span></div>
+            <div>Weapon: <span id="weapon">Laser</span></div>
+        </div>
+        <div id="minimap"></div>
+    </div>
+    
+    <!-- Message Display -->
+    <div id="messages"></div>
+    
+    <!-- Landing Menu -->
+    <div id="landingMenu" class="menu" style="display: none;">
+        <h2>Space Station</h2>
+        <div id="planetInfo"></div>
+        <button onclick="openShop()">Shop</button>
+        <button onclick="openMissions()">Missions</button>
+        <button onclick="takeOff()">Take Off</button>
+    </div>
+    
+    <!-- Load old code first for compatibility -->
+    <script src="js/data/gameData.js"></script>
+    <script src="js/systems/allSystems.js"></script>
+    <script src="js/main.js"></script>
+    
+    <!-- Then load new architecture -->
+    <script type="module">
+        import { game, migrationBridge } from './js/main-refactored.js';
+        import { getEventBus } from './js/core/EventBus.js';
+        import { getStateManager } from './js/core/StateManager.js';
+        
+        // Make available globally for debug panel
+        window.refactorDebug = {
+            game,
+            migrationBridge,
+            eventBus: getEventBus(),
+            stateManager: getStateManager()
+        };
+        
+        // Update debug panel
+        setInterval(() => {
+            if (!window.refactorDebug) return;
+            
+            // Update migration status
+            const status = window.refactorDebug.migrationBridge.getStatus();
+            const statusHtml = `
+                <div class="status">Progress: ${status.progress}%</div>
+                <div class="status migrated">Migrated: ${status.migrated.length || 0} systems</div>
+                <div class="status pending">Pending: ${status.pending.length || 0} systems</div>
+            `;
+            document.getElementById('migration-status').innerHTML = statusHtml;
+            
+            // Update FPS
+            const state = window.refactorDebug.stateManager.state;
+            document.getElementById('fps-status').textContent = `FPS: ${state.fps || '--'}`;
+            
+            // Update event count
+            const eventCount = window.refactorDebug.eventBus.getEvents().length;
+            document.getElementById('event-status').textContent = `Events: ${eventCount} types`;
+        }, 1000);
+        
+        // Debug functions
+        window.toggleEventDebug = function() {
+            window.refactorDebug.eventBus.debug = !window.refactorDebug.eventBus.debug;
+            console.log('Event debugging:', window.refactorDebug.eventBus.debug ? 'ON' : 'OFF');
+        };
+        
+        window.showMigrationDetails = function() {
+            const status = window.refactorDebug.migrationBridge.getStatus();
+            console.log('=== Migration Details ===');
+            console.log('Migrated systems:', status.migrated);
+            console.log('Pending systems:', status.pending);
+            console.log('Progress:', status.progress + '%');
+            console.table({
+                'Total Systems': status.migrated.length + status.pending.length,
+                'Migrated': status.migrated.length,
+                'Pending': status.pending.length,
+                'Progress': status.progress + '%'
+            });
+        };
+        
+        console.log('🚀 Refactored architecture loaded!');
+        console.log('Debug tools available at window.refactorDebug');
+    </script>
+</body>
+</html>

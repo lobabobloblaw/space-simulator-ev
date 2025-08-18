@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Trader - Render System Test</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/main.css">
+    <style>
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: #0ff;
+            font-family: monospace;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            z-index: 10000;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">Loading...</div>
+    
+    <!-- Tutorial/Hint System -->
+    <div id="tutorialHint"></div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- 90s Space Sim HUD -->
+    <div id="gameHUD">
+        <div class="tech-line"></div>
+        <div class="hud-container">
+            <!-- Left Panel: Ship Systems -->
+            <div class="hud-left">
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">HULL</span>
+                        <span class="status-value" id="health">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SHIELD</span>
+                        <span class="status-value" id="shield">NONE</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">FUEL</span>
+                        <span class="status-value" id="fuel">100%</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SPEED</span>
+                        <span class="status-value" id="speed">0.0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">CARGO</span>
+                        <span class="status-value" id="cargo">0/10</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">SECTOR</span>
+                        <span class="status-value" id="location">SPACE</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Center Panel: Cyberpunk Logo -->
+            <div class="hud-center">
+                <div id="logo-container">
+                    <div id="logo-ascii">GALAXY TRADER</div>
+                </div>
+                <div class="hud-subtitle">/// RENDER TEST</div>
+                <div class="key-stats">
+                    <div class="key-stat">
+                        <span class="status-label">CREDITS</span>
+                        <span class="status-value credits-value" id="credits">250</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">WEAPON</span>
+                        <span class="status-value weapon-value" id="weapon">NONE</span>
+                    </div>
+                    <div class="key-stat">
+                        <span class="status-label">KILLS</span>
+                        <span class="status-value" id="kills">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Controls & Radar -->
+            <div class="hud-right">
+                <div class="controls-panel">
+                    <div class="controls">
+                        <span class="control-key">W</span>
+                        <span class="control-action">THR</span>
+                        <span class="control-key">A/D</span>
+                        <span class="control-action">TURN</span>
+                        <span class="control-key">F</span>
+                        <span class="control-action">FIRE</span>
+                        <span class="control-key">L</span>
+                        <span class="control-action">LAND</span>
+                        <span class="control-key">S/O</span>
+                        <span class="control-action">SAVE</span>
+                    </div>
+                </div>
+                <div id="minimap">
+                    <canvas id="minimapCanvas" width="100" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Landing/Station Interface -->
+    <div id="landingOverlay">
+        <div id="landingHeader">
+            <h3 id="planetName">Planet Name</h3>
+        </div>
+        <div id="landingContent">
+            <div id="planetVisual">
+                <canvas id="planetCanvas" width="420" height="472"></canvas>
+            </div>
+            <div id="landingInfo">
+                <div id="landingMessage">DOCKING SUCCESSFUL</div>
+                <div id="planetDescription">Planet description goes here...</div>
+                <div id="landingDetails"></div>
+            </div>
+            <div id="tradingPanel">
+                <div class="cargo-status">
+                    <strong>CREDITS:</strong> <span id="tradeCredits">0</span> | 
+                    <strong>CARGO:</strong> <span id="tradeCargo">0/10</span>
+                </div>
+                <div id="commodityList"></div>
+            </div>
+            <div id="shopPanel">
+                <div class="cargo-status">
+                    <strong>CREDITS:</strong> <span id="shopCredits">0</span>
+                </div>
+                <div id="shopList"></div>
+            </div>
+        </div>
+        <div id="landingButtons">
+            <button id="departBtn">[1] DEPART</button>
+            <button id="stationBtn">[2] STATION</button>
+            <button id="tradeBtn">[3] TRADE</button>
+            <button id="outfitterBtn">[4] OUTFITTER</button>
+        </div>
+    </div>
+
+    <!-- Load old game data first -->
+    <script type="module">
+        // Set flag to prevent old game loop
+        window.preventOldInit = true;
+        import './js/main.js';
+    </script>
+    
+    <!-- Then initialize refactored game -->
+    <script type="module">
+        const statusDiv = document.getElementById('status');
+        
+        async function initGame() {
+            try {
+                statusDiv.textContent = 'Loading refactored modules...';
+                
+                // Load modules
+                const { getEventBus } = await import('./js/core/EventBus.js');
+                const { getStateManager } = await import('./js/core/StateManager.js');
+                const { getMigrationBridge } = await import('./js/core/MigrationBridge.js');
+                const Game = (await import('./js/core/Game.js')).default;
+                
+                statusDiv.textContent = 'Initializing systems...';
+                
+                // Initialize core
+                const eventBus = getEventBus();
+                const stateManager = getStateManager();
+                const migrationBridge = getMigrationBridge();
+                
+                // Wait for old code to load
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                statusDiv.textContent = 'Initializing migration bridge...';
+                migrationBridge.init();
+                
+                // Create game
+                statusDiv.textContent = 'Creating game instance...';
+                const canvas = document.getElementById('gameCanvas');
+                const game = new Game(canvas);
+                
+                statusDiv.textContent = 'Initializing game...';
+                await game.init();
+                
+                statusDiv.textContent = 'Starting game...';
+                game.start();
+                
+                // Make available globally
+                window.refactorDebug = {
+                    eventBus,
+                    stateManager,
+                    migrationBridge,
+                    game
+                };
+                
+                // Check systems
+                const systems = Array.from(game.systems.keys());
+                const status = migrationBridge.getStatus();
+                
+                statusDiv.innerHTML = `
+                    <div>✅ Refactored Game Running</div>
+                    <div>Systems: ${systems.join(', ')}</div>
+                    <div>Migration: ${status.progress}% complete</div>
+                    <div>Press W/A/S/D to move, F to fire</div>
+                `;
+                
+                console.log('Refactored game started successfully!');
+                console.log('Systems loaded:', systems);
+                console.log('Migration status:', status);
+                
+            } catch (error) {
+                statusDiv.innerHTML = `<div style="color: red">Error: ${error.message}</div>`;
+                console.error('Failed to start refactored game:', error);
+            }
+        }
+        
+        // Start after DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initGame);
+        } else {
+            initGame();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module Test</title>
+</head>
+<body>
+    <h1>Module Loading Test</h1>
+    <div id="status">Loading...</div>
+    
+    <script type="module">
+        console.log('Module script starting...');
+        
+        try {
+            // Test importing the modules
+            const { getEventBus } = await import('./js/core/EventBus.js');
+            console.log('EventBus loaded:', !!getEventBus);
+            
+            const { getStateManager } = await import('./js/core/StateManager.js');
+            console.log('StateManager loaded:', !!getStateManager);
+            
+            const eventBus = getEventBus();
+            const stateManager = getStateManager();
+            
+            console.log('EventBus instance:', eventBus);
+            console.log('StateManager instance:', stateManager);
+            
+            document.getElementById('status').textContent = 'Modules loaded successfully!';
+            document.getElementById('status').style.color = 'green';
+            
+        } catch (error) {
+            console.error('Error loading modules:', error);
+            document.getElementById('status').textContent = 'Error: ' + error.message;
+            document.getElementById('status').style.color = 'red';
+        }
+    </script>
+</body>
+</html>

@@ -3,6 +3,9 @@
  * Full game with all features
  */
 
+// Log initialization
+console.log('[main.js] Loading game code...');
+
 // Import all game data - MUST BE AT TOP FOR ES6 MODULES
 import { 
     npcTypes, 
@@ -1213,7 +1216,13 @@ setInterval(() => {
     }
 }, 30000);
 
-// Start the game
+// Start the original game immediately
 console.log('Galaxy Trader initialized!');
-console.log('Controls: S = Save, O = Load, M = Toggle Sound');
+console.log('Controls: W/A/S/D = Move, F = Fire, L = Land, S = Save, O = Load, M = Toggle Sound');
+
+// Mark game as started
+window.gameStarted = true;
+window.oldMainLoaded = true;
+
+// Start game loop
 gameLoop();

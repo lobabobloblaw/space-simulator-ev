@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Refactor Diagnostic</title>
+    <style>
+        body { 
+            background: #000; 
+            color: #0ff; 
+            font-family: monospace; 
+            padding: 20px;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .pending { color: #ff0; }
+        pre { 
+            background: #111; 
+            padding: 10px; 
+            border: 1px solid #333;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Galaxy Trader Refactor Diagnostic</h1>
+    <canvas id="gameCanvas" style="display:none;"></canvas>
+    
+    <h2>Load Status:</h2>
+    <div id="status"></div>
+    
+    <h2>Debug Output:</h2>
+    <pre id="debug"></pre>
+    
+    <!-- Load old code first as modules -->
+    <script type="module">
+        // Import old code to ensure globals are set
+        import './js/main.js';
+    </script>
+    
+    <!-- Then load new architecture -->
+    <script type="module">
+        const status = document.getElementById('status');
+        const debug = document.getElementById('debug');
+        const logs = [];
+        
+        function log(msg, type = 'info') {
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            status.appendChild(line);
+            logs.push({time: Date.now(), msg, type});
+            console.log(msg);
+        }
+        
+        async function diagnose() {
+            log('Starting diagnostic...', 'pending');
+            
+            // Step 1: Check if old code loaded
+            log(`Old code check:`, 'pending');
+            log(`  window.ship: ${!!window.ship}`, window.ship ? 'success' : 'error');
+            log(`  window.game: ${!!window.game}`, window.game ? 'success' : 'error');
+            log(`  window.planets: ${!!window.planets}`, window.planets ? 'success' : 'error');
+            log(`  window.preventOldInit: ${window.preventOldInit}`, 'info');
+            
+            // Step 2: Try loading new modules
+            log('Loading new modules...', 'pending');
+            
+            try {
+                const { getEventBus } = await import('./js/core/EventBus.js');
+                log('  ✓ EventBus loaded', 'success');
+                
+                const { getStateManager } = await import('./js/core/StateManager.js');
+                log('  ✓ StateManager loaded', 'success');
+                
+                const { getMigrationBridge } = await import('./js/core/MigrationBridge.js');
+                log('  ✓ MigrationBridge loaded', 'success');
+                
+                const Game = (await import('./js/core/Game.js')).default;
+                log('  ✓ Game loaded', 'success');
+                
+                // Step 3: Initialize core systems
+                log('Initializing core systems...', 'pending');
+                
+                const eventBus = getEventBus();
+                log('  ✓ EventBus instance created', 'success');
+                
+                const stateManager = getStateManager();
+                log('  ✓ StateManager instance created', 'success');
+                
+                const migrationBridge = getMigrationBridge();
+                log('  ✓ MigrationBridge instance created', 'success');
+                
+                // Step 4: Initialize migration bridge
+                log('Initializing migration bridge...', 'pending');
+                migrationBridge.init();
+                log('  ✓ Migration bridge initialized', 'success');
+                
+                // Step 5: Check state sync
+                log('Checking state sync...', 'pending');
+                const state = stateManager.state;
+                log(`  Ship synced: ${state.ship.x !== undefined}`, state.ship.x !== undefined ? 'success' : 'error');
+                log(`  Planets synced: ${state.planets.length > 0}`, state.planets.length > 0 ? 'success' : 'error');
+                
+                // Step 6: Create game instance
+                log('Creating game instance...', 'pending');
+                const canvas = document.getElementById('gameCanvas');
+                const game = new Game(canvas);
+                log('  ✓ Game instance created', 'success');
+                
+                // Step 7: Initialize game
+                log('Initializing game...', 'pending');
+                await game.init();
+                log('  ✓ Game initialized', 'success');
+                
+                // Step 8: Check migration status
+                const migrationStatus = migrationBridge.getStatus();
+                log(`Migration status: ${migrationStatus.progress}% complete`, 'info');
+                log(`  Migrated: ${migrationStatus.migrated.join(', ') || 'none'}`, 'info');
+                log(`  Pending: ${migrationStatus.pending.join(', ')}`, 'info');
+                
+                // Step 9: Check for actual system files
+                log('Checking for system files...', 'pending');
+                const systemsToCheck = ['InputSystem', 'PhysicsSystem', 'RenderSystem', 'AudioSystem', 'UISystem', 'WeaponSystem', 'SpawnSystem', 'SaveSystem'];
+                const systemsFound = [];
+                
+                for (const systemName of systemsToCheck) {
+                    try {
+                        await import(`./js/systems/${systemName}.js`);
+                        systemsFound.push(systemName);
+                        log(`  ✓ ${systemName} found`, 'success');
+                        
+                        // Auto-mark as migrated if found
+                        const systemKey = systemName.toLowerCase().replace('system', '');
+                        if (migrationStatus.pending.includes(systemKey)) {
+                            migrationBridge.markMigrated(systemKey);
+                            log(`    → Marked ${systemKey} as migrated`, 'success');
+                        }
+                    } catch (error) {
+                        if (!error.message.includes('404')) {
+                            log(`  ⚠ ${systemName}: ${error.message}`, 'error');
+                        }
+                    }
+                }
+                
+                // Step 10: Show updated migration status
+                const finalStatus = migrationBridge.getStatus();
+                log(`\nFinal migration status: ${finalStatus.progress}% complete`, finalStatus.progress > 0 ? 'success' : 'info');
+                log(`  Migrated systems: ${finalStatus.migrated.join(', ') || 'none'}`, finalStatus.migrated.length > 0 ? 'success' : 'info');
+                log(`  Remaining: ${finalStatus.pending.join(', ') || 'none'}`, 'info');
+                
+                // Display debug info
+                debug.textContent = JSON.stringify({
+                    eventBusEvents: eventBus.getEvents(),
+                    stateSnapshot: {
+                        ship: {
+                            x: state.ship.x,
+                            y: state.ship.y,
+                            health: state.ship.health
+                        },
+                        planetsCount: state.planets.length,
+                        npcCount: state.npcShips.length
+                    },
+                    migrationStatus
+                }, null, 2);
+                
+                log('✓ Diagnostic complete!', 'success');
+                
+                // Make available globally for testing
+                window.refactorTest = {
+                    eventBus,
+                    stateManager,
+                    migrationBridge,
+                    game
+                };
+                
+                log('Test objects available at window.refactorTest', 'info');
+                
+            } catch (error) {
+                log(`ERROR: ${error.message}`, 'error');
+                log(`Stack: ${error.stack}`, 'error');
+                debug.textContent = error.stack;
+            }
+        }
+        
+        // DO NOT set prevent flag - we need old code to initialize!
+        // window.preventOldInit = true;  // REMOVED - this was the problem!
+        
+        // Wait for everything to load
+        setTimeout(() => {
+            // Set flag AFTER old code has initialized but BEFORE game loop starts
+            window.preventOldInit = true;
+            diagnose();
+        }, 1000);
+    </script>
+</body>
+</html>
