@@ -2,7 +2,10 @@
  * All game systems consolidated
  */
 
-// Audio System
+// AudioSystem has been migrated to ./AudioSystem.js but is kept here temporarily for compatibility
+// The new AudioSystem uses EventBus pattern, but main.js still uses direct method calls
+// TODO: Update main.js to use EventBus, then remove this and use: import { AudioSystem } from './AudioSystem.js';
+
 export class AudioSystem {
     constructor() {
         this.context = null;
@@ -2379,7 +2382,7 @@ export function buyUpgrade(itemId, ship, shopInventory) {
 }
 
 // Export SaveSystem
-export { SaveSystem } from './saveSystem.js';
+export { SaveSystem } from './SaveSystem.js';
 
 // Export TouchControls
 export { TouchControls } from './touchControls.js';

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Game Debug</title>
+</head>
+<body>
+    <h1>Game Debug Test</h1>
+    <div id="log"></div>
+    
+    <script>
+        const log = (msg) => {
+            const div = document.createElement('div');
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            document.getElementById('log').appendChild(div);
+            console.log(msg);
+        };
+        
+        // Capture errors
+        window.onerror = (msg, url, line, col, error) => {
+            log(`ERROR: ${msg} at ${url}:${line}:${col}`);
+            if (error && error.stack) {
+                log(`Stack: ${error.stack}`);
+            }
+            return false;
+        };
+        
+        log('Starting debug test...');
+        log(`Document ready state: ${document.readyState}`);
+    </script>
+    
+    <!-- Import main.js as module -->
+    <script type="module">
+        import('./js/main.js').then(() => {
+            const log = (msg) => {
+                const div = document.createElement('div');
+                div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                document.getElementById('log').appendChild(div);
+            };
+            
+            log('✅ main.js loaded successfully');
+            
+            // Check what was created
+            setTimeout(() => {
+                log(`window.gameStarted: ${window.gameStarted}`);
+                log(`window.ship exists: ${!!window.ship}`);
+                log(`window.game exists: ${!!window.game}`);
+                log(`window.initGame exists: ${typeof window.initGame}`);
+                log(`window.planets: ${window.planets ? window.planets.length : 'undefined'}`);
+                
+                // Try to manually init if needed
+                if (window.initGame && !window.gameStarted) {
+                    log('Calling initGame manually...');
+                    try {
+                        window.initGame();
+                        log('✅ initGame called successfully');
+                    } catch (e) {
+                        log(`❌ initGame error: ${e.message}`);
+                    }
+                }
+            }, 1000);
+        }).catch(error => {
+            const log = (msg) => {
+                const div = document.createElement('div');
+                div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                div.style.color = 'red';
+                document.getElementById('log').appendChild(div);
+            };
+            
+            log(`❌ Failed to load main.js: ${error.message}`);
+            log(`Stack: ${error.stack}`);
+        });
+    </script>
+</body>
+</html>

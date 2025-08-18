@@ -135,11 +135,16 @@ export const GameEvents = {
     SHIP_DEATH: 'ship.death',
     SHIP_RESPAWN: 'ship.respawn',
     SHIP_UPGRADE: 'ship.upgrade',
+    SHIP_LANDED: 'ship.landed',
+    SHIP_THRUST: 'ship.thrust',
     
     // Combat events
     PROJECTILE_HIT: 'combat.projectile.hit',
     WEAPON_FIRE: 'combat.weapon.fire',
+    WEAPON_FIRED: 'combat.weapon.fired',
     EXPLOSION: 'combat.explosion',
+    ENTITY_DESTROYED: 'combat.entity.destroyed',
+    SHIELD_HIT: 'combat.shield.hit',
     
     // NPC events
     NPC_SPAWN: 'npc.spawn',
@@ -181,6 +186,7 @@ export const GameEvents = {
     UI_UPDATE: 'ui.update',
     MENU_OPEN: 'ui.menu.open',
     MENU_CLOSE: 'ui.menu.close',
+    TUTORIAL_UPDATE: 'ui.tutorial.update',
     
     // Audio events
     AUDIO_TOGGLE: 'audio.toggle',
@@ -190,6 +196,7 @@ export const GameEvents = {
     DEBUG_TOGGLE: 'debug.toggle',
     
     // Physics events
+    PICKUP_COLLECTED: 'physics.pickup.collected',
     PHYSICS_THRUST_CHANGED: 'physics.thrust.changed',
     PHYSICS_BRAKE_CHANGED: 'physics.brake.changed',
     PHYSICS_TURN_CHANGED: 'physics.turn.changed',

@@ -2,38 +2,43 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Module Test</title>
 </head>
 <body>
     <h1>Module Loading Test</h1>
-    <div id="status">Loading...</div>
+    <div id="status">Testing...</div>
     
     <script type="module">
-        console.log('Module script starting...');
+        const status = document.getElementById('status');
+        let messages = [];
         
+        // Test 1: Can we load gameData.js?
         try {
-            // Test importing the modules
-            const { getEventBus } = await import('./js/core/EventBus.js');
-            console.log('EventBus loaded:', !!getEventBus);
-            
-            const { getStateManager } = await import('./js/core/StateManager.js');
-            console.log('StateManager loaded:', !!getStateManager);
-            
-            const eventBus = getEventBus();
-            const stateManager = getStateManager();
-            
-            console.log('EventBus instance:', eventBus);
-            console.log('StateManager instance:', stateManager);
-            
-            document.getElementById('status').textContent = 'Modules loaded successfully!';
-            document.getElementById('status').style.color = 'green';
-            
-        } catch (error) {
-            console.error('Error loading modules:', error);
-            document.getElementById('status').textContent = 'Error: ' + error.message;
-            document.getElementById('status').style.color = 'red';
+            const module1 = await import('./js/data/gameData.js');
+            messages.push('✅ gameData.js loaded');
+            messages.push(`  - Has planets: ${module1.planets ? 'Yes' : 'No'}`);
+        } catch(e) {
+            messages.push('❌ gameData.js failed: ' + e.message);
         }
+        
+        // Test 2: Can we load allSystems.js?
+        try {
+            const module2 = await import('./js/systems/allSystems.js');
+            messages.push('✅ allSystems.js loaded');
+            messages.push(`  - Has AudioSystem: ${module2.AudioSystem ? 'Yes' : 'No'}`);
+        } catch(e) {
+            messages.push('❌ allSystems.js failed: ' + e.message);
+        }
+        
+        // Test 3: Can we load proceduralPlanetRenderer.js?
+        try {
+            const module3 = await import('./js/systems/proceduralPlanetRenderer.js');
+            messages.push('✅ proceduralPlanetRenderer.js loaded');
+        } catch(e) {
+            messages.push('❌ proceduralPlanetRenderer.js failed: ' + e.message);
+        }
+        
+        status.innerHTML = messages.join('<br>');
     </script>
 </body>
 </html>

@@ -15,6 +15,8 @@ import {
     missions
 } from './data/gameData.js';
 
+// AudioSystem is temporarily still imported from allSystems for compatibility
+// The new AudioSystem.js exists but uses EventBus pattern which main.js isn't ready for yet
 import {
     AudioSystem,
     createExplosion,
@@ -47,17 +49,30 @@ import {
 
 import { ProceduralPlanetRenderer } from './systems/proceduralPlanetRenderer.js';
 
-// Get canvas elements
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const minimapCanvas = document.getElementById('minimapCanvas');
-const minimapCtx = minimapCanvas.getContext('2d');
-const planetCanvas = document.getElementById('planetCanvas');
-const planetCtx = planetCanvas.getContext('2d');
+// Canvas elements - will be initialized when DOM is ready
+let canvas, ctx, minimapCanvas, minimapCtx, planetCanvas, planetCtx;
 
-// Set canvas size
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight - 150;  // HUD height (110px) + padding (40px)
+// Initialize canvas elements
+function initCanvasElements() {
+    canvas = document.getElementById('gameCanvas');
+    if (!canvas) {
+        console.error('[main.js] gameCanvas element not found!');
+        return false;
+    }
+    ctx = canvas.getContext('2d');
+    
+    minimapCanvas = document.getElementById('minimapCanvas');
+    minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
+    
+    planetCanvas = document.getElementById('planetCanvas');
+    planetCtx = planetCanvas ? planetCanvas.getContext('2d') : null;
+    
+    // Set canvas size
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight - 150;  // HUD height (110px) + padding (40px)
+    
+    return true;
+}
 
 // Game state
 const game = {
@@ -208,9 +223,8 @@ planetRenderer.initializePlanets(planets);
 // Initialize save system
 const saveSystem = new SaveSystem();
 
-// Initialize touch controls for mobile devices
-const touchControls = new TouchControls(game, ship, canvas);
-window.touchControls = touchControls;  // Make accessible for debugging
+// Initialize touch controls for mobile devices - will be created after canvas is ready
+let touchControls;
 
 // Mission system
 const missionSystem = {
@@ -288,11 +302,8 @@ document.addEventListener('keyup', (e) => {
     game.keys[e.code] = false;
 });
 
-// Window resize
-window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight - 150;  // HUD height (110px) + padding (40px)
-});
+// Window resize - will be set up after canvas is ready
+let resizeHandler;
 
 // Main render function with full visual effects
 function render() {
@@ -1007,8 +1018,10 @@ function render() {
     // Draw minimap
     renderMinimap();
     
-    // Draw touch controls on top of everything
-    touchControls.render();
+    // Draw touch controls on top of everything (if initialized)
+    if (touchControls) {
+        touchControls.render();
+    }
 }
 
 function renderMinimap() {
@@ -1109,8 +1122,10 @@ function gameLoop() {
         // Update tutorial
         updateTutorialHint(ship);
         
-        // Update touch controls
-        touchControls.update();
+        // Update touch controls (if initialized)
+        if (touchControls) {
+            touchControls.update();
+        }
     }
     
     // Always render
@@ -1141,74 +1156,12 @@ window.gameInstance = {
     buyUpgrade: (itemId) => buyUpgrade(itemId, ship, shopInventory, updateShopPanel)
 };
 
-// Wire up landing buttons
-document.getElementById('departBtn').onclick = () => closeLandingOverlay(game);
-document.getElementById('stationBtn').onclick = () => showPanel('landing', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
-document.getElementById('tradeBtn').onclick = () => showPanel('trading', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
-document.getElementById('outfitterBtn').onclick = () => showPanel('shop', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+// Wire up landing buttons (will be done after DOM is ready)
 
 // Start first mission
 missionSystem.assignNext();
 
-// Check for existing save on startup
-if (saveSystem.hasSave()) {
-    // Show load prompt
-    const loadPrompt = document.createElement('div');
-    loadPrompt.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: #141414;
-        border: 1px solid rgba(0, 255, 255, 0.3);
-        padding: 32px;
-        z-index: 10000;
-        font-family: 'JetBrains Mono', monospace;
-        color: white;
-        text-align: center;
-        box-shadow: 0 0 40px rgba(0, 255, 255, 0.2);
-    `;
-    loadPrompt.innerHTML = `
-        <h2 style="color: #00ffff; margin: 0 0 20px 0; font-weight: 300; letter-spacing: 4px; font-size: 18px;">SAVE DETECTED</h2>
-        <p style="margin-bottom: 24px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-size: 12px;">Continue Previous Session?</p>
-        <button id="loadSaveBtn" style="
-            background: transparent;
-            color: #00ffff;
-            border: 1px solid #00ffff;
-            padding: 10px 24px;
-            margin: 0 8px;
-            cursor: pointer;
-            font-family: inherit;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            font-size: 11px;
-            transition: all 0.2s;
-        ">LOAD</button>
-        <button id="newGameBtn" style="
-            background: transparent;
-            color: #888;
-            border: 1px solid #444;
-            padding: 10px 24px;
-            margin: 0 8px;
-            cursor: pointer;
-            font-family: inherit;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            font-size: 11px;
-            transition: all 0.2s;
-        ">NEW GAME</button>
-    `;
-    document.body.appendChild(loadPrompt);
-    
-    document.getElementById('loadSaveBtn').onclick = () => {
-        saveSystem.loadGame(ship, game, missionSystem, missions, npcShips, asteroids, pickups);
-        loadPrompt.remove();
-    };
-    
-    document.getElementById('newGameBtn').onclick = () => {
-        loadPrompt.remove();
-    };
-}
+// Check for existing save (will be done after DOM is ready)
 
 // Autosave every 30 seconds
 setInterval(() => {
@@ -1217,13 +1170,133 @@ setInterval(() => {
     }
 }, 30000);
 
-// Start the original game immediately
-console.log('Galaxy Trader initialized!');
-console.log('Controls: W/A/S/D = Move, F = Fire, L = Land, S = Save, O = Load, M = Toggle Sound');
+// Initialize game when DOM is ready
+function initGame() {
+    console.log('[main.js] Initializing game...');
+    
+    // Make initGame globally accessible for debugging
+    window.initGame = initGame;
+    
+    if (!initCanvasElements()) {
+        console.error('[main.js] Failed to initialize canvas elements');
+        return;
+    }
+    
+    // Now that canvas is ready, initialize TouchControls
+    touchControls = new TouchControls(game, ship, canvas);
+    window.touchControls = touchControls;  // Make accessible for debugging
+    console.log('[main.js] TouchControls initialized');
+    
+    // Set up window resize handler now that canvas is ready
+    resizeHandler = () => {
+        if (canvas) {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 150;  // HUD height (110px) + padding (40px)
+        }
+    };
+    window.addEventListener('resize', resizeHandler);
+    console.log('[main.js] Resize handler installed');
+    
+    // Wire up landing buttons now that DOM is ready
+    const departBtn = document.getElementById('departBtn');
+    const stationBtn = document.getElementById('stationBtn');
+    const tradeBtn = document.getElementById('tradeBtn');
+    const outfitterBtn = document.getElementById('outfitterBtn');
+    
+    if (departBtn) departBtn.onclick = () => closeLandingOverlay(game);
+    if (stationBtn) stationBtn.onclick = () => showPanel('landing', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+    if (tradeBtn) tradeBtn.onclick = () => showPanel('trading', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+    if (outfitterBtn) outfitterBtn.onclick = () => showPanel('shop', ship, updateTradingPanel, updateShopPanel, commodities, shopInventory);
+    console.log('[main.js] Landing buttons wired up');
+    
+    // Check for existing save now that DOM is ready (but not on diagnostic page)
+    if (saveSystem.hasSave() && !window.isDiagnosticPage) {
+        // Show load prompt
+        const loadPrompt = document.createElement('div');
+        loadPrompt.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #141414;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            padding: 32px;
+            z-index: 10000;
+            font-family: 'JetBrains Mono', monospace;
+            color: white;
+            text-align: center;
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.2);
+        `;
+        loadPrompt.innerHTML = `
+            <h2 style="color: #00ffff; margin: 0 0 20px 0; font-weight: 300; letter-spacing: 4px; font-size: 18px;">SAVE DETECTED</h2>
+            <p style="margin-bottom: 24px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-size: 12px;">Continue Previous Session?</p>
+            <button id="loadSaveBtn" style="
+                background: transparent;
+                color: #00ffff;
+                border: 1px solid #00ffff;
+                padding: 10px 24px;
+                margin: 0 8px;
+                cursor: pointer;
+                font-family: inherit;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                font-size: 11px;
+                transition: all 0.2s;
+            ">LOAD</button>
+            <button id="newGameBtn" style="
+                background: transparent;
+                color: #888;
+                border: 1px solid #444;
+                padding: 10px 24px;
+                margin: 0 8px;
+                cursor: pointer;
+                font-family: inherit;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                font-size: 11px;
+                transition: all 0.2s;
+            ">NEW GAME</button>
+        `;
+        document.body.appendChild(loadPrompt);
+        
+        document.getElementById('loadSaveBtn').onclick = () => {
+            saveSystem.loadGame(ship, game, missionSystem, missions, npcShips, asteroids, pickups);
+            loadPrompt.remove();
+        };
+        
+        document.getElementById('newGameBtn').onclick = () => {
+            loadPrompt.remove();
+        };
+    }
+    
+    console.log('Galaxy Trader initialized!');
+    console.log('Controls: W/A/S/D = Move, F = Fire, L = Land, S = Save, O = Load, M = Toggle Sound');
+    
+    // Mark game as started
+    window.gameStarted = true;
+    window.oldMainLoaded = true;
+    
+    // Start game loop
+    gameLoop();
+}
 
-// Mark game as started
-window.gameStarted = true;
-window.oldMainLoaded = true;
+// Start initialization when DOM is ready
+console.log('[main.js] Document readyState:', document.readyState);
+if (document.readyState === 'loading') {
+    console.log('[main.js] Waiting for DOMContentLoaded...');
+    document.addEventListener('DOMContentLoaded', initGame);
+} else {
+    // DOM is already ready
+    console.log('[main.js] DOM already ready, initializing now...');
+    initGame();
+}
 
-// Start game loop
-gameLoop();
+// Also make sure to initialize if module loads after DOM
+if (typeof window !== 'undefined') {
+    window.addEventListener('load', () => {
+        if (!window.gameStarted) {
+            console.log('[main.js] Window load event - initializing game...');
+            initGame();
+        }
+    });
+}

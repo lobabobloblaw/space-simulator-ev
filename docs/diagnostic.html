@@ -19,6 +19,14 @@
             border: 1px solid #333;
             overflow: auto;
         }
+        /* Hide game UI elements that shouldn't appear on diagnostic page */
+        #saveGameDialog,
+        #landingOverlay,
+        .game-notification,
+        #hud,
+        #tutorialHint {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -31,10 +39,30 @@
     <h2>Debug Output:</h2>
     <pre id="debug"></pre>
     
+    <!-- Set flag BEFORE any modules load -->
+    <script>
+        // This runs immediately, before module loading
+        window.isDiagnosticPage = true;
+        console.log('[Diagnostic] Set isDiagnosticPage flag');
+    </script>
+    
     <!-- Load old code first as modules -->
     <script type="module">
         // Import old code to ensure globals are set
         import './js/main.js';
+        
+        // Hide save dialog if it appears
+        setTimeout(() => {
+            const saveDialog = document.getElementById('saveGameDialog');
+            if (saveDialog) {
+                saveDialog.style.display = 'none';
+            }
+            // Also hide landing overlay if it appears
+            const landingOverlay = document.getElementById('landingOverlay');
+            if (landingOverlay) {
+                landingOverlay.style.display = 'none';
+            }
+        }, 100);
     </script>
     
     <!-- Then load new architecture -->
@@ -182,11 +210,15 @@
             }
         }
         
-        // DO NOT set prevent flag - we need old code to initialize!
-        // window.preventOldInit = true;  // REMOVED - this was the problem!
-        
         // Wait for everything to load
         setTimeout(() => {
+            // Hide any game UI elements that might have appeared
+            const saveDialog = document.getElementById('saveGameDialog');
+            if (saveDialog) saveDialog.style.display = 'none';
+            
+            const landingOverlay = document.getElementById('landingOverlay');
+            if (landingOverlay) landingOverlay.style.display = 'none';
+            
             // Set flag AFTER old code has initialized but BEFORE game loop starts
             window.preventOldInit = true;
             diagnose();

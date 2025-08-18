@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Debug Test</title>
+</head>
+<body>
+    <h1>Debug Test</h1>
+    <div id="output"></div>
+    
+    <script type="module">
+        const output = document.getElementById('output');
+        const messages = [];
+        
+        try {
+            messages.push('Starting module imports...');
+            
+            // Import main.js
+            await import('./js/main.js');
+            
+            messages.push('✅ main.js loaded successfully!');
+            messages.push(`Ship exists: ${typeof window.ship !== 'undefined'}`);
+            messages.push(`Game exists: ${typeof window.game !== 'undefined'}`);
+            messages.push(`Planets: ${window.planets ? window.planets.length : 0}`);
+            
+        } catch (error) {
+            messages.push('❌ Error loading main.js:');
+            messages.push(error.message);
+            messages.push('Stack trace:');
+            messages.push(error.stack);
+        }
+        
+        output.innerHTML = messages.join('<br>');
+    </script>
+</body>
+</html>
