@@ -119,7 +119,8 @@ const pickups = [];
 const asteroids = [];
 const stars = { far: [], mid: [], near: [] };
 
-// Make accessible for debugging
+// Make accessible for debugging and refactored systems
+window.asteroids = asteroids;
 window.npcShips = npcShips;
 window.projectiles = projectiles;
 window.warpEffects = warpEffects;
