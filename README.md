@@ -12,7 +12,7 @@ space-simulator-ev/
 │   ├── index.html         # Main game HTML
 │   ├── css/main.css       # Cyberpunk UI styles
 │   └── js/                # Game code
-│       ├── main.js        # Core game loop
+│       ├── main_eventbus_pure.js  # Active entry point (EventBus architecture)
 │       ├── data/          # Game configuration
 │       └── systems/       # Game systems
 ├── archive/               # Development history & backups
@@ -36,7 +36,7 @@ python3 -m http.server 8000
 
 ## Deployment
 
-Changes pushed to the `main` branch are automatically deployed to GitHub Pages (~1 minute delay).
+Changes pushed to the `main` branch are automatically deployed to GitHub Pages (~1–10 minutes delay).
 
 ```bash
 git add docs/
@@ -47,14 +47,13 @@ git push
 ## Controls
 
 - **W/↑**: Thrust forward
-- **A/D or ←/→**: Turn left/right  
+- **A/D or ←/→**: Turn left/right
 - **Space**: Brake
-- **F**: Fire weapon
-- **Q**: Switch weapons
-- **L**: Land on nearby planet
-- **S**: Save game
-- **O**: Load game
+- **F**: Fire
+- **Q**: Switch weapon
+- **L**: Land (nearby planet)
 - **M**: Toggle sound
+- **F5**: Save, **F9**: Load, **F12**: Clear save
 
 ## Features
 
@@ -65,16 +64,10 @@ git push
 - Mission system
 - Cyberpunk UI with particle effects
 
-## Latest Updates (Session 12)
+## Latest Updates (Session 43)
 
-- **Terra Nova Fix**: Oceanic world now shows ~75% water coverage consistently
-- **Minimap Update**: All elements now render in monochrome white (cleaner design)
-- **UI Improvements**: Landing window aligned with bottom HUD, landscapes fill full width
-- **Polish**: No more black bars on planet images, better responsive design
-
-### Recent Sessions
-- Session 11: Landing UI redesign with fixed window size
-- Session 10: Combat balance and NPC improvements
-- Session 9: Multiple bug fixes and gameplay enhancements
-- Session 8: AI-generated planet landscapes via Pollinations.ai
-- Session 7: Save/load fixes and project structure cleanup
+- High-quality Pollinations landscapes (flux, deterministic seed, tightened prompts); provider fallback; hi‑DPI rendering
+- Landing UI: richer descriptions; compact market/outfitter info; no-scroll one-shot
+- HUD: two-column controls; Mute toggle (M)
+- Starfield density increased (2.0x); import paths normalized
+- Deployed to GitHub Pages from `/docs`

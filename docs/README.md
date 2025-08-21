@@ -3,7 +3,7 @@
 A retro-style space trading and combat game built with HTML5 Canvas and JavaScript.
 
 ## Play Now
-[Launch Galaxy Trader](https://yourusername.github.io/space-simulator-ev/)
+[Launch Galaxy Trader](https://lobabobloblaw.github.io/space-simulator-ev/)
 
 ## Features
 - 🚀 **Space Trading**: Buy low, sell high across multiple planets
@@ -20,6 +20,9 @@ A retro-style space trading and combat game built with HTML5 Canvas and JavaScri
 - **Q** - Switch weapons
 - **L** - Land on planet (when close)
 - **M** - Toggle sound
+ - **F5** - Save
+ - **F9** - Load
+ - **F12** - Clear save
 
 ## Getting Started
 1. Start unarmed - trade commodities to earn credits

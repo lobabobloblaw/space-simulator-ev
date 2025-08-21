@@ -50,7 +50,17 @@ python3 -m http.server 8000
 - Saves ship state, credits, weapons, cargo
 
 ## Recent Sessions
-### Session 41 (Latest)
+### Session 43 (Latest)
+- High-quality planet landscapes via Pollinations (model=flux, enhance optional), with deterministic seeds and tightened prompts (no animals/humans)
+- Provider flow with fallback (Unsplash, Pollinations, procedural) and robust timeouts; provider overlay now disabled by default
+- Fixed duplicate planet visual code causing forced low-res images; unified draw path
+- Landing UI: richer planet descriptions, compact market highlights and outfitter info (one-shot, no scroll)
+- Controls HUD: two-column layout; added Mute toggle (M)
+- Starfield density increased (2.0x); import paths normalized to relative
+- RenderSystem safeguards to rehydrate visuals if missing
+- Deployed to GitHub Pages (serving from /docs)
+
+### Session 41
 - Fixed NPC visual highlights (removed distracting glows)
 - Overhauled NPC spawning (natural movement, no swarming)
 - Fixed trading UI (proper header/scroll separation)
