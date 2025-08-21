@@ -4,20 +4,25 @@ Copy and paste this entire prompt to start your next session:
 
 ---
 
-I'm working on Galaxy Trader, a 2D space trading game built with pure EventBus architecture. The project is located at `/Users/alexvoigt/Documents/Claude/space-simulator-ev/` on my Mac.
+I'm working on Galaxy Trader, a 2D space trading/combat game built with a pure EventBus architecture. The project is at `/Users/alexvoigt/Documents/Claude/space-simulator-ev/`.
 
 ## Current Status
-The game is FULLY FUNCTIONAL. In the last session (39), we restored asteroid collision effects including damage, screen shake, and visual feedback. Everything works correctly.
+The game is fully functional and deployed. In the last session (45) we:
+- Added reputation-based trade price modifiers; patrol hails and pirate taunts
+- Aligned Outfitter UI with Commodities Market (header + fixed credits, scrollable list)
+- Improved combat dynamics (spread + recoil bloom, longer projectile lifetimes, NPC arrive/strafe/damping/flee)
+- Added a robust Debug overlay (TAB) with quick actions (+9999cr, grant weapons, next weapon), damage numbers, and spread control
+- Fixed shop weapon install (proper stats) and weapon switching (no double-advance)
 
 ## Critical Information
-- **ACTIVE FILE:** The game uses `main_eventbus_pure.js` (NOT main.js!)
+- **ACTIVE FILE:** `docs/js/main_eventbus_pure.js` (NOT `main.js`)
 - **ARCHITECTURE:** Pure EventBus - no global variables, all state in StateManager
 - **TO RUN:** `cd /Users/alexvoigt/Documents/Claude/space-simulator-ev && python3 -m http.server 8000` then open `http://localhost:8000/docs/`
 
 ## Quick Orientation
-Read these files first:
-1. `SESSION_40_QUICK_START.md` - Immediate context
-2. `SESSION_39_HANDOFF.md` - Detailed last session info
+Read these first:
+1. `SESSION_45_HANDOFF.md` - Detailed last session info
+2. `SESSION_40_QUICK_START.md` - Quick orientation
 3. `SESSION_SUMMARY.md` - Overall project status
 
 ## Architecture Rules (IMPORTANT)
@@ -27,12 +32,12 @@ Read these files first:
 4. The game uses relative imports (`../core/`, `./`) not absolute
 
 ## Current Features Working
-- Ship movement, combat, shields
-- Asteroid collisions with damage/effects
-- NPC AI with different personalities
-- Trading system with multiple planets
-- Save/Load (F5/F9 keys)
-- All graphics rendering correctly
+- Ship movement, combat, shields; asteroid collisions
+- NPC AI (pirates, patrol, traders, freighters)
+- Trading across 4 planets; shop/upgrades; mission system
+- Save/Load (F5/F9/F12); Respawn (R)
+- Planet images (Pollinations flux + Unsplash + Lexica fallback) with HQ flow
+- Ship Radio (prev/play/next + volume, procedural ambient tracks)
 
 ## My Preferences
 - Be concise and focus on relevant code only
@@ -41,13 +46,12 @@ Read these files first:
 - Ask for permission rather than assuming limitations
 
 ## Potential Tasks (choose based on what I ask for)
-1. Add new weapon types
-2. Implement space stations
-3. Add faction/reputation system
-4. Create quest chains
-5. Performance optimizations
-6. Add multiplayer support
-7. Or debug any issues I mention
+1. Lower UI polish (primary): tighten HUD bottom band; clarify credits/weapon/kills; separators
+2. Radio polish: add progress/scan bar and channel labels; baseline alignment
+3. Visual polish: faction decals on minimap and HUD target brackets
+4. Performance: pool/cull explosion particles and trails
+5. Combat tweaks: tracer variance; micro spread/cadence tuning
+6. Or debug any issues I mention
 
 ## Testing Commands
 ```javascript
@@ -56,10 +60,12 @@ window.stateManager.state  // View game state
 window.eventBus            // Event system
 window.systems             // All game systems
 
-// Test collision effects:
+// Quick tests:
 const state = window.stateManager.state;
-state.ship.x = state.asteroids[0].x - 20;
-state.ship.vx = 1; // Ram asteroid
+// Respawn test: simulate death then press R
+state.ship.health = 0; state.ship.isDestroyed = true; window.eventBus.emit('ship.death');
+// Radio
+window.eventBus.emit('audio.music.play');
 ```
 
 ## If I Report Issues
@@ -67,13 +73,11 @@ state.ship.vx = 1; // Ram asteroid
 ### "No graphics showing"
 - Have me clear save data: Press F12 twice, then reload
 
-### "Collisions not working"  
-- They should be! Check PhysicsSystem.js for damage calculation
-- Look for screen shake and red flash on impact
+### "Collisions not working"
+- Check `PhysicsSystem.js` for damage calc; screen shake and red flash on impact
 
 ### "Which file is running?"
-- Confirm index.html loads `main_eventbus_pure.js`
-- Old `main.js` should NOT be used
+- Confirm `docs/index.html` loads `js/main_eventbus_pure.js` (not `main.js`)
 
 ## Key File Locations
 ```
@@ -83,9 +87,13 @@ state.ship.vx = 1; // Ram asteroid
 /docs/js/systems/NPCSystem.js      - NPC AI
 /docs/js/core/EventBus.js          - Event system
 /docs/js/core/StateManager.js      - Central state
+/docs/js/systems/UISystem.js       - HUD, landing overlay, planet image pipeline
+/docs/js/systems/ShipDesigns.js    - Procedural ship silhouettes
+/docs/js/systems/FactionVisuals.js - Faction palettes + decals
+/docs/js/systems/AudioSystem.js    - SFX + Radio
 ```
 
-Please start by asking me what I'd like to work on today, or if I'm experiencing any issues with the game.
+Please start by asking what I’d like to do next (lower UI polish, radio polish, visual polish, performance, or combat tweaks), or if I’m experiencing issues.
 
 ---
 

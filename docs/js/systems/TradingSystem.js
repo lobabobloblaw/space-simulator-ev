@@ -35,11 +35,25 @@ export default class TradingSystem {
         console.log('TradingSystem initialized');
     }
 
+    // Compute trader reputation effect (±5% at ±50 rep)
+    // Returns { buyMult, sellMult, effect }
+    getTraderRepEffect() {
+        const rep = (this.stateManager?.state?.reputation?.trader) || 0;
+        const clamped = Math.max(-50, Math.min(50, rep));
+        const effect = clamped * 0.001; // ±0.05
+        return {
+            buyMult: 1 - effect,
+            sellMult: 1 + effect,
+            effect
+        };
+    }
+
     showTradingPanel() {
         const state = this.stateManager.state;
         const planet = state.ship.landedPlanet;
         
         if (!planet || !planet.commodityPrices) return;
+        const repEff = this.getTraderRepEffect();
 
         // Hide other panels
         document.getElementById('landingInfo').style.display = 'none';
@@ -79,20 +93,25 @@ export default class TradingSystem {
             });
 
             for (const [type, items] of Object.entries(cargoGroups)) {
-                const commodity = commodities[type];
+                const commodity = commodities[type] || { name: type, icon: '📦' };
                 const sellPrice = planet.commodityPrices[type];
-                const profit = sellPrice - items[0].buyPrice;
-                const profitClass = profit > 0 ? 'profit' : profit < 0 ? 'loss' : '';
-                
+                const canSellHere = Number.isFinite(sellPrice);
+                const adjustedSell = canSellHere ? Math.max(1, Math.round(sellPrice * repEff.sellMult)) : 0;
+                const profit = canSellHere ? (adjustedSell - items[0].buyPrice) : 0;
+                const profitClass = canSellHere ? (profit > 0 ? 'profit' : profit < 0 ? 'loss' : '') : '';
+                const modStr = repEff.effect !== 0 ? ` <span style="color:#8ac">${repEff.effect>0?'+':''}${Math.round(repEff.effect*100)}%</span>` : '';
+                const priceHtml = canSellHere
+                    ? `§${adjustedSell}${modStr} (${profit > 0 ? '+' : ''}${profit})`
+                    : '<span style="color:#888">Not accepted here</span>';
+
                 html += `
                     <div class="commodity-item">
                         <span class="commodity-icon">${commodity.icon}</span>
                         <span class="commodity-name">${commodity.name} (${items.length})</span>
-                        <span class="commodity-price ${profitClass}">
-                            §${sellPrice} (${profit > 0 ? '+' : ''}${profit})
-                        </span>
-                        <button class="trade-btn sell-btn" onclick="window.tradingSystem.sellCommodity('${type}')">
-                            SELL
+                        <span class="commodity-price ${profitClass}">${priceHtml}</span>
+                        <button class="trade-btn sell-btn" ${!canSellHere ? 'disabled' : ''}
+                                onclick="${!canSellHere ? '' : `window.tradingSystem.sellCommodity('${type}')`}">
+                            ${!canSellHere ? 'NO BUYERS' : 'SELL'}
                         </button>
                     </div>
                 `;
@@ -104,15 +123,17 @@ export default class TradingSystem {
         
         for (const [type, price] of Object.entries(planet.commodityPrices)) {
             const commodity = commodities[type];
-            const canAfford = state.ship.credits >= price;
+            const adjustedBuy = Math.max(1, Math.round(price * repEff.buyMult));
+            const canAfford = state.ship.credits >= adjustedBuy;
             const hasSpace = state.ship.cargo.length < state.ship.cargoCapacity;
             const canBuy = canAfford && hasSpace;
+            const modStr = repEff.effect !== 0 ? ` <span style="color:#8ac">${repEff.effect>0?'-':'+'}${Math.abs(Math.round(repEff.effect*100))}%</span>` : '';
             
             html += `
                 <div class="commodity-item">
                     <span class="commodity-icon">${commodity.icon}</span>
                     <span class="commodity-name">${commodity.name}</span>
-                    <span class="commodity-price">§${price}</span>
+                    <span class="commodity-price">§${adjustedBuy}${modStr}</span>
                     <button class="trade-btn buy-btn" 
                             ${!canBuy ? 'disabled' : ''} 
                             onclick="window.tradingSystem.buyCommodity('${type}', ${price})">
@@ -127,9 +148,13 @@ export default class TradingSystem {
 
     buyCommodity(type, price) {
         const state = this.stateManager.state;
+        const planet = state.ship.landedPlanet;
+        const repEff = this.getTraderRepEffect();
+        const base = planet?.commodityPrices?.[type];
+        const effectivePrice = Number.isFinite(base) ? Math.max(1, Math.round(base * repEff.buyMult)) : price;
         
         // Check conditions
-        if (state.ship.credits < price) {
+        if (state.ship.credits < effectivePrice) {
             this.eventBus.emit(GameEvents.UI_MESSAGE, {
                 message: 'Insufficient credits!',
                 type: 'error',
@@ -148,10 +173,10 @@ export default class TradingSystem {
         }
 
         // Make purchase
-        state.ship.credits -= price;
+        state.ship.credits -= effectivePrice;
         state.ship.cargo.push({
             type: type,
-            buyPrice: price,
+            buyPrice: effectivePrice,
             buyLocation: state.ship.landedPlanet.name
         });
 
@@ -165,10 +190,15 @@ export default class TradingSystem {
         // Show message
         const commodity = commodities[type];
         this.eventBus.emit(GameEvents.UI_MESSAGE, {
-            message: `Bought ${commodity.name} for §${price}`,
+            message: `Bought ${commodity.name} for §${effectivePrice}`,
             type: 'success',
             duration: 2000
         });
+
+        // Reputation: small gain for commerce activity (optional, minor)
+        state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
+        state.reputation.trader = (state.reputation.trader || 0) + 1;
+        this.eventBus.emit(GameEvents.REPUTATION_CHANGED, { faction: 'trader', delta: +1, total: state.reputation.trader });
     }
 
     sellCommodity(type) {
@@ -181,11 +211,21 @@ export default class TradingSystem {
 
         const item = state.ship.cargo[itemIndex];
         const sellPrice = planet.commodityPrices[type];
-        const profit = sellPrice - item.buyPrice;
+        if (!Number.isFinite(sellPrice)) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: 'No buyers for this cargo here',
+                type: 'warning',
+                duration: 1800
+            });
+            return;
+        }
+        const repEff = this.getTraderRepEffect();
+        const adjustedSell = Math.max(1, Math.round(sellPrice * repEff.sellMult));
+        const profit = adjustedSell - item.buyPrice;
 
         // Remove from cargo and add credits
         state.ship.cargo.splice(itemIndex, 1);
-        state.ship.credits += sellPrice;
+        state.ship.credits += adjustedSell;
 
         // Track trading profit
         if (!state.ship.totalProfit) state.ship.totalProfit = 0;
@@ -206,10 +246,16 @@ export default class TradingSystem {
                           profit < 0 ? ` (Loss: §${Math.abs(profit)})` : '';
         
         this.eventBus.emit(GameEvents.UI_MESSAGE, {
-            message: `Sold ${commodity.name} for §${sellPrice}${profitMsg}`,
+            message: `Sold ${commodity.name} for §${adjustedSell}${profitMsg}`,
             type: profit > 0 ? 'success' : profit < 0 ? 'warning' : 'info',
             duration: 2000
         });
+
+        // Reputation: commerce increases trader standing (sell weighted a bit more)
+        state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
+        const delta = profit > 0 ? 2 : 1;
+        state.reputation.trader = (state.reputation.trader || 0) + delta;
+        this.eventBus.emit(GameEvents.REPUTATION_CHANGED, { faction: 'trader', delta, total: state.reputation.trader });
 
         // Check for trading mission completion
         if (state.ship.credits >= 750 && state.missionSystem) {

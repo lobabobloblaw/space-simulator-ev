@@ -196,13 +196,25 @@ export const GameEvents = {
     MENU_CLOSE: 'ui.menu.close',
     TUTORIAL_UPDATE: 'ui.tutorial.update',
     
+    
     // Audio events
     AUDIO_TOGGLE: 'audio.toggle',
     AUDIO_PLAY: 'audio.play',
     AUDIO_STATE_CHANGED: 'audio.state.changed',
+    // Music/Radio events
+    AUDIO_MUSIC_TOGGLE: 'audio.music.toggle',
+    AUDIO_MUSIC_PLAY: 'audio.music.play',
+    AUDIO_MUSIC_PAUSE: 'audio.music.pause',
+    AUDIO_MUSIC_NEXT: 'audio.music.next',
+    AUDIO_MUSIC_PREV: 'audio.music.prev',
+    AUDIO_MUSIC_VOLUME: 'audio.music.volume',
+    AUDIO_MUSIC_STATE: 'audio.music.state',
     
     // Debug events
     DEBUG_TOGGLE: 'debug.toggle',
+    
+    // Reputation events
+    REPUTATION_CHANGED: 'reputation.changed',
     
     // Physics events
     PICKUP_COLLECTED: 'physics.pickup.collected',

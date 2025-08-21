@@ -1,5 +1,6 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { GameConstants } from '../utils/Constants.js';
 
 /**
  * WeaponSystem - Handles all weapon mechanics (firing, projectiles, damage)
@@ -132,12 +133,41 @@ export class WeaponSystem {
     fireProjectile(shooter, angle, isPlayer, weapon) {
         if (!shooter || !weapon) return;
         
+        // Apply weapon-specific spread (degrees)
+        // Base spread per-weapon (degrees)
+        let spreadDeg = (weapon.type === 'rapid') ? 4.0
+                           : (weapon.type === 'laser') ? 1.2
+                           : (weapon.type === 'plasma') ? 1.0
+                            : 0.0;
+        // Debug global spread multiplier
+        try {
+            const dbg = this.stateManager.state.debug || {};
+            const mult = (typeof dbg.spreadMult === 'number') ? dbg.spreadMult : 1;
+            spreadDeg *= mult;
+        } catch (_) {}
+        // Dynamic recoil bloom for player: grows with sustained fire, decays over time (see update())
+        if (isPlayer) {
+            const ship = shooter;
+            const bloom = Math.min(6.0, Math.max(0, ship.spreadBloom || 0));
+            // Apply debug multiplier to bloom as well
+            try {
+                const dbg = this.stateManager.state.debug || {};
+                const mult = (typeof dbg.spreadMult === 'number') ? dbg.spreadMult : 1;
+                spreadDeg += bloom * mult;
+            } catch (_) {
+                spreadDeg += bloom;
+            }
+        }
+        const spreadRad = spreadDeg * Math.PI / 180;
+        const jitter = (Math.random() - 0.5) * 2 * spreadRad;
+        const finalAngle = angle + jitter;
+
         // Create projectile with proper velocity based on weapon type
         const projectile = {
-            x: shooter.x + Math.cos(angle) * (shooter.size + 5),
-            y: shooter.y + Math.sin(angle) * (shooter.size + 5),
-            vx: Math.cos(angle) * weapon.speed + shooter.vx,
-            vy: Math.sin(angle) * weapon.speed + shooter.vy,
+            x: shooter.x + Math.cos(finalAngle) * (shooter.size + 5),
+            y: shooter.y + Math.sin(finalAngle) * (shooter.size + 5),
+            vx: Math.cos(finalAngle) * weapon.speed + shooter.vx,
+            vy: Math.sin(finalAngle) * weapon.speed + shooter.vy,
             isPlayer: isPlayer,
             shooter: shooter,
             lifetime: 0,
@@ -147,18 +177,18 @@ export class WeaponSystem {
         
         // Adjust velocity for specific weapon types
         if (weapon.type === "rapid") {
-            projectile.vx = Math.cos(angle) * 3 + shooter.vx;
-            projectile.vy = Math.sin(angle) * 3 + shooter.vy;
+            projectile.vx = Math.cos(finalAngle) * 3 + shooter.vx;
+            projectile.vy = Math.sin(finalAngle) * 3 + shooter.vy;
         } else if (weapon.type === "plasma") {
-            projectile.vx = Math.cos(angle) * 1.5 + shooter.vx;
-            projectile.vy = Math.sin(angle) * 1.5 + shooter.vy;
+            projectile.vx = Math.cos(finalAngle) * 1.5 + shooter.vx;
+            projectile.vy = Math.sin(finalAngle) * 1.5 + shooter.vy;
         } else if (weapon.type === "mining") {
-            projectile.vx = Math.cos(angle) * 2 + shooter.vx;
-            projectile.vy = Math.sin(angle) * 2 + shooter.vy;
+            projectile.vx = Math.cos(finalAngle) * 2 + shooter.vx;
+            projectile.vy = Math.sin(finalAngle) * 2 + shooter.vy;
         } else {
             // Default laser
-            projectile.vx = Math.cos(angle) * 2 + shooter.vx;
-            projectile.vy = Math.sin(angle) * 2 + shooter.vy;
+            projectile.vx = Math.cos(finalAngle) * 2 + shooter.vx;
+            projectile.vy = Math.sin(finalAngle) * 2 + shooter.vy;
         }
         
         // Add to projectiles array
@@ -168,6 +198,13 @@ export class WeaponSystem {
         this.syncState();
         
         console.log(`[WeaponSystem] Fired ${weapon.type} projectile`);
+
+        // Increase recoil bloom for player after shot
+        if (isPlayer) {
+            const ship = shooter;
+            const add = (weapon.type === 'rapid') ? 0.4 : (weapon.type === 'plasma') ? 0.3 : 0.25;
+            ship.spreadBloom = Math.min(6.0, (ship.spreadBloom || 0) + add);
+        }
     }
     
     /**
@@ -182,8 +219,18 @@ export class WeaponSystem {
             proj.y += proj.vy;
             proj.lifetime++;
             
-            // Remove expired projectiles
-            if (proj.lifetime > 60) {
+            // Remove expired projectiles (per-type lifetime, extended for longer travel)
+            let maxLifetime = GameConstants?.WEAPONS?.PROJECTILE_LIFETIME ?? 100;
+            if (proj.type === 'rapid') maxLifetime = 80;
+            else if (proj.type === 'plasma') maxLifetime = 140;
+            else if (proj.type === 'mining') maxLifetime = 100;
+            // Apply optional debug multiplier
+            try {
+                const mult = (state?.debug?.projLifetimeMult) ?? 1;
+                maxLifetime = Math.floor(maxLifetime * mult);
+            } catch (_) {}
+            // 'laser' uses default
+            if (proj.lifetime > maxLifetime) {
                 this.projectiles.splice(i, 1);
                 this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_EXPIRED, { projectile: proj });
                 continue;
@@ -237,40 +284,25 @@ export class WeaponSystem {
      * Handle projectile hitting the player ship
      */
     handleProjectileHitShip(projectile, ship, explosions, audioSystem) {
-        // Apply damage
-        if (ship.shield > 0) {
-            ship.shield = Math.max(0, ship.shield - projectile.damage);
-            this.eventBus.emit(GameEvents.SHIELD_HIT, {
-                ship: ship,
-                damage: projectile.damage
-            });
-            
-            // Create shield hit effect
-            if (explosions && this.createExplosion) {
-                explosions.push(this.createExplosion(projectile.x, projectile.y, true));
-            }
-            
-            // Play shield hit sound
-            if (audioSystem) {
-                audioSystem.playShieldHit();
-            }
-        } else {
-            ship.health = Math.max(0, ship.health - projectile.damage);
-            this.eventBus.emit(GameEvents.SHIP_DAMAGE, {
-                ship: ship,
-                damage: projectile.damage
-            });
-            
-            // Create hit effect
-            if (explosions && this.createExplosion) {
-                explosions.push(this.createExplosion(projectile.x, projectile.y, true));
-            }
-            
-            // Play hit sound
-            if (audioSystem) {
-                audioSystem.playExplosion(true);
+        const dmg = projectile.damage;
+        const god = this.stateManager.state.debug?.godMode;
+        if (!god) {
+            if (ship.shield > 0) {
+                ship.shield = Math.max(0, ship.shield - dmg);
+                this.eventBus.emit(GameEvents.SHIELD_HIT, { ship, damage: dmg });
+                if (audioSystem && audioSystem.playShieldHit) audioSystem.playShieldHit();
+            } else {
+                ship.health = Math.max(0, ship.health - dmg);
+                this.eventBus.emit(GameEvents.SHIP_DAMAGE, { ship, damage: dmg });
+                if (audioSystem && audioSystem.playExplosion) audioSystem.playExplosion(true);
             }
         }
+        // Create hit effect
+        if (explosions && this.createExplosion) {
+            explosions.push(this.createExplosion(projectile.x, projectile.y, true));
+        }
+        // Debug damage number
+        this.eventBus.emit('debug.damage', { x: projectile.x, y: projectile.y, amount: dmg });
         
         // Emit projectile hit event
         this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
@@ -296,6 +328,8 @@ export class WeaponSystem {
         if (explosions && this.createExplosion) {
             explosions.push(this.createExplosion(projectile.x, projectile.y, true));
         }
+        // Debug damage number
+        this.eventBus.emit('debug.damage', { x: projectile.x, y: projectile.y, amount: projectile.damage });
         
         // Emit events
         this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
@@ -386,16 +420,10 @@ export class WeaponSystem {
             });
         }
         
-        // Switch weapons
+        // Switch weapons (emit event only; switching handled centrally)
         if (hasKey('q') && !ship.weaponSwitchPressed && ship.weapons && ship.weapons.length > 1) {
-            ship.currentWeapon = (ship.currentWeapon + 1) % ship.weapons.length;
             ship.weaponSwitchPressed = true;
-            
-            // Emit switch event
-            this.eventBus.emit(GameEvents.INPUT_SWITCH_WEAPON, {
-                ship: ship,
-                newWeapon: ship.weapons[ship.currentWeapon]
-            });
+            this.eventBus.emit(GameEvents.INPUT_SWITCH_WEAPON);
         } else if (!hasKey('q')) {
             ship.weaponSwitchPressed = false;
         }
@@ -415,7 +443,26 @@ export class WeaponSystem {
         // Calculate angle to target
         const dx = target.x - npc.x;
         const dy = target.y - npc.y;
-        const angle = Math.atan2(dy, dx);
+        let angle = Math.atan2(dy, dx);
+
+        // Apply range-based aim error using GameConstants.NPC.ACCURACY
+        try {
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const ACC = GameConstants?.NPC?.ACCURACY || { close: 0.8, medium: 0.5, long: 0.3, max: 0.2 };
+            const MOVEP = GameConstants?.NPC?.MOVEMENT_PENALTY ?? 0.5;
+            const speed = Math.sqrt((target.vx || 0) ** 2 + (target.vy || 0) ** 2);
+            // Determine bucket and base spread
+            let acc = ACC.long; let baseSpreadDeg = 9;
+            if (dist < 150) { acc = ACC.close; baseSpreadDeg = 3; }
+            else if (dist < 300) { acc = ACC.medium; baseSpreadDeg = 6; }
+            else if (dist > 450) { acc = ACC.max; baseSpreadDeg = 12; }
+            // Movement penalty scales with target speed (normalized to ~0.8 default max speed)
+            const speedFactor = Math.min(1, speed / 0.8);
+            const effectiveAcc = Math.max(0, Math.min(1, acc * (1 - MOVEP * speedFactor)));
+            const spreadDeg = baseSpreadDeg * (1 - effectiveAcc);
+            const spreadRad = spreadDeg * Math.PI / 180;
+            angle += (Math.random() - 0.5) * 2 * spreadRad;
+        } catch (_) {}
         
         // Fire projectile
         this.fireProjectile(npc, angle, false, npc.weapon);
@@ -484,6 +531,13 @@ export class WeaponSystem {
         if (state && state.ship && state.input && state.input.keys) {
             // Always use state.input.keys directly to avoid Proxy issues
             this.processWeaponInput(state.ship, state.input.keys, state.audioSystem);
+        }
+
+        // Decay recoil bloom
+        if (state && state.ship) {
+            if (state.ship.spreadBloom && state.ship.spreadBloom > 0) {
+                state.ship.spreadBloom = Math.max(0, state.ship.spreadBloom - 0.03);
+            }
         }
     }
     

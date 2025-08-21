@@ -1,6 +1,8 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { ProceduralPlanetRenderer } from './proceduralPlanetRenderer.js';
+import ShipDesigns from './ShipDesigns.js';
+import FactionVisuals from './FactionVisuals.js';
 
 /**
  * RenderSystem - Handles all visual rendering for the game
@@ -212,7 +214,10 @@ export class RenderSystem {
         this.renderShip(state);
         this.renderExplosions(state);
         this.renderWarpEffects(state);
-        
+
+        // Debug overlays in world space (before restore)
+        this.renderDebug(state);
+
         // Restore context
         this.ctx.restore();
         
@@ -242,6 +247,86 @@ export class RenderSystem {
         gradient.addColorStop(1, '#000000');
         this.ctx.fillStyle = gradient;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+    
+    /**
+     * Render simple debug overlays (hitboxes, vectors, npc info)
+     */
+    renderDebug(state) {
+        const dbg = state.debug || {};
+        if (!dbg.enabled) return;
+        this.ctx.save();
+        // World-space overlays already drawn due to camera transform earlier
+        if (dbg.drawHitboxes) {
+            // Ship
+            if (!state.ship.isDestroyed) {
+                this.ctx.strokeStyle = '#0ff';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                this.ctx.arc(state.ship.x, state.ship.y, state.ship.size, 0, Math.PI * 2);
+                this.ctx.stroke();
+            }
+            // NPCs
+            for (const npc of state.npcShips || []) {
+                this.ctx.strokeStyle = npc.behavior === 'aggressive' ? '#f44' : (npc.behavior === 'lawful' ? '#4af' : '#aaa');
+                this.ctx.beginPath();
+                this.ctx.arc(npc.x, npc.y, npc.size, 0, Math.PI * 2);
+                this.ctx.stroke();
+            }
+            // Asteroids
+            for (const a of state.asteroids || []) {
+                this.ctx.strokeStyle = '#666';
+                this.ctx.beginPath();
+                this.ctx.arc(a.x, a.y, a.radius, 0, Math.PI * 2);
+                this.ctx.stroke();
+            }
+        }
+        if (dbg.drawVectors) {
+            // Velocity vectors for ship and NPCs
+            const drawVec = (x, y, vx, vy, color) => {
+                this.ctx.strokeStyle = color;
+                this.ctx.beginPath();
+                this.ctx.moveTo(x, y);
+                this.ctx.lineTo(x + vx * 20, y + vy * 20);
+                this.ctx.stroke();
+            };
+            drawVec(state.ship.x, state.ship.y, state.ship.vx, state.ship.vy, '#0f0');
+            for (const npc of state.npcShips || []) {
+                drawVec(npc.x, npc.y, npc.vx, npc.vy, '#ff0');
+            }
+        }
+        if (dbg.showProjInfo) {
+            // Draw projectile lifetime bars
+            for (const proj of state.projectiles || []) {
+                const max = (proj.type === 'rapid') ? 45 : (proj.type === 'plasma') ? 80 : 60;
+                const t = Math.min(1, (proj.lifetime || 0) / max);
+                const len = 12;
+                this.ctx.strokeStyle = proj.isPlayer ? '#0ff' : '#f80';
+                this.ctx.beginPath();
+                this.ctx.moveTo(proj.x, proj.y);
+                this.ctx.lineTo(proj.x - proj.vx * (len/5) * (1-t), proj.y - proj.vy * (len/5) * (1-t));
+                this.ctx.stroke();
+            }
+            // Floating damage numbers
+            const dnums = (state.debug && state.debug.damageNumbers) || [];
+            this.ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            this.ctx.textAlign = 'center';
+            for (const dn of dnums) {
+                const alpha = Math.max(0, 1 - dn.life / dn.max);
+                this.ctx.fillStyle = `rgba(255,220,120,${alpha})`;
+                this.ctx.fillText(`-${dn.amount}`, dn.x, dn.y);
+            }
+        }
+        if (dbg.drawNPCInfo) {
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = '10px "JetBrains Mono", monospace';
+            this.ctx.textAlign = 'left';
+            for (const npc of state.npcShips || []) {
+                const info = `${npc.type}/${npc.behavior} hp:${Math.max(0, Math.round(npc.health))} cd:${Math.max(0, Math.round(npc.weaponCooldown||0))}`;
+                this.ctx.fillText(info, npc.x + npc.size + 6, npc.y - npc.size - 6);
+            }
+        }
+        this.ctx.restore();
     }
     
     /**
@@ -486,6 +571,10 @@ export class RenderSystem {
             this.ctx.save();
             this.ctx.translate(npc.x, npc.y);
             this.ctx.rotate(npc.angle);
+            // Upscale NPCs based on type for clearer silhouettes
+            const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
+            const npcScale = scaleMap[npc.type] || 1.4;
+            this.ctx.scale(npcScale, npcScale);
             
             // Engine thrust effect
             if (npc.thrusting && this.showEffects) {
@@ -669,30 +758,18 @@ export class RenderSystem {
      * Render specific NPC ship type
      */
     renderNPCShip(npc) {
-        // Ship gradient
-        const shipGradient = this.ctx.createLinearGradient(
-            npc.size, 0, -npc.size, 0
-        );
-        shipGradient.addColorStop(0, npc.color);
-        shipGradient.addColorStop(0.5, npc.color);
-        shipGradient.addColorStop(1, '#000000');
-        
-        this.ctx.fillStyle = shipGradient;
-        this.ctx.strokeStyle = npc.color;
-        this.ctx.lineWidth = 1;
-        
-        // Different shapes based on type
-        if (npc.type === 'freighter') {
-            this.renderFreighter(npc);
-        } else if (npc.type === 'pirate') {
-            this.renderPirate(npc);
-        } else if (npc.type === 'patrol') {
-            this.renderPatrol(npc);
-        } else if (npc.type === 'trader') {
-            this.renderTrader(npc);
-        } else {
-            this.renderDefaultShip(npc);
-        }
+        // Unified ship designs per type
+        const typeToDesign = {
+            freighter: 'hauler',
+            pirate: 'raider',
+            patrol: 'wing',
+            trader: 'oval',
+            interceptor: 'dart',
+        };
+        const design = typeToDesign[npc.type] || 'delta';
+        const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
+        ShipDesigns.draw(this.ctx, design, npc.size, palette);
+        FactionVisuals.drawDecals(this.ctx, npc.faction || 'civilian', npc.size);
     }
     
     renderFreighter(npc) {
@@ -904,6 +981,8 @@ export class RenderSystem {
         this.ctx.save();
         this.ctx.translate(ship.x, ship.y);
         this.ctx.rotate(ship.angle);
+        // Upscale for richer sprite-like presentation
+        this.ctx.scale(1.6, 1.6);
         
         // Engine thrust effect
         // Check if thrust keys are pressed (handle proxy-wrapped Set)
@@ -957,39 +1036,21 @@ export class RenderSystem {
             this.ctx.fill();
         }
         
-        // Ship body
-        const shipGradient = this.ctx.createLinearGradient(
-            ship.size, 0, -ship.size, 0
-        );
-        shipGradient.addColorStop(0, '#ffffff');
-        shipGradient.addColorStop(0.3, '#dddddd');
-        shipGradient.addColorStop(0.7, '#888888');
-        shipGradient.addColorStop(1, '#444444');
-        
-        this.ctx.fillStyle = shipGradient;
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = 1;
-        
-        // Ship shape
-        this.ctx.beginPath();
-        this.ctx.moveTo(ship.size * 1.2, 0);
-        this.ctx.lineTo(-ship.size * 0.6, -ship.size * 0.7);
-        this.ctx.lineTo(-ship.size * 0.3, -ship.size * 0.4);
-        this.ctx.lineTo(-ship.size * 0.5, 0);
-        this.ctx.lineTo(-ship.size * 0.3, ship.size * 0.4);
-        this.ctx.lineTo(-ship.size * 0.6, ship.size * 0.7);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
-        
-        // Cockpit
-        this.ctx.fillStyle = 'rgba(100, 200, 255, 0.8)';
-        this.ctx.fillRect(ship.size * 0.4, -3, 5, 6);
+        // Ship body via design system with faction palette
+        const palette = FactionVisuals.getPalette(state.ship.faction || 'civilian');
+        const playerDesign = (state.ship.class === 'interceptor') ? 'dart' :
+                             (state.ship.class === 'freighter') ? 'hauler' :
+                             (state.ship.class === 'trader') ? 'oval' :
+                             (state.ship.class === 'patrol') ? 'wing' :
+                             (state.ship.class === 'pirate') ? 'raider' :
+                             'delta';
+        ShipDesigns.draw(this.ctx, playerDesign, ship.size, palette);
+        FactionVisuals.drawDecals(this.ctx, state.ship.faction || 'civilian', ship.size);
         
         // Weapon indicators
         if (ship.weapons && ship.weapons.length > 0) {
-            this.ctx.fillStyle = '#ff0000';
-            this.ctx.fillRect(ship.size * 0.8, -2, 2, 4);
+            this.ctx.fillStyle = '#ff5555';
+            this.ctx.fillRect(ship.size * 0.9, -2, 2, 4);
         }
         
         this.ctx.restore();
@@ -1254,7 +1315,14 @@ export class RenderSystem {
      */
     resizeCanvas() {
         this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight - 150; // Account for HUD
+        try {
+            const root = document.documentElement;
+            const reserveStr = getComputedStyle(root).getPropertyValue('--hud-reserve').trim();
+            const reserve = parseInt(reserveStr || '150', 10) || 150;
+            this.canvas.height = window.innerHeight - reserve; // Account for HUD via CSS var
+        } catch (_) {
+            this.canvas.height = window.innerHeight - 150; // Fallback
+        }
         this.screenCenter.x = this.canvas.width / 2;
         this.screenCenter.y = this.canvas.height / 2;
     }

@@ -40,6 +40,10 @@ export class UISystem {
         this.usePollinationsEnhance = false;
         // Show provider/resolution debug overlay (off by default)
         this.showProviderInfo = false;
+
+        // Radio scanning animation timers
+        this.radioScanInterval = null;
+        this.radioScanTimeout = null;
     }
     
     /**
@@ -71,6 +75,8 @@ export class UISystem {
         // Initialize mute label based on current state
         const audio = this.stateManager.state.audio;
         this.updateMuteLabel(audio && audio.enabled !== false);
+        // Initialize radio controls
+        this.initializeRadioControls();
 
         console.log('[UISystem] Initialized');
     }
@@ -95,9 +101,12 @@ export class UISystem {
         this.eventBus.on(GameEvents.UI_MESSAGE, this.handleUIMessage);
         // Audio state
         this.eventBus.on(GameEvents.AUDIO_STATE_CHANGED, this.handleAudioStateChanged);
+        this.eventBus.on(GameEvents.AUDIO_MUSIC_STATE, this.handleMusicState);
         
         // Tutorial
         this.eventBus.on(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
+
+        // No UI image toggles; provider behavior managed via debug toggles
     }
     
     /**
@@ -116,6 +125,8 @@ export class UISystem {
             }
         }
     }
+
+    // No initializeLandingControls; UI remains clean and non-interactive
     
     /**
      * Handle state change event
@@ -187,6 +198,8 @@ export class UISystem {
         }
     }
 
+    // Removed UI-driven image source/enhance handlers per requirements
+
     handleAudioStateChanged(data) {
         const enabled = data && data.enabled !== false;
         this.updateMuteLabel(enabled);
@@ -196,6 +209,69 @@ export class UISystem {
         const label = document.getElementById('muteActionLabel');
         if (label) {
             label.textContent = enabled ? 'MUTE' : 'UNMUTE';
+        }
+    }
+    
+    initializeRadioControls() {
+        const radioBox = document.getElementById('shipRadio');
+        const prev = document.getElementById('radioPrev');
+        const play = document.getElementById('radioPlay');
+        const next = document.getElementById('radioNext');
+        const title = document.getElementById('radioTitle');
+        if (!(prev && play && next && title)) return;
+        const startScan = (lockAfterMs = 1200) => {
+            if (!title) return;
+            if (radioBox) { radioBox.classList.add('scanning'); radioBox.classList.remove('tuned'); }
+            // Clear any existing scan
+            if (this.radioScanInterval) { clearInterval(this.radioScanInterval); this.radioScanInterval = null; }
+            if (this.radioScanTimeout) { clearTimeout(this.radioScanTimeout); this.radioScanTimeout = null; }
+
+            const roll = () => {
+                const freq = (87 + Math.random() * 53).toFixed(1); // 87.0–140.0
+                const band = Math.random() > 0.3 ? 'MHz' : 'kHz';
+                const channel = 'CH-' + String(Math.floor(Math.random() * 90) + 10).padStart(2, '0');
+                const dots = '.'.repeat((Math.floor(Date.now() / 200) % 4));
+                title.textContent = `SCANNING${dots} ${freq} ${band} ${channel}`;
+            };
+            roll();
+            this.radioScanInterval = setInterval(roll, 140);
+            this.radioScanTimeout = setTimeout(() => {
+                if (this.radioScanInterval) { clearInterval(this.radioScanInterval); this.radioScanInterval = null; }
+                // Lock to a tuned readout
+                const freq = (87 + Math.random() * 53).toFixed(1);
+                const band = Math.random() > 0.3 ? 'MHz' : 'kHz';
+                const channel = 'CH-' + String(Math.floor(Math.random() * 90) + 10).padStart(2, '0');
+                title.textContent = `${freq} ${band} ${channel}`;
+                if (radioBox) { radioBox.classList.add('tuned'); radioBox.classList.remove('scanning'); }
+            }, lockAfterMs);
+        };
+
+        play.onclick = () => this.eventBus.emit(GameEvents.AUDIO_MUSIC_TOGGLE);
+        prev.onclick = () => { startScan(1000); this.eventBus.emit(GameEvents.AUDIO_MUSIC_PREV); };
+        next.onclick = () => { startScan(1000); this.eventBus.emit(GameEvents.AUDIO_MUSIC_NEXT); };
+        title.textContent = 'SCANNING… 118.7 MHz CH-12';
+    }
+
+    handleMusicState(data) {
+        const title = document.getElementById('radioTitle');
+        const play = document.getElementById('radioPlay');
+        if (title && data) {
+            if (data.playing) {
+                // Stop scanning and show tuned
+                if (this.radioScanInterval) { clearInterval(this.radioScanInterval); this.radioScanInterval = null; }
+                if (this.radioScanTimeout) { clearTimeout(this.radioScanTimeout); this.radioScanTimeout = null; }
+                const freq = (87 + Math.random() * 53).toFixed(1);
+                const band = Math.random() > 0.3 ? 'MHz' : 'kHz';
+                const channel = 'CH-' + String(Math.floor(Math.random() * 90) + 10).padStart(2, '0');
+                title.textContent = `${freq} ${band} ${channel}`;
+                const rb = document.getElementById('shipRadio'); if (rb) { rb.classList.add('tuned'); rb.classList.remove('scanning'); }
+            } else {
+                title.textContent = 'SCANNING…';
+                const rb = document.getElementById('shipRadio'); if (rb) { rb.classList.add('scanning'); rb.classList.remove('tuned'); }
+            }
+        }
+        if (play && data) {
+            play.textContent = data.playing ? '⏸' : '▶';
         }
     }
     
@@ -211,17 +287,19 @@ export class UISystem {
         };
         
         updateElement('health', Math.max(0, Math.round(ship.health)) + '%');
-        updateElement('shield', ship.shield > 0 ? Math.round(ship.shield) : 'None');
+        updateElement('shield', ship.shield > 0 ? Math.round(ship.shield) : 'OFFLINE');
         updateElement('fuel', Math.round(ship.fuel) + '%');
         updateElement('speed', (Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy) * 100).toFixed(1));
         
-        const cargoUsed = ship.cargo ? ship.cargo.reduce((sum, item) => sum + item.quantity, 0) : 0;
+        const cargoUsed = Array.isArray(ship.cargo)
+            ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
+            : 0;
         updateElement('cargo', cargoUsed + '/' + (ship.cargoCapacity || 10));
         updateElement('location', ship.isLanded && ship.landedPlanet ? ship.landedPlanet.name : 'SPACE');
         updateElement('credits', ship.credits || 0);
         updateElement('weapon', ship.weapons && ship.weapons.length > 0 ? 
-            ship.weapons[ship.currentWeapon].type.toUpperCase() : 'NONE');
-        updateElement('kills', ship.kills || 0);
+            ship.weapons[ship.currentWeapon].type.toUpperCase() : 'UNARMED');
+        updateElement('kills', (ship.kills && ship.kills > 0) ? ship.kills : 'NO KILLS');
     }
     
     /**
@@ -374,6 +452,7 @@ export class UISystem {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, width, height);
         this.addFilmGrainOverlay(planetCanvas);
+        this.addSignalProcessingOverlay(planetCanvas);
 
         if (!useAI) {
             this.drawCanvasFallback(planet, planetCanvas);
@@ -690,14 +769,20 @@ export class UISystem {
         
         if (creditsElement) creditsElement.textContent = ship.credits;
         
-        const cargoUsed = ship.cargo ? ship.cargo.reduce((sum, item) => sum + item.quantity, 0) : 0;
+        const cargoUsed = Array.isArray(ship.cargo)
+            ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
+            : 0;
         if (cargoElement) cargoElement.textContent = `${cargoUsed}/${ship.cargoCapacity}`;
         
         // Calculate total cargo value
         let totalValue = 0;
-        if (ship.cargo) {
+        if (Array.isArray(ship.cargo)) {
             for (let item of ship.cargo) {
-                totalValue += item.quantity * ship.currentPlanet.commodityPrices[item.type];
+                const qty = (item?.quantity ?? 1);
+                const price = ship.currentPlanet?.commodityPrices?.[item?.type];
+                if (Number.isFinite(price)) {
+                    totalValue += qty * price;
+                }
             }
         }
         
@@ -899,6 +984,60 @@ export class UISystem {
         }
         return grainOverlay;
     }
+
+    /**
+     * Add a "signal processing" overlay (scanlines + rolling luminance bar)
+     * that gives a static/decoder feel before the image fades in.
+     */
+    addSignalProcessingOverlay(planetCanvas) {
+        const container = planetCanvas.parentElement;
+        if (!container) return null;
+        let overlay = container.querySelector('.signal-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'signal-overlay';
+            container.appendChild(overlay);
+            overlay.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 12;
+                opacity: 1;
+                mix-blend-mode: screen;
+                transition: opacity 0.6s ease-in-out;
+                background-image:
+                    repeating-linear-gradient(180deg, rgba(255,255,255,0.055) 0 1px, rgba(0,0,0,0) 1px 3px),
+                    linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(255,255,255,0.09) 45%, rgba(0,0,0,0) 60%);
+                background-size: auto, 100% 30%;
+                background-repeat: repeat, no-repeat;
+                background-position: 0 0, 0 -30%;
+                box-shadow: inset 0 0 40px rgba(0,0,0,0.6);
+                filter: saturate(0.9) contrast(1.05);
+                animation: signalScan 2.2s linear infinite;
+            `;
+            // Inject keyframes once
+            if (!document.querySelector('#signalOverlayKeyframes')) {
+                const style = document.createElement('style');
+                style.id = 'signalOverlayKeyframes';
+                style.textContent = `
+                    @keyframes signalScan {
+                        0% { transform: translateY(-6%); }
+                        50% { transform: translateY(6%); }
+                        100% { transform: translateY(-6%); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        } else {
+            // Reset visibility if it existed from a previous landing
+            overlay.style.opacity = '1';
+            overlay.style.display = 'block';
+        }
+        return overlay;
+    }
     
     /**
      * Fade in planet image
@@ -909,6 +1048,11 @@ export class UISystem {
         const height = planetCanvas.height;
         
         const grainOverlay = planetCanvas.parentElement.querySelector('.film-grain-overlay');
+        const signalOverlay = planetCanvas.parentElement.querySelector('.signal-overlay');
+
+        // Offscreen canvas for pixelation band (reused each frame)
+        const pixelCanvas = document.createElement('canvas');
+        const pixelCtx = pixelCanvas.getContext('2d');
         
         let fadeProgress = 0;
         const fadeDuration = 60;
@@ -926,14 +1070,72 @@ export class UISystem {
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, width, height);
             
-            // Draw image with increasing opacity
+            // Subtle chromatic aberration pass (fades out as image resolves)
+            const dprLocal = Math.min(window.devicePixelRatio || 1, 2);
+            const dx = Math.max(1, Math.ceil(2 * dprLocal * (1 - eased)));
+            const chromaAlpha = 0.4 * (1 - eased);
+            if (chromaAlpha > 0.01) {
+                ctx.save();
+                ctx.globalAlpha = chromaAlpha;
+                ctx.filter = `drop-shadow(${dx}px 0 0 rgba(255,0,0,0.8)) drop-shadow(${-dx}px 0 0 rgba(0,255,255,0.8))`;
+                ctx.drawImage(img, 0, 0, width, height);
+                ctx.restore();
+            }
+
+            // Draw main image with increasing opacity, no filter
+            ctx.save();
+            ctx.filter = 'none';
             ctx.globalAlpha = eased;
             ctx.drawImage(img, 0, 0, width, height);
-            ctx.globalAlpha = 1;
+            ctx.restore();
+
+            // Central pixelated processing line (visible early, fades out)
+            const bandStrength = 1 - eased;
+            if (bandStrength > 0.03) {
+                const bandHeight = Math.max(18, Math.floor(height * 0.16));
+                const bandY = Math.floor(height * 0.5 - bandHeight * 0.5);
+                // Low-res sample size for pixel look
+                const sampleW = 96; // horizontal resolution of pixelation
+                const sampleH = Math.max(16, Math.floor(bandHeight * 0.25));
+                if (pixelCanvas.width !== sampleW || pixelCanvas.height !== sampleH) {
+                    pixelCanvas.width = sampleW;
+                    pixelCanvas.height = sampleH;
+                }
+                pixelCtx.imageSmoothingEnabled = false;
+                // Animate slight vertical drift to simulate processing sweep
+                const drift = Math.sin(fadeProgress * 0.2) * (height * 0.02);
+                // Draw the full image squeezed into the tiny pixel canvas
+                pixelCtx.clearRect(0, 0, sampleW, sampleH);
+                pixelCtx.drawImage(img, 0, (height * 0.5 - sampleH * 0.5) + drift, width, sampleH, 0, 0, sampleW, sampleH);
+                // Composite to main at band area with nearest-neighbor scaling
+                ctx.save();
+                ctx.imageSmoothingEnabled = false;
+                ctx.globalAlpha = Math.min(0.85, 0.25 + bandStrength * 0.7);
+                // Slight horizontal jitter
+                const jitter = Math.floor(Math.sin(fadeProgress * 0.6) * 3);
+                ctx.drawImage(pixelCanvas, 0, bandY + jitter, width, bandHeight);
+                // Add a bright scanning core line
+                const midY = bandY + Math.floor(bandHeight / 2);
+                const glowAlpha = 0.12 + bandStrength * 0.2;
+                const grad = ctx.createLinearGradient(0, midY - 1, 0, midY + 1);
+                grad.addColorStop(0, `rgba(255,255,255,0)`);
+                grad.addColorStop(0.5, `rgba(255,255,255,${glowAlpha.toFixed(3)})`);
+                grad.addColorStop(1, `rgba(255,255,255,0)`);
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, midY - 2, width, 4);
+                ctx.restore();
+            }
             
-            // Fade grain overlay
+            // Fade overlays (grain + signal)
             if (grainOverlay) {
                 grainOverlay.style.opacity = (1 - eased * 0.85).toString();
+            }
+            if (signalOverlay) {
+                signalOverlay.style.opacity = (1 - eased).toString();
+                if (fadeProgress >= fadeDuration) {
+                    // After fade completes, hide to save cycles
+                    setTimeout(() => { signalOverlay.style.display = 'none'; }, 250);
+                }
             }
             
             if (fadeProgress < fadeDuration) {
@@ -985,6 +1187,11 @@ export class UISystem {
         const grainOverlay = planetCanvas.parentElement.querySelector('.film-grain-overlay');
         if (grainOverlay) {
             grainOverlay.style.opacity = '0.15';
+        }
+        const signalOverlay = planetCanvas.parentElement.querySelector('.signal-overlay');
+        if (signalOverlay) {
+            signalOverlay.style.display = 'block';
+            signalOverlay.style.opacity = '0.35';
         }
     }
     

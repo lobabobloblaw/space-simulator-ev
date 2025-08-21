@@ -19,6 +19,8 @@ import SaveSystemAdapterFixed from './systems/SaveSystemAdapterFixed.js';
 import TradingSystem from './systems/TradingSystem.js';
 import ShopSystem from './systems/ShopSystem.js';  // Shop system for outfitter
 import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personalities
+import DebugSystem from './systems/DebugSystem.js';
+import { GameConstants } from './utils/Constants.js';
 
 // We'll import game data dynamically in the initialization function
 // to ensure it's available when needed
@@ -125,6 +127,8 @@ async function initializeGameState() {
         pirateKills: shipData?.pirateKills ?? 0
     };
     
+    // Assign basic faction for the player (generic civilian)
+    state.ship.faction = state.ship.faction || 'civilian';
     console.log('[EventBus] Ship initialized with credits:', state.ship.credits);
     
     // Initialize camera
@@ -158,12 +162,12 @@ async function initializeGameState() {
         patrol: {
             size: 14, color: "#8888ff", maxSpeed: 0.45, thrust: 0.004,
             turnSpeed: 0.012, health: 100, maxHealth: 100, credits: 50,
-            behavior: "lawful", weapon: { type: "rapid", damage: 7, cooldown: 8 }
+            behavior: "lawful", weapon: { type: "rapid", damage: 7, cooldown: 9 }
         },
         pirate: {
             size: 10, color: "#ff4444", maxSpeed: 0.5, thrust: 0.005,
             turnSpeed: 0.015, health: 70, maxHealth: 70, credits: 150,
-            behavior: "aggressive", weapon: { type: "plasma", damage: 15, cooldown: 25 }
+            behavior: "aggressive", weapon: { type: "plasma", damage: 15, cooldown: 26 }
         }
     };
     
@@ -197,6 +201,7 @@ async function initializeGameState() {
             angle: Math.atan2(vy, vx),
             type: type,
             ...template,
+            faction: (type === 'patrol') ? 'patrol' : (type === 'pirate') ? 'pirate' : 'trader',
             targetPlanet: targetPlanet,
             weaponCooldown: Math.random() * 30,  // Random cooldown state
             lifetime: Math.floor(Math.random() * 300),  // Been around for a while
@@ -286,6 +291,9 @@ async function initializeGameState() {
         available: missionData?.available ?? missionsData
     };
     
+    // Initialize reputation scaffold
+    state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
+    
     // Initialize spawn state
     state.npcSpawnState = {
         nextShipSpawn: Date.now() + Math.random() * 3000 + 2000
@@ -293,8 +301,9 @@ async function initializeGameState() {
     
     // Initialize audio state
     state.audio = {
-        enabled: true,
-        masterVolume: 0.3
+        enabled: false, // SFX muted by default
+        masterVolume: 0.3,
+        musicVolume: 0.6
     };
     
     // Initialize input state
@@ -402,6 +411,17 @@ function setupEventHandlers() {
             });
         }
     });
+
+    // Allow respawn via 'R' after death
+    eventBus.on(GameEvents.INPUT_KEY_DOWN, (data) => {
+        try {
+            const key = (data?.key || '').toLowerCase();
+            const state = stateManager.state;
+            if (key === 'r' && state.ship?.isDestroyed) {
+                respawnPlayer();
+            }
+        } catch (_) {}
+    });
     
     // NPC death handling
     eventBus.on(GameEvents.NPC_DEATH, (data) => {
@@ -415,6 +435,14 @@ function setupEventHandlers() {
             
             if (data.npc.behavior === 'aggressive') {
                 state.ship.pirateKills = (state.ship.pirateKills || 0) + 1;
+                // Reputation: defeating pirates increases patrol standing
+                state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
+                state.reputation.patrol = (state.reputation.patrol || 0) + 1;
+                eventBus.emit(GameEvents.REPUTATION_CHANGED, { faction: 'patrol', delta: +1, total: state.reputation.patrol });
+                eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Reputation +1 (Patrol)', type: 'info', duration: 1200 });
+                // Reputation: pirates dislike you for killing their own
+                state.reputation.pirate = (state.reputation.pirate || 0) - 1;
+                eventBus.emit(GameEvents.REPUTATION_CHANGED, { faction: 'pirate', delta: -1, total: state.reputation.pirate });
             }
             
             if (state.ship.tutorialStage === 'combat' && state.ship.kills >= 1) {
@@ -434,6 +462,64 @@ function setupEventHandlers() {
     });
     
     console.log('[EventBus] Event handlers setup complete');
+}
+
+/**
+ * Respawn the player ship after destruction
+ */
+function respawnPlayer() {
+    const state = stateManager.state;
+    const ship = state.ship;
+    
+    // Determine spawn point: last landed planet if available, else origin
+    let spawnX = 0, spawnY = 0;
+    let planet = ship.landedPlanet || null;
+    if (!planet && state.planets && state.planets.length > 0) {
+        // Choose nearest planet to current ship position
+        let best = null, bestD = Infinity;
+        for (const p of state.planets) {
+            const dx = ship.x - p.x, dy = ship.y - p.y;
+            const d = dx*dx + dy*dy;
+            if (d < bestD) { bestD = d; best = p; }
+        }
+        planet = best;
+    }
+    if (planet) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = (planet.radius || 40) + 80;
+        spawnX = planet.x + Math.cos(angle) * dist;
+        spawnY = planet.y + Math.sin(angle) * dist;
+    }
+    
+    // Reset ship state
+    ship.isDestroyed = false;
+    ship.health = ship.maxHealth;
+    if (ship.maxShield > 0) {
+        ship.shield = Math.floor(ship.maxShield * (GameConstants?.SHIP?.RESPAWN_SHIELD_FRACTION || 0.5));
+    }
+    ship.x = spawnX;
+    ship.y = spawnY;
+    ship.vx = 0;
+    ship.vy = 0;
+    ship.weaponCooldown = 0;
+    ship.landingCooldown = 30;
+    ship.isLanded = false;
+    ship.currentPlanet = planet || null;
+    
+    // Apply death penalty (credits)
+    const penalty = GameConstants?.SHIP?.DEATH_PENALTY ?? 100;
+    ship.credits = Math.max(0, (ship.credits || 0) - penalty);
+    
+    // Clear hostile projectiles around spawn
+    state.projectiles = [];
+    
+    // Notify systems
+    eventBus.emit(GameEvents.SHIP_RESPAWN, { ship });
+    eventBus.emit(GameEvents.UI_MESSAGE, {
+        message: 'Respawned near nearest planet',
+        type: 'info',
+        duration: 2000
+    });
 }
 
 /**
@@ -543,6 +629,14 @@ async function initializeSystems() {
         console.error('❌ NPCSystem failed:', e);
     }
     
+    try {
+        systems.debug = new DebugSystem();
+        await systems.debug.init();
+        console.log('✅ DebugSystem initialized');
+    } catch (e) {
+        console.error('❌ DebugSystem failed:', e);
+    }
+    
     // Set audioSystem reference in state for compatibility
     stateManager.state.audioSystem = systems.audio;
     
@@ -604,6 +698,10 @@ async function initGame() {
             if (systems.render && systems.render.render) {
                 systems.render.render(stateManager.state, deltaTime);
             }
+        },
+        onFPS: (stats) => {
+            // Forward to DebugSystem via EventBus
+            eventBus.emit('debug.fps', stats);
         }
     });
     

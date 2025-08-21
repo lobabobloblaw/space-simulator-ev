@@ -71,12 +71,55 @@ export default class NPCSystem {
             // Apply AI decisions
             this.applyAIDecision(npc, aiDecision, state);
             
+            // Reputation-based comms (hail/taunt) when near player
+            this.handleRepComms(npc, state);
+
             // Update physics
             this.updateNPCPhysics(npc);
             
             // Update weapon cooldown
             if (npc.weaponCooldown > 0) {
                 npc.weaponCooldown--;
+            }
+        }
+    }
+
+    /**
+     * Simple hail/taunt based on player reputation when near
+     */
+    handleRepComms(npc, state) {
+        const rep = state.reputation || { patrol: 0, pirate: 0 };
+        const ship = state.ship;
+        if (!ship) return;
+        const dx = npc.x - ship.x;
+        const dy = npc.y - ship.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 450) return;
+        const now = Date.now();
+
+        if (npc.behavior === 'lawful' && rep.patrol >= 6) {
+            if (!npc.lastHail || now - npc.lastHail > 9000) {
+                const lines = [
+                    'PATROL: Good hunting, captain.',
+                    'PATROL: We appreciate your service.',
+                    'PATROL: Stay sharp out there.'
+                ];
+                npc.message = lines[Math.floor(Math.random()*lines.length)];
+                npc.messageTime = now;
+                npc.lastHail = now;
+            }
+        }
+
+        if (npc.behavior === 'aggressive' && rep.pirate <= -5) {
+            if (!npc.lastTaunt || now - npc.lastTaunt > 8000) {
+                const lines = [
+                    'You think the patrols can save you?',
+                    'Bounty hunter, huh? Try me.',
+                    'Your head’s worth credits.'
+                ];
+                npc.message = lines[Math.floor(Math.random()*lines.length)];
+                npc.messageTime = now;
+                npc.lastTaunt = now;
             }
         }
     }
@@ -211,24 +254,8 @@ export default class NPCSystem {
      * Handle NPC death
      */
     handleNPCDeath(npc, ship, state) {
-        if (npc.killedBy === 'player') {
-            const bounty = npc.behavior === 'aggressive' ? npc.credits : Math.floor(npc.credits * 0.5);
-            const killBonus = 25;
-            ship.credits += bounty + killBonus;
-            ship.kills++;
-            
-            // Track pirate kills for reputation
-            if (npc.behavior === 'aggressive') {
-                if (!ship.pirateKills) ship.pirateKills = 0;
-                ship.pirateKills++;
-            }
-            
-            // Tutorial progression
-            if (ship.tutorialStage === 'combat' && ship.kills >= 1) {
-                ship.tutorialStage = 'complete';
-            }
-        }
-        
+        // Credits, kills, and reputation are handled centrally in main_eventbus_pure NPC_DEATH handler
+        // Keep visuals/loot here only.
         // Create explosion effect
         this.eventBus.emit(GameEvents.EXPLOSION_CREATED, {
             x: npc.x,
@@ -381,10 +408,13 @@ export default class NPCSystem {
                 decision.shouldThrust = true;
             } else if (Math.abs(angleDiff) < Math.PI / 3) {
                 decision.shouldThrust = true;
-                decision.thrustPower = 0.5;
+                decision.thrustPower = 0.6;
             } else {
                 decision.shouldThrust = false;
             }
+            // Add lateral jitter to avoid circular fleeing
+            const jitter = (Math.random() - 0.5) * 0.2; // ±0.2 rad
+            decision.desiredAngle += jitter;
         } else {
             // Normal pirate behavior - hunt targets
             let bestTarget = null;
@@ -427,24 +457,41 @@ export default class NPCSystem {
                     npc.lastAttackMessage = Date.now();
                 }
                 
-                // Calculate intercept angle
+                // Calculate intercept angle with modest lead
+                const leadFactor = 0.7;
                 const interceptTime = bestTargetDist / (npc.maxSpeed * 50);
-                const targetX = bestTarget.x + bestTarget.vx * interceptTime;
-                const targetY = bestTarget.y + bestTarget.vy * interceptTime;
+                const targetX = bestTarget.x + bestTarget.vx * interceptTime * leadFactor;
+                const targetY = bestTarget.y + bestTarget.vy * interceptTime * leadFactor;
                 decision.desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
                 
                 let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
                 
-                if (Math.abs(angleDiff) < Math.PI / 4) {
-                    if (bestTargetDist > 150) {
+                // Arrive behavior to prevent tight orbits
+                if (bestTargetDist > 180) {
+                    if (Math.abs(angleDiff) < Math.PI / 3) decision.shouldThrust = true;
+                } else if (bestTargetDist > 110) {
+                    if (Math.abs(angleDiff) < Math.PI / 4) {
                         decision.shouldThrust = true;
-                    } else if (bestTargetDist < 80) {
-                        decision.shouldBrake = true;
+                        decision.thrustPower = 0.6;
                     }
+                } else if (bestTargetDist < 90) {
+                    decision.shouldBrake = true;
+                }
+
+                // Strafe when close to avoid orbit lock
+                if (bestTargetDist < 250 && bestTargetDist > 120) {
+                    const now = Date.now();
+                    if (!npc.strafeDir || !npc.strafeTimer || now - npc.strafeTimer > 900 + Math.random()*500) {
+                        npc.strafeDir = (Math.random() < 0.5 ? -1 : 1);
+                        npc.strafeTimer = now;
+                    }
+                    const strafeAngle = decision.desiredAngle + npc.strafeDir * Math.PI * 0.25; // ±45°
+                    // Apply a small lateral nudge
+                    decision.desiredAngle = this.normalizeAngle(strafeAngle * 0.2 + decision.desiredAngle * 0.8);
                 }
                 
                 // Fire at target
-                if (bestTargetDist < 250 && Math.abs(angleDiff) < Math.PI / 6 && npc.weaponCooldown <= 0) {
+                if (bestTargetDist < 260 && Math.abs(angleDiff) < Math.PI / 5 && npc.weaponCooldown <= 0) {
                     decision.shouldFire = true;
                 }
             } else {
@@ -829,7 +876,20 @@ export default class NPCSystem {
             npc.angle += turnAmount;
         }
         
-        // Apply thrust/brake
+        // Lateral velocity damping to reduce orbiting/looping
+        const velAngle = Math.atan2(npc.vy, npc.vx);
+        const desired = decision.desiredAngle;
+        const headingMisalign = Math.abs(this.normalizeAngle(velAngle - desired));
+        // If moving largely sideways/backwards relative to desired direction, damp velocity
+        if (headingMisalign > Math.PI * 0.5) {
+            npc.vx *= 0.95;
+            npc.vy *= 0.95;
+        } else if (headingMisalign > Math.PI * 0.35) {
+            npc.vx *= 0.98;
+            npc.vy *= 0.98;
+        }
+
+        // Apply thrust/brake with arrive behavior
         if (decision.shouldThrust) {
             const thrustPower = decision.thrustPower || 1.0;
             const thrustX = Math.cos(npc.angle) * npc.thrust * thrustPower;

@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/main.css">
 </head>
 <body>
@@ -50,25 +50,33 @@
                     </div>
                 </div>
             </div>
+            <!-- Ship Radio / Music Player -->
+            <div id="shipRadio" class="radio-radial" aria-label="Ship Radio">
+                <button id="radioPrev" title="Previous frequency">◄</button>
+                <button id="radioPlay" title="Play/Pause">▶</button>
+                <button id="radioNext" title="Next frequency">►</button>
+                <div id="radioTitle">SCANNING… 118.7 MHz</div>
+                <div id="radioViz" aria-hidden="true"></div>
+                <div id="radioDial" aria-hidden="true"></div>
+            </div>
             
             <!-- Center Panel: Cyberpunk Logo -->
             <div class="hud-center">
                 <div id="logo-container">
-                    <div id="logo-ascii">GALAXY TRADER</div>
-                </div>
-                <div class="hud-subtitle">/// SYSTEM ONLINE</div>
-                <div class="key-stats">
-                    <div class="key-stat">
-                        <span class="status-label">CREDITS</span>
-                        <span class="status-value credits-value" id="credits">250</span>
-                    </div>
-                    <div class="key-stat">
-                        <span class="status-label">WEAPON</span>
-                        <span class="status-value weapon-value" id="weapon">NONE</span>
-                    </div>
-                    <div class="key-stat">
-                        <span class="status-label">KILLS</span>
-                        <span class="status-value" id="kills">0</span>
+                    <div id="logo-ascii">GALAXY<br>TRADER</div>
+                    <div class="key-stats">
+                        <div class="key-stat">
+                            <span class="status-label">CREDITS</span>
+                            <span class="status-value credits-value" id="credits">250</span>
+                        </div>
+                        <div class="key-stat">
+                            <span class="status-label">WEAPON</span>
+                            <span class="status-value weapon-value" id="weapon">NONE</span>
+                        </div>
+                        <div class="key-stat">
+                            <span class="status-label">KILLS</span>
+                            <span class="status-value" id="kills">0</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -133,10 +141,15 @@
                 </div>
             </div>
             <div id="shopPanel">
-                <div class="cargo-status">
-                    <strong>CREDITS:</strong> <span id="shopCredits">0</span>
+                <div class="trading-header">
+                    <div class="cargo-status">
+                        <strong>CREDITS:</strong> <span id="shopCredits">0</span>
+                    </div>
+                    <div class="commodity-header">OUTFITTER</div>
                 </div>
-                <div id="shopList"></div>
+                <div class="trading-content">
+                    <div id="shopList"></div>
+                </div>
             </div>
         </div>
         <div id="landingButtons">

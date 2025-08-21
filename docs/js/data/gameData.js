@@ -107,14 +107,14 @@ export const shopInventory = {
         type: "weapon", 
         price: 600, 
         value: { type: "rapid", damage: 5, cooldown: 12 },
-        description: "Fast firing laser (5 damage)"
+        description: "Spray-fire; best at close range"
     },
     weapon3: { 
         name: "Plasma Cannon", 
         type: "weapon", 
         price: 1200, 
-        value: { type: "plasma", damage: 20, cooldown: 35 },
-        description: "High damage plasma weapon (20 damage)"
+        value: { type: "plasma", damage: 20, cooldown: 28, speed: 1.9 },
+        description: "High burst; slower bolts (20 dmg, 28 cd)"
     },
     cargo1: { 
         name: "Cargo Expansion", 

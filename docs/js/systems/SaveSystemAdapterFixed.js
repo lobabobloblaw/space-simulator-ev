@@ -77,6 +77,7 @@ export class SaveSystemAdapterFixed {
                     cargoCapacity: state.ship.cargoCapacity || 10,
                     tutorialStage: state.ship.tutorialStage || 'start'
                 },
+                reputation: state.reputation || { trader: 0, patrol: 0, pirate: 0 },
                 mission: {
                     activeId: state.missionSystem?.active?.id || null,
                     completed: state.missionSystem?.completed || []
@@ -178,6 +179,11 @@ export class SaveSystemAdapterFixed {
                     state.ship[key] = data.ship[key];
                 }
             });
+            
+            // Restore reputation scaffold
+            if (data.reputation) {
+                state.reputation = { trader: 0, patrol: 0, pirate: 0, ...data.reputation };
+            }
             
             // Restore mission state
             if (data.mission && state.missionSystem) {
@@ -310,7 +316,9 @@ export class SaveSystemAdapterFixed {
             shield: ship.shield > 0 ? Math.round(ship.shield) : 'None'
         };
         
-        const cargoUsed = ship.cargo ? ship.cargo.reduce((sum, item) => sum + item.quantity, 0) : 0;
+        const cargoUsed = Array.isArray(ship.cargo)
+            ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
+            : 0;
         elements.cargo = cargoUsed + '/' + (ship.cargoCapacity || 10);
         elements.location = ship.isLanded && ship.landedPlanet ? ship.landedPlanet.name : 'SPACE';
         elements.weapon = ship.weapons && ship.weapons.length > 0 ? 

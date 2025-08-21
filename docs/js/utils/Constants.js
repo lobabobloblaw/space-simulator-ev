@@ -78,8 +78,8 @@ export const GameConstants = {
         PLASMA_CANNON: {
             type: "plasma",
             damage: 20,
-            cooldown: 35,
-            speed: 1.5,
+            cooldown: 28,
+            speed: 1.9,
             color: '#00ffff'
         },
         

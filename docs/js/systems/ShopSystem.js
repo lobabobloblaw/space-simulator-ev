@@ -53,7 +53,8 @@ export default class ShopSystem {
             // Check if already owned
             if (!ship.weapons) ship.weapons = [];
             
-            const alreadyOwned = ship.weapons.some(w => w.type === itemId);
+            const wType = item.value?.type || itemId;
+            const alreadyOwned = ship.weapons.some(w => w.type === wType);
             if (alreadyOwned) {
                 this.eventBus.emit(GameEvents.UI_MESSAGE, {
                     message: 'You already own this weapon!',
@@ -65,10 +66,10 @@ export default class ShopSystem {
             
             // Add weapon to ship
             ship.weapons.push({
-                type: itemId,
-                damage: item.damage,
-                cooldown: item.cooldown,
-                speed: item.speed || 2
+                type: wType,
+                damage: item.value?.damage ?? item.damage,
+                cooldown: item.value?.cooldown ?? item.cooldown,
+                speed: item.value?.speed ?? item.speed ?? 2
             });
             
             // Auto-equip if first weapon

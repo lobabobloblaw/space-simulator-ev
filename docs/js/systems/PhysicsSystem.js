@@ -109,8 +109,7 @@ export class PhysicsSystem {
         // Update NPC physics (when migrated)
         this.updateNPCPhysics(state, deltaTime);
         
-        // Update projectile physics (when migrated)
-        this.updateProjectilePhysics(state, deltaTime);
+        // Projectiles are updated in WeaponSystem; avoid double-updating here
         
         // Update asteroid physics (when migrated)
         this.updateAsteroidPhysics(state, deltaTime);
@@ -381,7 +380,10 @@ export class PhysicsSystem {
                 
                 // Calculate damage - scales with speed and asteroid size
                 const baseDamage = Math.floor(relSpeed * asteroid.radius * 3); // Increased multiplier
-                const damage = Math.max(5, baseDamage); // Minimum 5 damage
+                let damage = Math.max(5, baseDamage); // Minimum 5 damage
+                if (this.stateManager.state.debug?.godMode) {
+                    damage = 0; // God mode: no damage from impacts
+                }
                 
                 // Apply damage
                 if (damage > 0) {
@@ -410,11 +412,9 @@ export class PhysicsSystem {
                         });
                     }
                     
-                    // Screen shake effect
+                    // Screen shake/damage flash
                     ship.screenShake = Math.min(20, damage * 0.5);
                     ship.screenShakeDecay = 0.8;
-                    
-                    // Damage flash
                     ship.damageFlash = 1.0;
                     
                     // Emit damage event

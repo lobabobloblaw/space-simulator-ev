@@ -64,10 +64,13 @@ git push
 - Mission system
 - Cyberpunk UI with particle effects
 
-## Latest Updates (Session 43)
+## Latest Updates (Session 44)
 
-- High-quality Pollinations landscapes (flux, deterministic seed, tightened prompts); provider fallback; hi‑DPI rendering
-- Landing UI: richer descriptions; compact market/outfitter info; no-scroll one-shot
-- HUD: two-column controls; Mute toggle (M)
-- Starfield density increased (2.0x); import paths normalized
-- Deployed to GitHub Pages from `/docs`
+- Planet visuals: added signal-processing intro (scanlines + chromatic offset) and a pixelated “processing” band that fades into the final image; preserves HQ Pollinations/Unsplash/lexica logic without UI provider switches.
+- Ships: new procedural silhouettes via `ShipDesigns.js`, larger sprite-like rendering, unified NPC designs by type, and per-faction palettes/decals via `FactionVisuals.js`.
+- Factions + reputation: generic `civilian/trader/patrol/pirate/merc/miner` palettes; basic `state.reputation.{trader, patrol, pirate}` with events. Trader rep increases on buy/sell; patrol rep increases on pirate kills.
+- Respawn: press R after death to respawn near the nearest planet; small credit penalty applied; projectiles cleared.
+- Trading fixes: cannot sell goods at planets that don’t buy them (“No buyers” shown). Cargo display hardened to avoid NaN.
+- Ship Radio: compact in-HUD music widget (prev/play/next + volume). Procedural ambient tracks; volume persists across tracks and sessions; muted by M.
+
+Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
