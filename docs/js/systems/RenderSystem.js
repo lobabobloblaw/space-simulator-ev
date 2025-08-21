@@ -18,7 +18,6 @@ export class RenderSystem {
         this.screenCenter = { x: canvas.width / 2, y: canvas.height / 2 };
         
         // Rendering state
-        this.stars = { far: [], mid: [], near: [] };
         this.nebulaOffset = { x: 0, y: 0 };
         
         // Performance optimization flags
@@ -34,8 +33,7 @@ export class RenderSystem {
         // Initialize procedural planet renderer
         this.planetRenderer = new ProceduralPlanetRenderer();
         
-        // Generate stars on creation (reduced for performance)
-        this.generateStars();
+        // Don't generate stars here - we'll use the ones from state
         
         // Bind methods
         this.handleCanvasResize = this.handleCanvasResize.bind(this);
@@ -52,6 +50,11 @@ export class RenderSystem {
         
         // Set initial canvas size
         this.resizeCanvas();
+
+        // Safety: ensure visual world data exists (stars/asteroids/planets)
+        // In theory initializeGameState sets these, but if anything raced or failed,
+        // we restore minimal visuals here to avoid an empty scene.
+        this.ensureWorldVisuals();
         
         // Initialize planets with procedural generation
         // We'll do this after a small delay to ensure state is ready
@@ -64,6 +67,91 @@ export class RenderSystem {
         }, 100);
         
         console.log('[RenderSystem] Initialized');
+    }
+
+    /**
+     * Ensure stars, asteroids, and planets exist in state (fallback safeguard)
+     */
+    ensureWorldVisuals() {
+        const state = this.stateManager.state;
+
+        // Stars fallback
+        if (!state.stars || !state.stars.far || !state.stars.mid || !state.stars.near) {
+            console.warn('[RenderSystem] World stars missing; generating fallback starfields');
+            const density = (state.renderSettings && state.renderSettings.starDensity) ? state.renderSettings.starDensity : 1.0;
+            state.stars = { far: [], mid: [], near: [] };
+            for (let i = 0; i < Math.floor(3000 * density); i++) {
+                state.stars.far.push({
+                    x: (Math.random() - 0.5) * 12000,
+                    y: (Math.random() - 0.5) * 12000,
+                    brightness: Math.random() * 0.5 + 0.3,
+                    size: Math.random() < 0.95 ? 1 : 2,
+                    color: Math.random() < 0.94 ? '#ffffff' : 
+                           Math.random() < 0.5 ? '#ffeeee' :
+                           Math.random() < 0.7 ? '#eeeeff' : '#ffffee'
+                });
+            }
+            for (let i = 0; i < Math.floor(1200 * density); i++) {
+                state.stars.mid.push({
+                    x: (Math.random() - 0.5) * 8000,
+                    y: (Math.random() - 0.5) * 8000,
+                    brightness: Math.random() * 0.6 + 0.4,
+                    size: Math.random() < 0.9 ? 1 : 2,
+                    twinkle: Math.random() * Math.PI * 2,
+                    twinkleSpeed: 0.01 + Math.random() * 0.03,
+                    color: Math.random() < 0.92 ? '#ffffff' : 
+                           Math.random() < 0.6 ? '#ffeeee' : '#eeeeff'
+                });
+            }
+            for (let i = 0; i < Math.floor(600 * density); i++) {
+                state.stars.near.push({
+                    x: (Math.random() - 0.5) * 6000,
+                    y: (Math.random() - 0.5) * 6000,
+                    brightness: Math.random() * 0.7 + 0.5,
+                    size: Math.random() < 0.8 ? 1 : Math.random() < 0.95 ? 2 : 3,
+                    color: '#ffffff'
+                });
+            }
+        }
+
+        // Asteroids fallback
+        if (!state.asteroids || state.asteroids.length === 0) {
+            console.warn('[RenderSystem] Asteroids missing; generating fallback field');
+            state.asteroids = [];
+            for (let i = 0; i < 40; i++) {
+                const shapePoints = [];
+                for (let j = 0; j < 8; j++) shapePoints.push(0.7 + Math.random() * 0.6);
+                state.asteroids.push({
+                    x: (Math.random() - 0.5) * 4000,
+                    y: (Math.random() - 0.5) * 4000,
+                    vx: (Math.random() - 0.5) * 0.3,
+                    vy: (Math.random() - 0.5) * 0.3,
+                    radius: Math.random() * 8 + 2,
+                    color: '#666',
+                    rotationSpeed: (Math.random() - 0.5) * 0.02,
+                    rotation: Math.random() * Math.PI * 2,
+                    health: 20,
+                    maxHealth: 20,
+                    oreContent: Math.floor(Math.random() * 3) + 1,
+                    shapePoints
+                });
+            }
+        }
+
+        // Planets fallback
+        if (!state.planets || state.planets.length === 0) {
+            console.warn('[RenderSystem] Planets missing; loading from data module');
+            import('../data/gameData.js')
+                .then(mod => {
+                    if (mod.planets && mod.planets.length) {
+                        state.planets = mod.planets;
+                        // Initialize renderer cache now that planets exist
+                        this.planetRenderer.initializePlanets(state.planets);
+                        console.log('[RenderSystem] Loaded', state.planets.length, 'planets from data');
+                    }
+                })
+                .catch(e => console.error('[RenderSystem] Failed to load planets data:', e));
+        }
     }
     
     /**
@@ -84,48 +172,8 @@ export class RenderSystem {
         });
     }
     
-    /**
-     * Generate star field
-     */
-    generateStars() {
-        // Far stars (minimal parallax) - reduced for performance
-        for (let i = 0; i < 300; i++) {
-            this.stars.far.push({
-                x: (Math.random() - 0.5) * 12000,
-                y: (Math.random() - 0.5) * 12000,
-                brightness: Math.random() * 0.5 + 0.3,
-                size: Math.random() < 0.95 ? 1 : 2,
-                color: Math.random() < 0.94 ? '#ffffff' : 
-                       Math.random() < 0.5 ? '#ffeeee' :
-                       Math.random() < 0.7 ? '#eeeeff' : '#ffffee'
-            });
-        }
-        
-        // Mid-range stars with twinkling - reduced for performance
-        for (let i = 0; i < 120; i++) {
-            this.stars.mid.push({
-                x: (Math.random() - 0.5) * 8000,
-                y: (Math.random() - 0.5) * 8000,
-                brightness: Math.random() * 0.6 + 0.4,
-                size: Math.random() < 0.9 ? 1 : 2,
-                twinkle: Math.random() * Math.PI * 2,
-                twinkleSpeed: 0.01 + Math.random() * 0.03,
-                color: Math.random() < 0.92 ? '#ffffff' : 
-                       Math.random() < 0.6 ? '#ffeeee' : '#eeeeff'
-            });
-        }
-        
-        // Near stars (maximum parallax) - reduced for performance  
-        for (let i = 0; i < 60; i++) {
-            this.stars.near.push({
-                x: (Math.random() - 0.5) * 6000,
-                y: (Math.random() - 0.5) * 6000,
-                brightness: Math.random() * 0.7 + 0.5,
-                size: Math.random() < 0.8 ? 1 : Math.random() < 0.95 ? 2 : 3,
-                color: '#ffffff'
-            });
-        }
-    }
+    // Stars are now generated in main_eventbus_pure.js and stored in state
+    // This provides consistency across all systems
     
     /**
      * Main render method - called each frame
@@ -141,8 +189,17 @@ export class RenderSystem {
         // Save context state
         this.ctx.save();
         
-        // Apply camera transform
-        this.ctx.translate(this.screenCenter.x - this.camera.x, this.screenCenter.y - this.camera.y);
+        // Apply screen shake if active
+        let shakeX = 0, shakeY = 0;
+        if (state.ship.screenShake && state.ship.screenShake > 0) {
+            shakeX = (Math.random() - 0.5) * state.ship.screenShake;
+            shakeY = (Math.random() - 0.5) * state.ship.screenShake;
+            state.ship.screenShake *= state.ship.screenShakeDecay || 0.8;
+            if (state.ship.screenShake < 0.5) state.ship.screenShake = 0;
+        }
+        
+        // Apply camera transform with shake
+        this.ctx.translate(this.screenCenter.x - this.camera.x + shakeX, this.screenCenter.y - this.camera.y + shakeY);
         
         // Render layers in order (back to front)
         this.renderNebula();
@@ -158,6 +215,14 @@ export class RenderSystem {
         
         // Restore context
         this.ctx.restore();
+        
+        // Draw damage flash overlay
+        if (state.ship.damageFlash && state.ship.damageFlash > 0) {
+            this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * 0.3})`;
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            state.ship.damageFlash -= 0.05;
+            if (state.ship.damageFlash < 0) state.ship.damageFlash = 0;
+        }
         
         // Render UI elements (not affected by camera)
         this.renderMinimap(state);
@@ -216,8 +281,11 @@ export class RenderSystem {
      * Render parallax star layers
      */
     renderStars() {
+        const state = this.stateManager.state;
+        if (!state.stars) return;
+        
         // Far stars (minimal parallax)
-        for (let star of this.stars.far) {
+        for (let star of state.stars.far || []) {
             const screenX = star.x - this.camera.x * 0.05;
             const screenY = star.y - this.camera.y * 0.05;
             
@@ -239,7 +307,7 @@ export class RenderSystem {
         }
         
         // Mid stars with twinkling
-        for (let star of this.stars.mid) {
+        for (let star of state.stars.mid || []) {
             const screenX = star.x - this.camera.x * 0.2;
             const screenY = star.y - this.camera.y * 0.2;
             
@@ -256,7 +324,7 @@ export class RenderSystem {
         }
         
         // Near stars
-        for (let star of this.stars.near) {
+        for (let star of state.stars.near || []) {
             const screenX = star.x - this.camera.x * 0.4;
             const screenY = star.y - this.camera.y * 0.4;
             
@@ -439,46 +507,7 @@ export class RenderSystem {
                 this.ctx.fill();
             }
             
-            // State glow effect based on NPC state
-            if (npc.state && this.showEffects) {
-                this.ctx.save();
-                let glowColor = null;
-                let glowIntensity = 0.3;
-                
-                switch(npc.state) {
-                    case 'pursuing':
-                        glowColor = 'rgba(255, 100, 100, ';
-                        glowIntensity = 0.4;
-                        break;
-                    case 'fleeing':
-                        glowColor = 'rgba(255, 255, 100, ';
-                        glowIntensity = 0.3;
-                        break;
-                    case 'warning':
-                        glowColor = 'rgba(255, 165, 0, ';
-                        glowIntensity = 0.5 + Math.sin(Date.now() * 0.01) * 0.2;
-                        break;
-                    case 'patrolling':
-                        glowColor = 'rgba(100, 200, 255, ';
-                        glowIntensity = 0.2;
-                        break;
-                }
-                
-                if (glowColor) {
-                    const glowGradient = this.ctx.createRadialGradient(
-                        0, 0, npc.size,
-                        0, 0, npc.size * 2
-                    );
-                    glowGradient.addColorStop(0, glowColor + glowIntensity + ')');
-                    glowGradient.addColorStop(1, 'transparent');
-                    
-                    this.ctx.fillStyle = glowGradient;
-                    this.ctx.beginPath();
-                    this.ctx.arc(0, 0, npc.size * 2, 0, Math.PI * 2);
-                    this.ctx.fill();
-                }
-                this.ctx.restore();
-            }
+
             
             // Ship body
             this.renderNPCShip(npc);
@@ -1243,8 +1272,6 @@ export class RenderSystem {
      */
     destroy() {
         // Clear any render-specific resources
-        this.stars = { far: [], mid: [], near: [] };
-        
         console.log('[RenderSystem] Destroyed');
     }
 }

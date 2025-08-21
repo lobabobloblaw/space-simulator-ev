@@ -15,14 +15,17 @@ import AudioSystem from './systems/AudioSystem.js';
 import UISystem from './systems/UISystem.js';
 import WeaponSystem from './systems/WeaponSystem.js';
 import SpawnSystem from './systems/SpawnSystem.js';
-import { SaveSystem } from './systems/saveSystem.js';
+import SaveSystemAdapterFixed from './systems/SaveSystemAdapterFixed.js';
 import TradingSystem from './systems/TradingSystem.js';
+import ShopSystem from './systems/ShopSystem.js';  // Shop system for outfitter
 import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personalities
 
 // We'll import game data dynamically in the initialization function
 // to ensure it's available when needed
 
 console.log('[EventBus] Module loaded - Starting pure EventBus game initialization...');
+console.log('[EventBus] Current URL:', window.location.href);
+console.log('[EventBus] Script base path:', import.meta.url);
 window.eventBusModuleLoaded = true;
 
 // Get singletons
@@ -39,35 +42,90 @@ async function initializeGameState() {
     const state = stateManager.state;
     
     // Import game data dynamically
-    const gameDataModule = await import('./data/gameData.js');
-    const planetsData = gameDataModule.planets;
-    const missionsData = gameDataModule.missions;
-    
     console.log('[EventBus] initializeGameState called');
-    console.log('[EventBus] planets loaded:', planetsData?.length || 'NO');
+    console.log('[EventBus] Importing game data...');
     
-    // Initialize ship
+    // Import game data
+    let planetsData, missionsData;
+    try {
+        console.log('[EventBus] Attempting to import gameData.js...');
+        const gameDataModule = await import('./data/gameData.js');
+        console.log('[EventBus] Import returned:', gameDataModule);
+        planetsData = gameDataModule.planets;
+        missionsData = gameDataModule.missions;
+        console.log('[EventBus] Game data imported successfully');
+        console.log('[EventBus] Planets loaded:', planetsData?.length || 'NO');
+        console.log('[EventBus] Missions loaded:', missionsData?.length || 'NO');
+        
+        // Verify planets data
+        if (!planetsData || planetsData.length === 0) {
+            console.error('[EventBus] WARNING: No planets in imported data!');
+            console.log('[EventBus] gameDataModule keys:', Object.keys(gameDataModule));
+        }
+    } catch (e) {
+        console.error('[EventBus] Failed to import game data:', e);
+        console.error('[EventBus] Error stack:', e.stack);
+        // Fallback to empty arrays to prevent crashes
+        planetsData = [];
+        missionsData = [];
+        console.error('[EventBus] Using empty arrays as fallback');
+    }
+    
+    // CHECK FOR SAVED DATA FIRST!
+    const savedData = localStorage.getItem('galaxyTraderSave');
+    let shipData = null;
+    let missionData = null;
+    
+    if (savedData) {
+        try {
+            const save = JSON.parse(savedData);
+            shipData = save.ship;
+            missionData = save.missionSystem;
+            console.log('[EventBus] Found save during init - loading credits:', shipData?.credits);
+            console.log('[EventBus] Save data keys:', Object.keys(save));
+        } catch (e) {
+            console.log('[EventBus] Invalid save data, using defaults:', e);
+        }
+    } else {
+        console.log('[EventBus] No save found - using defaults');
+    }
+    
+    // Initialize ship with saved data OR defaults
     state.ship = {
-        x: 0, y: 0, vx: 0, vy: 0,
-        angle: 0, thrust: 0.012, maxSpeed: 0.8,
-        fuel: 100, maxFuel: 100,
-        credits: 250,
-        tutorialStage: 'start',
-        size: 8,
-        isLanded: false, landedPlanet: null,
+        x: shipData?.x ?? 0,
+        y: shipData?.y ?? 0,
+        vx: shipData?.vx ?? 0,
+        vy: shipData?.vy ?? 0,
+        angle: shipData?.angle ?? 0,
+        thrust: shipData?.thrust ?? 0.012,
+        maxSpeed: shipData?.maxSpeed ?? 0.8,
+        fuel: shipData?.fuel ?? 100,
+        maxFuel: shipData?.maxFuel ?? 100,
+        credits: shipData?.credits ?? 250,  // Use saved credits or default 250
+        tutorialStage: shipData?.tutorialStage ?? 'start',
+        size: shipData?.size ?? 8,
+        isLanded: false,  // Always start not landed
+        landedPlanet: null,
         landingCooldown: 0,
-        class: "shuttle",
-        health: 100, maxHealth: 100,
+        class: shipData?.class ?? "shuttle",
+        health: shipData?.health ?? 100,
+        maxHealth: shipData?.maxHealth ?? 100,
         weaponCooldown: 0,
         weaponSwitchPressed: false,
-        kills: 0,
-        cargo: [], cargoCapacity: 10,
-        weapons: [], 
-        currentWeapon: 0,
-        shield: 0, maxShield: 0,
-        engineLevel: 1, weaponLevel: 1,
-        currentPlanet: null
+        kills: shipData?.kills ?? 0,
+        cargo: shipData?.cargo ?? [],
+        cargoCapacity: shipData?.cargoCapacity ?? 10,
+        weapons: shipData?.weapons ?? [],
+        currentWeapon: shipData?.currentWeapon ?? 0,
+        shield: shipData?.shield ?? 0,
+        maxShield: shipData?.maxShield ?? 0,
+        engineLevel: shipData?.engineLevel ?? 1,
+        weaponLevel: shipData?.weaponLevel ?? 1,
+        currentPlanet: null,
+        pirateKills: shipData?.pirateKills ?? 0
     };
+    
+    console.log('[EventBus] Ship initialized with credits:', state.ship.credits);
     
     // Initialize camera
     state.camera = { x: 0, y: 0 };
@@ -76,15 +134,83 @@ async function initializeGameState() {
     state.paused = false;
     state.gameTime = 0;
     
-    // Initialize entities
-    state.planets = planetsData;
+    // Initialize entities - ALWAYS fresh, never from save
+    state.planets = planetsData;  // Always use fresh planet data
     console.log('[EventBus] Assigned planets to state:', state.planets?.length);
+    
+    // Initialize with some NPCs already in the system
     state.npcShips = [];
-    state.asteroids = [];
-    state.projectiles = [];
-    state.explosions = [];
-    state.warpEffects = [];
-    state.pickups = [];
+    
+    // Spawn 3-5 initial NPCs already traveling through the system
+    const initialNPCCount = 3 + Math.floor(Math.random() * 3);
+    const npcTypes = ['trader', 'freighter', 'patrol', 'pirate'];
+    const npcTemplates = {
+        freighter: {
+            size: 18, color: "#4488ff", maxSpeed: 0.25, thrust: 0.002,
+            turnSpeed: 0.008, health: 80, maxHealth: 80, credits: 100,
+            behavior: "passive", weapon: { type: "laser", damage: 5, cooldown: 30 }
+        },
+        trader: {
+            size: 12, color: "#44ff88", maxSpeed: 0.35, thrust: 0.003,
+            turnSpeed: 0.01, health: 60, maxHealth: 60, credits: 75,
+            behavior: "passive", weapon: null
+        },
+        patrol: {
+            size: 14, color: "#8888ff", maxSpeed: 0.45, thrust: 0.004,
+            turnSpeed: 0.012, health: 100, maxHealth: 100, credits: 50,
+            behavior: "lawful", weapon: { type: "rapid", damage: 7, cooldown: 8 }
+        },
+        pirate: {
+            size: 10, color: "#ff4444", maxSpeed: 0.5, thrust: 0.005,
+            turnSpeed: 0.015, health: 70, maxHealth: 70, credits: 150,
+            behavior: "aggressive", weapon: { type: "plasma", damage: 15, cooldown: 25 }
+        }
+    };
+    
+    for (let i = 0; i < initialNPCCount; i++) {
+        const type = npcTypes[Math.floor(Math.random() * npcTypes.length)];
+        const template = npcTemplates[type];
+        
+        // Random position in the system (not too close to player start)
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 300 + Math.random() * 700;
+        const x = Math.cos(angle) * distance;
+        const y = Math.sin(angle) * distance;
+        
+        // Random velocity (already traveling)
+        const velAngle = Math.random() * Math.PI * 2;
+        const speed = template.maxSpeed * (0.3 + Math.random() * 0.4);
+        const vx = Math.cos(velAngle) * speed;
+        const vy = Math.sin(velAngle) * speed;
+        
+        // For traders/freighters, set a target planet
+        let targetPlanet = null;
+        if ((type === 'trader' || type === 'freighter') && planetsData.length > 0) {
+            targetPlanet = planetsData[Math.floor(Math.random() * planetsData.length)];
+        }
+        
+        state.npcShips.push({
+            x: x,
+            y: y,
+            vx: vx,
+            vy: vy,
+            angle: Math.atan2(vy, vx),
+            type: type,
+            ...template,
+            targetPlanet: targetPlanet,
+            weaponCooldown: Math.random() * 30,  // Random cooldown state
+            lifetime: Math.floor(Math.random() * 300),  // Been around for a while
+            thrusting: false,
+            state: type === 'patrol' ? 'patrolling' : null
+        });
+    }
+    
+    console.log(`[EventBus] Spawned ${initialNPCCount} initial NPCs already in system`)
+    state.asteroids = [];  // Will be generated below
+    state.projectiles = [];  // Projectiles don't persist
+    state.explosions = [];  // Effects don't persist
+    state.warpEffects = [];  // Effects don't persist
+    state.pickups = [];  // Pickups don't persist
     
     // Generate asteroids
     for (let i = 0; i < 50; i++) {
@@ -108,11 +234,15 @@ async function initializeGameState() {
         });
     }
     
-    // Generate stars
+    // Generate stars - ALWAYS fresh, never from save
+    // Density is configurable for easy tuning
+    const STAR_DENSITY = 2.0; // 1.0 = baseline; increase for denser fields
+    state.renderSettings = state.renderSettings || {};
+    state.renderSettings.starDensity = STAR_DENSITY;
     state.stars = { far: [], mid: [], near: [] };
     
     // Far stars
-    for (let i = 0; i < 3000; i++) {
+    for (let i = 0; i < Math.floor(3000 * STAR_DENSITY); i++) {
         state.stars.far.push({
             x: (Math.random() - 0.5) * 12000,
             y: (Math.random() - 0.5) * 12000,
@@ -125,7 +255,7 @@ async function initializeGameState() {
     }
     
     // Mid stars
-    for (let i = 0; i < 1200; i++) {
+    for (let i = 0; i < Math.floor(1200 * STAR_DENSITY); i++) {
         state.stars.mid.push({
             x: (Math.random() - 0.5) * 8000,
             y: (Math.random() - 0.5) * 8000,
@@ -139,7 +269,7 @@ async function initializeGameState() {
     }
     
     // Near stars
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < Math.floor(600 * STAR_DENSITY); i++) {
         state.stars.near.push({
             x: (Math.random() - 0.5) * 6000,
             y: (Math.random() - 0.5) * 6000,
@@ -149,11 +279,11 @@ async function initializeGameState() {
         });
     }
     
-    // Initialize mission system
+    // Initialize mission system with saved data OR defaults
     state.missionSystem = {
-        active: null,
-        completed: [],
-        available: missionsData
+        active: missionData?.active ?? null,
+        completed: missionData?.completed ?? [],
+        available: missionData?.available ?? missionsData
     };
     
     // Initialize spawn state
@@ -370,10 +500,21 @@ async function initializeSystems() {
     }
     
     try {
-        systems.save = new SaveSystem();
-        console.log('✅ SaveSystem initialized');
+        console.log('🔧 Creating SaveSystemAdapterFixed...');
+        systems.save = new SaveSystemAdapterFixed();
+        console.log('🔧 SaveSystemAdapterFixed created, now initializing...');
+        await systems.save.init();
+        console.log('✅ SaveSystemAdapterFixed initialized - Save/Load connected');
+        
+        // Test that it's working
+        console.log('🔧 Testing save system...');
+        console.log('  - EventBus connected:', !!systems.save.eventBus);
+        console.log('  - StateManager connected:', !!systems.save.stateManager);
+        console.log('  - State ship exists:', !!systems.save.stateManager?.state?.ship);
+        console.log('  - Current credits:', systems.save.stateManager?.state?.ship?.credits);
     } catch (e) {
-        console.error('❌ SaveSystem failed:', e);
+        console.error('❌ SaveSystemAdapterFixed failed:', e);
+        console.error('Stack trace:', e.stack);
     }
     
     try {
@@ -383,6 +524,15 @@ async function initializeSystems() {
         console.log('✅ TradingSystem initialized');
     } catch (e) {
         console.error('❌ TradingSystem failed:', e);
+    }
+    
+    try {
+        systems.shop = new ShopSystem();
+        await systems.shop.init();
+        window.shopSystem = systems.shop; // For onclick handlers
+        console.log('✅ ShopSystem initialized');
+    } catch (e) {
+        console.error('❌ ShopSystem failed:', e);
     }
     
     try {
@@ -412,6 +562,8 @@ async function initGame() {
     console.log('  - planets:', gameDataModule.planets?.length || 'MISSING');
     console.log('  - missions:', gameDataModule.missions?.length || 'MISSING');
     console.log('  - npcTypes:', Object.keys(gameDataModule.npcTypes || {}).length || 'MISSING');
+    console.log('  - shopInventory:', Object.keys(gameDataModule.shopInventory || {}).length || 'MISSING');
+    console.log('  - commodities:', Object.keys(gameDataModule.commodities || {}).length || 'MISSING');
     
     // Set canvas size
     const canvas = document.getElementById('gameCanvas');
@@ -455,59 +607,23 @@ async function initGame() {
         }
     });
     
-    // Check for saved game
-    if (systems.save && systems.save.hasSave()) {
-        const loadPrompt = document.createElement('div');
-        loadPrompt.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: #141414;
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            padding: 32px;
-            z-index: 10000;
-            font-family: 'JetBrains Mono', monospace;
-            color: white;
-            text-align: center;
-            box-shadow: 0 0 40px rgba(0, 255, 255, 0.2);
-        `;
-        loadPrompt.innerHTML = `
-            <h2 style="color: #00ffff; margin: 0 0 20px 0; font-family: 'Orbitron', monospace; font-weight: 600; text-transform: uppercase; font-size: 24px;">SAVE DETECTED</h2>
-            <p style="margin-bottom: 24px; color: #888; font-family: 'JetBrains Mono', monospace;">Continue Previous Session?</p>
-            <button id="loadSaveBtn" style="
-                background: transparent;
-                color: #00ffff;
-                border: 1px solid #00ffff;
-                padding: 10px 24px;
-                margin: 0 8px;
-                cursor: pointer;
-                font-family: 'JetBrains Mono', monospace;
-                text-transform: uppercase;
-                transition: all 0.2s;
-            " onmouseover="this.style.background='rgba(0,255,255,0.1)'" onmouseout="this.style.background='transparent'">LOAD</button>
-            <button id="newGameBtn" style="
-                background: transparent;
-                color: #888;
-                border: 1px solid #444;
-                padding: 10px 24px;
-                margin: 0 8px;
-                cursor: pointer;
-                font-family: 'JetBrains Mono', monospace;
-                text-transform: uppercase;
-                transition: all 0.2s;
-            " onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">NEW GAME</button>
-        `;
-        document.body.appendChild(loadPrompt);
-        
-        document.getElementById('loadSaveBtn').onclick = () => {
-            eventBus.emit(GameEvents.GAME_LOAD);
-            loadPrompt.remove();
-        };
-        
-        document.getElementById('newGameBtn').onclick = () => {
-            loadPrompt.remove();
-        };
+    // Check if we loaded a saved game during initialization
+    const savedData = localStorage.getItem('galaxyTraderSave');
+    if (savedData) {
+        try {
+            const save = JSON.parse(savedData);
+            if (save.ship) {
+                // Show a brief notification that save was loaded
+                eventBus.emit(GameEvents.UI_MESSAGE, {
+                    message: `Save loaded - Credits: ${save.ship.credits}, Kills: ${save.ship.kills}`,
+                    type: 'success',
+                    duration: 3000
+                });
+                console.log('[EventBus] Save automatically loaded during initialization');
+            }
+        } catch (e) {
+            console.log('[EventBus] Could not parse save notification:', e);
+        }
     }
     
     // Wire up UI buttons
@@ -518,14 +634,36 @@ async function initGame() {
     
     if (departBtn) departBtn.onclick = () => eventBus.emit(GameEvents.MENU_CLOSE);
     if (stationBtn) stationBtn.onclick = () => eventBus.emit(GameEvents.MENU_OPEN, { panel: 'landing' });
-    if (tradeBtn) tradeBtn.onclick = () => eventBus.emit(GameEvents.MENU_OPEN, { panel: 'trading' });
-    if (outfitterBtn) outfitterBtn.onclick = () => eventBus.emit(GameEvents.MENU_OPEN, { panel: 'shop' });
+    if (tradeBtn) tradeBtn.onclick = () => {
+        const state = stateManager.state;
+        eventBus.emit(GameEvents.MENU_OPEN, { 
+            panel: 'trading',
+            ship: state.ship,
+            commodities: gameDataModule.commodities
+        });
+    };
+    if (outfitterBtn) outfitterBtn.onclick = () => {
+        const state = stateManager.state;
+        eventBus.emit(GameEvents.MENU_OPEN, { 
+            panel: 'shop',
+            ship: state.ship,
+            shopInventory: gameDataModule.shopInventory
+        });
+    };
     
     // Start game loop
     loop.start();
     
     // Start first mission
     const state = stateManager.state;
+    
+    // Initialize tutorial hint for weaponless start
+    if (!state.ship.weapons || state.ship.weapons.length === 0) {
+        eventBus.emit(GameEvents.TUTORIAL_UPDATE, {
+            stage: 'start',
+            ship: state.ship
+        });
+    }
     if (state.missionSystem && state.missionSystem.available.length > 0) {
         state.missionSystem.active = state.missionSystem.available[0];
         eventBus.emit(GameEvents.UI_MESSAGE, {
@@ -545,7 +683,7 @@ async function initGame() {
     
     console.log('[EventBus] 🎉 PURE EVENTBUS ARCHITECTURE DEPLOYED!');
     console.log('[EventBus] All systems use StateManager - no window globals');
-    console.log('[EventBus] Controls: W/A/S/D = Move, F = Fire, L = Land, S = Save, O = Load, M = Toggle Sound');
+    console.log('[EventBus] Controls: W/A/S/D = Move, F = Fire, L = Land, M = Toggle Sound, F5 = Save, F9 = Load, F12 = Clear Save');
 }
 
 // Handle window resize
@@ -571,9 +709,9 @@ if (document.readyState === 'loading') {
 // Export for debugging (but not required for operation)
 export { eventBus, stateManager, systems };
 
-// Also expose globally for debugging in test environment
-if (window.location.pathname.includes('test-pure')) {
-    window.eventBus = eventBus;
-    window.stateManager = stateManager;
-    window.systems = systems;
-}
+// Expose globally for debugging
+// TODO: Remove in production
+window.eventBus = eventBus;
+window.stateManager = stateManager;
+window.systems = systems;
+window.GameEvents = GameEvents;

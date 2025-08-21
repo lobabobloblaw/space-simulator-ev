@@ -166,13 +166,21 @@ export class InputSystem {
             }
         }
         
-        // Special handling for save/load keys (S and O without modifiers)
-        if (key === 's' && !e.ctrlKey && !e.metaKey) {
+        // Special handling for save/load/clear using Function Keys
+        // F5 = Quick Save
+        if (key === 'f5') {
             e.preventDefault();
             this.eventBus.emit(GameEvents.GAME_SAVE);
-        } else if (key === 'o' && !e.ctrlKey && !e.metaKey) {
+        }
+        // F9 = Quick Load
+        else if (key === 'f9') {
             e.preventDefault();
             this.eventBus.emit(GameEvents.GAME_LOAD);
+        }
+        // F12 = Clear save (with confirmation)
+        else if (key === 'f12') {
+            e.preventDefault();
+            this.eventBus.emit(GameEvents.GAME_CLEAR_SAVE);
         }
         
         // Emit raw key event for systems that need it

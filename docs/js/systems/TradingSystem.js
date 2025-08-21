@@ -45,8 +45,8 @@ export default class TradingSystem {
         document.getElementById('landingInfo').style.display = 'none';
         document.getElementById('shopPanel').style.display = 'none';
         
-        // Show trading panel
-        this.tradingPanel.style.display = 'block';
+        // Show trading panel with flex display
+        this.tradingPanel.style.display = 'flex';
         
         this.updateTradingUI();
     }
@@ -62,8 +62,8 @@ export default class TradingSystem {
         document.getElementById('tradeCargo').textContent = 
             `${state.ship.cargo.length}/${state.ship.cargoCapacity}`;
 
-        // Build commodity list
-        let html = '<div class="commodity-header">COMMODITIES MARKET</div>';
+        // Build commodity list (header is now in HTML)
+        let html = '';
         
         // Show items in cargo (sell section)
         if (state.ship.cargo.length > 0) {

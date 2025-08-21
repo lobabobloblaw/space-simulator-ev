@@ -79,6 +79,7 @@ export class SpawnSystem {
         this.handleNPCDeath = this.handleNPCDeath.bind(this);
         this.handleAsteroidDestroyed = this.handleAsteroidDestroyed.bind(this);
         this.handlePickupExpired = this.handlePickupExpired.bind(this);
+        this.handleExplosion = this.handleExplosion.bind(this);
         
         console.log('[SpawnSystem] Created');
     }
@@ -100,6 +101,7 @@ export class SpawnSystem {
         this.eventBus.on(GameEvents.NPC_DEATH, this.handleNPCDeath);
         this.eventBus.on('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.on('pickup.expired', this.handlePickupExpired);
+        this.eventBus.on(GameEvents.EXPLOSION, this.handleExplosion);
     }
     
     /**
@@ -200,6 +202,46 @@ export class SpawnSystem {
     }
     
     /**
+     * Handle explosion creation
+     */
+    handleExplosion(data) {
+        if (!data) return;
+        
+        const state = this.stateManager.state;
+        if (!state.explosions) state.explosions = [];
+        
+        // Determine explosion size parameters
+        let radius, maxRadius, maxLifetime;
+        
+        if (data.size === 'small') {
+            radius = 5;
+            maxRadius = 15;
+            maxLifetime = 20;
+        } else if (data.size === 'large') {
+            radius = 15;
+            maxRadius = 40;
+            maxLifetime = 20;
+        } else {
+            // Default medium
+            radius = 10;
+            maxRadius = 25;
+            maxLifetime = 20;
+        }
+        
+        // Create explosion object
+        const explosion = {
+            x: data.x,
+            y: data.y,
+            radius: radius,
+            maxRadius: maxRadius,
+            lifetime: 0,
+            maxLifetime: maxLifetime
+        };
+        
+        state.explosions.push(explosion);
+    }
+    
+    /**
      * Spawn an NPC
      */
     spawnNPC() {
@@ -224,48 +266,131 @@ export class SpawnSystem {
         let spawnX, spawnY, initialVx, initialVy;
         let spawnEffect = 'arrive';
         
-        if (type === 'trader') {
-            // Spawn near a random planet
-            const planet = state.planets[Math.floor(Math.random() * state.planets.length)];
-            const angle = Math.random() * Math.PI * 2;
-            const distance = planet.radius + 100 + Math.random() * 100;
-            spawnX = planet.x + Math.cos(angle) * distance;
-            spawnY = planet.y + Math.sin(angle) * distance;
-            initialVx = Math.cos(angle) * template.maxSpeed * 0.5;
-            initialVy = Math.sin(angle) * template.maxSpeed * 0.5;
-            spawnEffect = 'takeoff';
+        if (type === 'trader' || type === 'freighter') {
+            // Traders/Freighters spawn near planets or in transit between them
+            if (Math.random() < 0.4) {
+                // Spawn near a planet (arriving or departing)
+                const planet = state.planets[Math.floor(Math.random() * state.planets.length)];
+                const angle = Math.random() * Math.PI * 2;
+                const distance = planet.radius + 100 + Math.random() * 100;
+                spawnX = planet.x + Math.cos(angle) * distance;
+                spawnY = planet.y + Math.sin(angle) * distance;
+                
+                // 50% chance to be departing (moving away) or arriving (moving slowly)
+                if (Math.random() < 0.5) {
+                    // Departing - moving away from planet
+                    initialVx = Math.cos(angle) * template.maxSpeed * (0.3 + Math.random() * 0.4);
+                    initialVy = Math.sin(angle) * template.maxSpeed * (0.3 + Math.random() * 0.4);
+                    spawnEffect = 'takeoff';
+                } else {
+                    // Arriving - moving slowly or orbiting
+                    const orbitAngle = angle + Math.PI/2;
+                    initialVx = Math.cos(orbitAngle) * template.maxSpeed * 0.2;
+                    initialVy = Math.sin(orbitAngle) * template.maxSpeed * 0.2;
+                    spawnEffect = null; // No effect for already-present ships
+                }
+            } else {
+                // Spawn in transit between planets
+                const fromPlanet = state.planets[Math.floor(Math.random() * state.planets.length)];
+                const toPlanet = state.planets[Math.floor(Math.random() * state.planets.length)];
+                
+                // Position somewhere along the route
+                const progress = 0.2 + Math.random() * 0.6; // 20-80% along the route
+                spawnX = fromPlanet.x + (toPlanet.x - fromPlanet.x) * progress;
+                spawnY = fromPlanet.y + (toPlanet.y - fromPlanet.y) * progress;
+                
+                // Velocity toward destination with some variance
+                const travelAngle = Math.atan2(toPlanet.y - spawnY, toPlanet.x - spawnX);
+                const angleVariance = (Math.random() - 0.5) * Math.PI/6; // ±30 degrees
+                initialVx = Math.cos(travelAngle + angleVariance) * template.maxSpeed * (0.4 + Math.random() * 0.3);
+                initialVy = Math.sin(travelAngle + angleVariance) * template.maxSpeed * (0.4 + Math.random() * 0.3);
+                spawnEffect = null; // Already in system
+            }
         } else if (type === 'pirate') {
-            // Spawn at distance from player
-            const angle = Math.random() * Math.PI * 2;
-            const distance = 1200 + Math.random() * 300;
-            spawnX = state.ship.x + Math.cos(angle) * distance;
-            spawnY = state.ship.y + Math.sin(angle) * distance;
-            initialVx = -Math.cos(angle) * template.maxSpeed * 0.3;
-            initialVy = -Math.sin(angle) * template.maxSpeed * 0.3;
-            spawnEffect = 'arrive';
+            // Pirates spawn at edges but with varied trajectories
+            const spawnAngle = Math.random() * Math.PI * 2;
+            const distance = 1000 + Math.random() * 500;
+            spawnX = state.ship.x + Math.cos(spawnAngle) * distance;
+            spawnY = state.ship.y + Math.sin(spawnAngle) * distance;
+            
+            // Random trajectory - not always toward player
+            const trajectoryType = Math.random();
+            if (trajectoryType < 0.3) {
+                // Moving across the system (tangential)
+                const tangentAngle = spawnAngle + Math.PI/2 * (Math.random() < 0.5 ? 1 : -1);
+                initialVx = Math.cos(tangentAngle) * template.maxSpeed * (0.3 + Math.random() * 0.3);
+                initialVy = Math.sin(tangentAngle) * template.maxSpeed * (0.3 + Math.random() * 0.3);
+            } else if (trajectoryType < 0.6) {
+                // Prowling (slow random direction)
+                const prowlAngle = Math.random() * Math.PI * 2;
+                initialVx = Math.cos(prowlAngle) * template.maxSpeed * 0.2;
+                initialVy = Math.sin(prowlAngle) * template.maxSpeed * 0.2;
+            } else {
+                // Hunting (moving inward but at an angle)
+                const huntAngle = spawnAngle + Math.PI + (Math.random() - 0.5) * Math.PI/2;
+                initialVx = Math.cos(huntAngle) * template.maxSpeed * 0.3;
+                initialVy = Math.sin(huntAngle) * template.maxSpeed * 0.3;
+            }
+            spawnEffect = Math.random() < 0.3 ? 'arrive' : null; // Only some show warp effect
         } else if (type === 'patrol') {
-            // Spawn at medium distance
-            const angle = Math.random() * Math.PI * 2;
-            const distance = 400 + Math.random() * 400;
-            spawnX = state.ship.x + Math.cos(angle) * distance;
-            spawnY = state.ship.y + Math.sin(angle) * distance;
-            initialVx = -Math.cos(angle) * template.maxSpeed * 0.5;
-            initialVy = -Math.sin(angle) * template.maxSpeed * 0.5;
-            spawnEffect = 'arrive';
+            // Patrols spawn in patrol patterns around the system
+            const patrolPattern = Math.random();
+            
+            if (patrolPattern < 0.4) {
+                // Circular patrol around player's general area
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 400 + Math.random() * 600;
+                spawnX = state.ship.x + Math.cos(angle) * distance;
+                spawnY = state.ship.y + Math.sin(angle) * distance;
+                
+                // Moving perpendicular to radius (orbiting)
+                const orbitDirection = Math.random() < 0.5 ? 1 : -1;
+                const orbitAngle = angle + Math.PI/2 * orbitDirection;
+                initialVx = Math.cos(orbitAngle) * template.maxSpeed * (0.3 + Math.random() * 0.2);
+                initialVy = Math.sin(orbitAngle) * template.maxSpeed * (0.3 + Math.random() * 0.2);
+                spawnEffect = null; // Already patrolling
+            } else if (patrolPattern < 0.7) {
+                // Patrolling trade routes
+                const planet = state.planets[Math.floor(Math.random() * state.planets.length)];
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 200 + Math.random() * 300;
+                spawnX = planet.x + Math.cos(angle) * distance;
+                spawnY = planet.y + Math.sin(angle) * distance;
+                
+                // Random patrol direction
+                const patrolAngle = Math.random() * Math.PI * 2;
+                initialVx = Math.cos(patrolAngle) * template.maxSpeed * 0.35;
+                initialVy = Math.sin(patrolAngle) * template.maxSpeed * 0.35;
+                spawnEffect = null;
+            } else {
+                // Responding to something (moving with purpose)
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 800 + Math.random() * 400;
+                spawnX = state.ship.x + Math.cos(angle) * distance;
+                spawnY = state.ship.y + Math.sin(angle) * distance;
+                
+                // Moving across the area
+                const moveAngle = Math.random() * Math.PI * 2;
+                initialVx = Math.cos(moveAngle) * template.maxSpeed * 0.4;
+                initialVy = Math.sin(moveAngle) * template.maxSpeed * 0.4;
+                spawnEffect = 'arrive'; // Just arrived to investigate
+            }
         } else {
-            // Default spawn
+            // Default spawn - random position and trajectory
             const angle = Math.random() * Math.PI * 2;
             const distance = 600 + Math.random() * 600;
             spawnX = state.ship.x + Math.cos(angle) * distance;
             spawnY = state.ship.y + Math.sin(angle) * distance;
+            
+            // Random velocity direction
             const velAngle = Math.random() * Math.PI * 2;
-            initialVx = Math.cos(velAngle) * template.maxSpeed * 0.3;
-            initialVy = Math.sin(velAngle) * template.maxSpeed * 0.3;
-            spawnEffect = 'arrive';
+            initialVx = Math.cos(velAngle) * template.maxSpeed * (0.2 + Math.random() * 0.3);
+            initialVy = Math.sin(velAngle) * template.maxSpeed * (0.2 + Math.random() * 0.3);
+            spawnEffect = Math.random() < 0.2 ? 'arrive' : null;
         }
         
-        // Create warp effect at spawn location
-        if (state.warpEffects) {
+        // Create warp effect at spawn location if appropriate
+        if (state.warpEffects && spawnEffect) {
             state.warpEffects.push({
                 x: spawnX,
                 y: spawnY,
@@ -447,6 +572,7 @@ export class SpawnSystem {
         this.eventBus.off(GameEvents.NPC_DEATH, this.handleNPCDeath);
         this.eventBus.off('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.off('pickup.expired', this.handlePickupExpired);
+        this.eventBus.off(GameEvents.EXPLOSION, this.handleExplosion);
         
         console.log('[SpawnSystem] Destroyed');
     }

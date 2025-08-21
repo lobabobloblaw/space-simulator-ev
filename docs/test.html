@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Game Data</title>
+</head>
+<body>
+    <h1>Testing Game Data Import</h1>
+    <div id="output"></div>
+    
+    <script type="module">
+        import * as gameData from './js/data/gameData.js';
+        
+        const output = document.getElementById('output');
+        output.innerHTML = `
+            <p>Planets: ${gameData.planets?.length || 0}</p>
+            <p>Missions: ${gameData.missions?.length || 0}</p>
+            <p>NPC Types: ${Object.keys(gameData.npcTypes || {}).length}</p>
+            <p>First planet: ${gameData.planets?.[0]?.name || 'N/A'}</p>
+        `;
+        
+        console.log('Game data:', gameData);
+        console.log('Planets:', gameData.planets);
+    </script>
+</body>
+</html>

@@ -159,6 +159,19 @@ body {
     50% { opacity: 0.6; }
 }
 
+@keyframes shake {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    10% { transform: translateX(-52%) translateY(-2px); }
+    20% { transform: translateX(-48%) translateY(0); }
+    30% { transform: translateX(-52%) translateY(2px); }
+    40% { transform: translateX(-48%) translateY(0); }
+    50% { transform: translateX(-52%) translateY(-1px); }
+    60% { transform: translateX(-48%) translateY(0); }
+    70% { transform: translateX(-52%) translateY(1px); }
+    80% { transform: translateX(-48%) translateY(0); }
+    90% { transform: translateX(-51%) translateY(-1px); }
+}
+
 /* Center Panel - Logo & Key Stats */
 .hud-center {
     flex: 1;
@@ -267,7 +280,7 @@ body {
 
 .controls {
     display: grid;
-    grid-template-columns: auto auto;
+    grid-template-columns: auto auto auto auto; /* key action | key action */
     gap: 2px var(--spacing-xs);
     font-size: 9px;
 }
@@ -409,7 +422,7 @@ body {
     display: block;
     width: 420px !important;  /* Force full container width */
     height: 472.5px !important;  /* Maintain 8:9 aspect ratio */
-    image-rendering: crisp-edges;  /* Better scaling for AI images */
+    image-rendering: auto;  /* Prefer smooth scaling for photographic images */
     position: relative;
 }
 
@@ -420,7 +433,7 @@ body {
     flex-direction: column;
     gap: var(--spacing-sm);
     min-height: 0;  /* Allow shrinking */
-    overflow-y: auto;  /* Scroll if needed */
+    overflow: hidden;  /* Avoid scroll for one-shot landing page */
 }
 
 #landingMessage {
@@ -432,9 +445,19 @@ body {
 
 #planetDescription {
     font-size: 12px;
-    line-height: 1.6;
+    line-height: 1.4;
     color: var(--text-secondary);
     flex: 1;
+    /* Clamp to keep landing page one-shot without scroll */
+    display: -webkit-box;
+    -webkit-line-clamp: 8; /* visible lines */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+#landingDetails {
+    font-size: 11px;
+    line-height: 1.4;
 }
 
 #landingButtons {
@@ -471,12 +494,34 @@ body {
     display: none;
     flex: 1;
     flex-direction: column;
-    padding: var(--spacing-md);
     min-height: 0;  /* Allow shrinking */
     height: 100%;  /* Full height of content area */
-    overflow-y: auto;
     background: var(--bg-black);
     min-width: 350px;  /* Ensure readability */
+}
+
+/* Trading Panel specific structure */
+#tradingPanel {
+    padding: 0;  /* Remove padding from main container */
+}
+
+.trading-header {
+    flex-shrink: 0;  /* Never shrink */
+    padding: var(--spacing-md) var(--spacing-md) 0 var(--spacing-md);
+    background: var(--bg-black);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.trading-content {
+    flex: 1;
+    overflow-y: auto;  /* Only this part scrolls */
+    padding: 0 var(--spacing-md) var(--spacing-md) var(--spacing-md);
+    min-height: 0;  /* Allow shrinking */
+}
+
+#shopPanel {
+    padding: var(--spacing-md);
+    overflow-y: auto;
 }
 
 /* Trading System Styles */

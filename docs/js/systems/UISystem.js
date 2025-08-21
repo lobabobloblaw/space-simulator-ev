@@ -25,8 +25,21 @@ export class UISystem {
         this.handlePurchase = this.handlePurchase.bind(this);
         this.handleUIMessage = this.handleUIMessage.bind(this);
         this.handleTutorialUpdate = this.handleTutorialUpdate.bind(this);
+        this.handleAudioStateChanged = this.handleAudioStateChanged.bind(this);
         
         console.log('[UISystem] Created');
+
+        // Image provider preference for planet landscapes
+        // Options: 'lexica' (search existing high-res), 'pollinations' (generate), 'auto' (try lexica then pollinations)
+        this.landscapeImageProvider = 'auto';
+        // If true, when using Pollinations, prefer a single HQ attempt and wait longer
+        this.pollinationsHQOnly = false;
+        // Max wait per attempt (ms)
+        this.pollinationsTimeoutMs = 12000;
+        // Control whether Pollinations enhances prompts (can drift undesirably)
+        this.usePollinationsEnhance = false;
+        // Show provider/resolution debug overlay (off by default)
+        this.showProviderInfo = false;
     }
     
     /**
@@ -45,6 +58,20 @@ export class UISystem {
         // Initialize UI elements
         this.initializeUI();
         
+        // Wire mute toggle click if present
+        const muteKey = document.getElementById('muteKey');
+        if (muteKey) {
+            muteKey.style.cursor = 'pointer';
+            muteKey.title = 'Toggle sound (M)';
+            muteKey.addEventListener('click', () => {
+                this.eventBus.emit(GameEvents.AUDIO_TOGGLE);
+            });
+        }
+
+        // Initialize mute label based on current state
+        const audio = this.stateManager.state.audio;
+        this.updateMuteLabel(audio && audio.enabled !== false);
+
         console.log('[UISystem] Initialized');
     }
     
@@ -66,6 +93,8 @@ export class UISystem {
         
         // UI messages
         this.eventBus.on(GameEvents.UI_MESSAGE, this.handleUIMessage);
+        // Audio state
+        this.eventBus.on(GameEvents.AUDIO_STATE_CHANGED, this.handleAudioStateChanged);
         
         // Tutorial
         this.eventBus.on(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
@@ -157,6 +186,18 @@ export class UISystem {
             this.updateTutorialHint(data.ship);
         }
     }
+
+    handleAudioStateChanged(data) {
+        const enabled = data && data.enabled !== false;
+        this.updateMuteLabel(enabled);
+    }
+
+    updateMuteLabel(enabled) {
+        const label = document.getElementById('muteActionLabel');
+        if (label) {
+            label.textContent = enabled ? 'MUTE' : 'UNMUTE';
+        }
+    }
     
     /**
      * Update HUD elements
@@ -245,7 +286,12 @@ export class UISystem {
         const descElement = document.getElementById('planetDescription');
         
         if (nameElement) nameElement.textContent = planet.name;
-        if (descElement) descElement.textContent = planet.description;
+        if (descElement) {
+            const text = planet.longDescription || planet.description || '';
+            descElement.textContent = text;
+        }
+        // Populate contextual details panel
+        this.populateLandingDetails(planet);
         
         // Draw planet visual
         if (this.planetCanvas) {
@@ -254,6 +300,325 @@ export class UISystem {
         
         // Show landing info panel by default
         this.showPanel('landing', ship);
+    }
+
+    /**
+     * Populate landing details (market snapshot, outfitter inventory)
+     */
+    async populateLandingDetails(planet) {
+        const details = document.getElementById('landingDetails');
+        if (!details) return;
+        try {
+            const mod = await import('../data/gameData.js');
+            const commodities = mod.commodities || {};
+            const shopInventory = mod.shopInventory || {};
+
+            // Market snapshot: compute relative prices
+            const entries = Object.entries(planet.commodityPrices || {});
+            const analyzed = entries.map(([key, price]) => {
+                const base = commodities[key]?.basePrice || price;
+                const delta = price - base;
+                const ratio = base ? price / base : 1;
+                return { key, price, base, delta, ratio };
+            });
+            const bestBuys = analyzed.slice().sort((a,b)=>a.ratio-b.ratio).slice(0,2);
+            const bestSells = analyzed.slice().sort((a,b)=>b.ratio-a.ratio).slice(0,2);
+
+            const buyList = bestBuys.map(x => {
+                const c = commodities[x.key];
+                return `${c?.icon || ''} ${c?.name || x.key} — §${x.price}`;
+            }).join(' • ');
+            const sellList = bestSells.map(x => {
+                const c = commodities[x.key];
+                return `${c?.icon || ''} ${c?.name || x.key} — §${x.price} (base §${x.base})`;
+            }).join('<br>');
+
+            // Outfitter list
+            const items = (planet.shopItems || []).map(id => shopInventory[id]).filter(Boolean);
+            const itemList = items.slice(0,3).map(i => `${i.name} — §${i.price}`).join(' • ');
+
+            details.innerHTML = `
+                <div style="margin-top: 8px;">
+                    <div style="color:#888; text-transform:uppercase; letter-spacing:1px; font-size:10px; margin-bottom:4px;">Market Highlights</div>
+                    <div style="display:flex; gap:12px;">
+                        <div style="flex:1"><span style="color:#aaa; font-size:10px;">Best Buys:</span> <span>${buyList || '—'}</span></div>
+                        <div style="flex:1"><span style="color:#aaa; font-size:10px;">Best Sells:</span> <span>${sellList || '—'}</span></div>
+                    </div>
+                </div>
+                <div style="margin-top: 12px;">
+                    <div style="color:#888; text-transform:uppercase; letter-spacing:1px; font-size:10px; margin-bottom:4px;">Outfitter Inventory</div>
+                    <div style="font-size:12px; line-height:1.4;">${itemList || 'Standard services only'}</div>
+                </div>
+            `;
+        } catch (e) {
+            // Fallback: clear details if module load fails
+            details.textContent = '';
+        }
+    }
+
+    /**
+     * Draw high-quality planet visual using Pollinations API with higher resolution
+     */
+    async drawPlanetVisual(planet, planetCanvas, useAI = true) {
+        const ctx = planetCanvas.getContext('2d');
+        const cssWidth = planetCanvas.clientWidth || 420;
+        const cssHeight = planetCanvas.clientHeight || 472;
+        // Increase canvas backing resolution for sharper rendering on HiDPI
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        planetCanvas.width = Math.floor(cssWidth * dpr);
+        planetCanvas.height = Math.floor(cssHeight * dpr);
+        const width = planetCanvas.width;
+        const height = planetCanvas.height;
+
+        // Clear canvas first and ensure overlays exist
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        this.addFilmGrainOverlay(planetCanvas);
+
+        if (!useAI) {
+            this.drawCanvasFallback(planet, planetCanvas);
+            return;
+        }
+
+        // Attempt provider 1: Lexica (search-based, often higher-res, free)
+        if (useAI && (this.landscapeImageProvider === 'lexica' || this.landscapeImageProvider === 'auto')) {
+            try {
+                const url = await this.fetchLexicaImageUrl(this.generatePlanetPrompt(planet), Math.floor(cssWidth * dpr));
+                if (url) {
+                    await this.loadPlanetImage(url, planet, planetCanvas, ctx, 'LEX');
+                    return;
+                }
+            } catch (e) {
+                // Continue to pollinations attempts
+            }
+        }
+
+        // Attempt provider 2: Unsplash Source (free, high-res photos by keywords)
+        if (useAI && (this.landscapeImageProvider === 'unsplash' || this.landscapeImageProvider === 'auto')) {
+            try {
+                const url = this.buildUnsplashUrl(Math.floor(cssWidth * dpr), Math.floor(cssHeight * dpr), planet);
+                const ok = await this.loadPlanetImage(url, planet, planetCanvas, ctx, 'UNS', { crossorigin: false });
+                if (ok) return;
+            } catch (e) {
+                // Continue to pollinations attempts
+            }
+        }
+
+        // Build high-quality image request with multiple attempts (Pollinations)
+        const baseW = Math.round(cssWidth);
+        const baseH = Math.round(cssHeight); // keep 8:9 aspect
+        const prompt = this.generatePlanetPrompt(planet);
+        const encodedPrompt = encodeURIComponent(prompt);
+        // Use deterministic seed per planet for consistent imagery
+        const randomSeed = this.getDeterministicSeed(planet);
+
+        // Candidate sizes (w,h) in priority order: max cap, DPR oversample, DPR, baseline
+        const candidates = [];
+        const pushUnique = (w,h) => {
+            const key = `${w}x${h}`;
+            if (!candidates.find(c => c.key === key)) candidates.push({w,h,key});
+        };
+        // Build candidate sizes
+        if (this.pollinationsHQOnly) {
+            // Single HQ candidate only
+            pushUnique(1024, Math.floor(1024 * baseH / baseW));
+        } else {
+            // Prefer one solid HQ attempt to avoid long multi-fallbacks
+            pushUnique(1024, Math.floor(1024 * baseH / baseW)); // 1k wide
+            const oversample = 1.25; // modest oversample
+            pushUnique(Math.floor(baseW * dpr * oversample), Math.floor(baseH * dpr * oversample));
+            pushUnique(Math.floor(baseW * dpr), Math.floor(baseH * dpr));
+            // Baseline CSS size
+            pushUnique(baseW, baseH);
+        }
+
+        const buildPollinationsUrl = (w, h) => {
+            const params = new URLSearchParams();
+            params.set('model', 'flux');
+            params.set('width', String(w));
+            params.set('height', String(h));
+            params.set('seed', String(randomSeed));
+            params.set('enhance', this.usePollinationsEnhance ? 'true' : 'false');
+            params.set('safe', 'true');
+            params.set('private', 'true');
+            // nologo requires registered referrer; harmless to pass
+            params.set('nologo', 'true');
+            try {
+                params.set('referrer', window.location.origin);
+            } catch (_) {}
+            return `https://image.pollinations.ai/prompt/${encodedPrompt}?${params.toString()}`;
+        };
+
+        const urls = candidates.map(c => ({
+            url: buildPollinationsUrl(c.w, c.h),
+            w: c.w,
+            h: c.h
+        }));
+
+        const img = new Image();
+        let attempt = 0;
+        let timeoutId = null;
+
+        const tryLoad = () => {
+            if (attempt >= urls.length) {
+                // All attempts failed; fallback to procedural
+                this.drawCanvasFallback(planet, planetCanvas);
+                return;
+            }
+            const target = urls[attempt++];
+            img.crossOrigin = 'anonymous';
+            img.decoding = 'async';
+            // Start timeout to fallback if server is slow or rejects large size silently
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                // Move to next candidate
+                tryLoad();
+            }, this.pollinationsTimeoutMs); // allow extended time for HQ generation
+            img.src = target.url;
+        };
+
+        img.onload = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            // Prefer high smoothing for downscale quality
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            // Show actual resolution info for diagnostics (optional)
+            if (this.showProviderInfo) {
+                this.showImageInfo(planetCanvas, img.naturalWidth, img.naturalHeight, attempt, urls.length, 'POL');
+            } else {
+                // Ensure any previous debug overlay is removed
+                const old = planetCanvas.parentElement?.querySelector('.ai-image-info');
+                if (old) old.remove();
+            }
+            this.fadeInPlanetImage(img, planetCanvas, planet.name);
+        };
+
+        img.onerror = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            // Try next resolution or fallback
+            tryLoad();
+        };
+
+        tryLoad();
+    }
+
+    /**
+     * Derive a deterministic numeric seed from planet identity
+     */
+    getDeterministicSeed(planet) {
+        const s = `${planet?.name || ''}|${Math.round(planet?.x||0)},${Math.round(planet?.y||0)}|${Math.round(planet?.radius||0)}`;
+        let hash = 0;
+        for (let i = 0; i < s.length; i++) {
+            hash = ((hash << 5) - hash) + s.charCodeAt(i);
+            hash |= 0; // 32-bit
+        }
+        // Keep seed positive and within a reasonable range
+        return Math.abs(hash % 1000000);
+    }
+
+    /**
+     * Fetch a high-res image URL from Lexica search by prompt.
+     * Chooses the first image meeting minWidth, otherwise best available.
+     */
+    async fetchLexicaImageUrl(prompt, minWidth = 800) {
+        const q = encodeURIComponent(prompt);
+        const endpoint = `https://lexica.art/api/v1/search?q=${q}`;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3500);
+        try {
+            const res = await fetch(endpoint, { signal: ctrl.signal });
+            clearTimeout(t);
+            if (!res.ok) throw new Error(`Lexica HTTP ${res.status}`);
+            const data = await res.json();
+            const imgs = Array.isArray(data.images) ? data.images : [];
+            if (imgs.length === 0) return null;
+            // Prefer portrait-ish or square images with width >= minWidth
+            const candidates = imgs
+                .map(i => ({
+                    url: i.src || i.srcSmall,
+                    w: i.width || 0,
+                    h: i.height || 0,
+                }))
+                .filter(i => !!i.url);
+            const good = candidates.filter(i => i.w >= minWidth);
+            const chosen = (good[0] || candidates[0]);
+            return chosen ? chosen.url : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /**
+     * Load an image URL to the planet canvas using high-quality smoothing
+     */
+    async loadPlanetImage(url, planet, planetCanvas, ctx, providerTag = 'AI', opts = {}) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            if (opts.crossorigin === false) {
+                // Leave crossOrigin unset to avoid CORS issues with canvas draw
+            } else {
+                img.crossOrigin = 'anonymous';
+            }
+            img.decoding = 'async';
+            img.onload = () => {
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                if (this.showProviderInfo) {
+                    this.showImageInfo(planetCanvas, img.naturalWidth, img.naturalHeight, 1, 1, providerTag);
+                } else {
+                    const old = planetCanvas.parentElement?.querySelector('.ai-image-info');
+                    if (old) old.remove();
+                }
+                this.fadeInPlanetImage(img, planetCanvas, planet.name);
+                resolve(true);
+            };
+            img.onerror = () => resolve(false);
+            img.src = url;
+        });
+    }
+
+    /**
+     * Display small overlay with image resolution/debug info in planet visual area
+     */
+    showImageInfo(planetCanvas, w, h, attempt, total, provider = 'AI') {
+        const container = planetCanvas.parentElement;
+        if (!container) return;
+        if (!this.showProviderInfo) {
+            const old = container.querySelector('.ai-image-info');
+            if (old) old.remove();
+            return;
+        }
+        let info = container.querySelector('.ai-image-info');
+        if (!info) {
+            info = document.createElement('div');
+            info.className = 'ai-image-info';
+            container.appendChild(info);
+            info.style.cssText = `
+                position: absolute;
+                bottom: 6px;
+                left: 8px;
+                font-size: 10px;
+                color: #aaa;
+                background: rgba(0,0,0,0.4);
+                border: 1px solid rgba(255,255,255,0.1);
+                padding: 2px 6px;
+                pointer-events: none;
+                z-index: 20;
+            `;
+        }
+        info.textContent = `${provider} ${w}x${h} (try ${attempt}/${total})`;
+    }
+
+    /**
+     * Build an Unsplash Source URL for planet landscapes
+     */
+    buildUnsplashUrl(w, h, planet) {
+        const terms = [
+            'space', 'planet', 'atmosphere', 'landscape',
+            planet?.name?.toLowerCase().replace(/\s+/g, '-') || ''
+        ].filter(Boolean).join(',');
+        // Unsplash Source returns a random matching image at requested size
+        return `https://source.unsplash.com/${w}x${h}/?${encodeURIComponent(terms)}`;
     }
     
     /**
@@ -398,7 +763,11 @@ export class UISystem {
      * Update shop panel
      */
     updateShopPanel(ship, shopInventory) {
-        if (!ship || !ship.currentPlanet) return;
+        if (!ship) return;
+        
+        // Use landedPlanet if currentPlanet is not set
+        const planet = ship.currentPlanet || ship.landedPlanet;
+        if (!planet) return;
         
         // Update credits display
         const creditsElement = document.getElementById('shopCredits');
@@ -411,10 +780,14 @@ export class UISystem {
         list.innerHTML = '';
         
         // Only show items available at this planet
-        const availableItems = ship.currentPlanet.shopItems || [];
+        const availableItems = planet.shopItems || [];
+        
+        // If no specific items, show all basic items for now
+        const defaultItems = ['laser', 'rapid', 'plasma', 'mining', 'shield_basic', 'engine_upgrade'];
+        const itemsToShow = availableItems.length > 0 ? availableItems : defaultItems;
         
         if (shopInventory) {
-            for (let itemId of availableItems) {
+            for (let itemId of itemsToShow) {
                 const item = shopInventory[itemId];
                 if (!item) continue;
                 
@@ -424,6 +797,9 @@ export class UISystem {
                     alreadyOwned = true;
                 } else if (item.type === 'engine' && ship.engineLevel >= item.value) {
                     alreadyOwned = true;
+                } else if (item.type === 'weapon' && ship.weapons) {
+                    // Check if weapon already owned
+                    alreadyOwned = ship.weapons.some(w => w.type === itemId);
                 }
                 
                 const shopItem = document.createElement('div');
@@ -435,7 +811,7 @@ export class UISystem {
                     </div>
                     <div class="price">${item.price}</div>
                     <button class="shop-buy-button" 
-                            onclick="window.gameInstance.buyUpgrade('${itemId}')" 
+                            onclick="window.shopSystem.buyUpgrade('${itemId}')" 
                             ${alreadyOwned || ship.credits < item.price ? 'disabled' : ''}>
                         ${alreadyOwned ? 'Owned' : 'Buy'}
                     </button>
@@ -444,106 +820,33 @@ export class UISystem {
             }
         }
         
-        if (availableItems.length === 0) {
+        if (itemsToShow.length === 0) {
             list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No items available at this station</div>';
         }
     }
     
-    /**
-     * Draw planet visual
-     */
-    drawPlanetVisual(planet, planetCanvas, forceReload = false) {
-        if (!planet || !planetCanvas) return;
-        
-        // Check if we've already loaded this planet's image
-        if (!forceReload && planetCanvas.dataset.planetLoaded === planet.name) {
-            return; // Already loaded, don't reload
-        }
-        
-        const ctx = planetCanvas.getContext('2d');
-        const width = planetCanvas.width;
-        const height = planetCanvas.height;
-        
-        // Clear canvas with loading message
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        
-        // Mark as loading this planet
-        planetCanvas.dataset.planetLoaded = planet.name;
-        
-        // Try to load AI-generated landscape
-        this.loadPlanetLandscape(planet, planetCanvas);
-    }
     
-    /**
-     * Load AI-generated planet landscape
-     */
-    loadPlanetLandscape(planet, planetCanvas) {
-        console.log('[UISystem] Starting AI landscape generation for', planet.name);
-        
-        // Add film grain overlay if needed
-        this.addFilmGrainOverlay(planetCanvas);
-        
-        // Show loading message
-        const ctx = planetCanvas.getContext('2d');
-        const width = planetCanvas.width;
-        const height = planetCanvas.height;
-        
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        ctx.fillStyle = '#00ffff';
-        ctx.font = '14px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('SCANNING SURFACE...', width / 2, height / 2);
-        
-        // Generate prompt based on planet
-        let prompt = this.generatePlanetPrompt(planet);
-        
-        // Create image element
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        
-        // Encode prompt for URL
-        const encodedPrompt = encodeURIComponent(prompt);
-        const randomSeed = Math.floor(Math.random() * 1000000);
-        
-        // Pollinations.ai URL
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=420&height=472&nologo=true&seed=${randomSeed}`;
-        console.log('[UISystem] Loading AI image from:', imageUrl);
-        img.src = imageUrl;
-        
-        // Handle successful load
-        img.onload = () => {
-            this.fadeInPlanetImage(img, planetCanvas, planet.name);
-        };
-        
-        // Handle error - draw fallback
-        img.onerror = () => {
-            console.log('[UISystem] Failed to load AI landscape, using procedural fallback');
-            this.drawCanvasFallback(planet, planetCanvas);
-        };
-    }
     
     /**
      * Generate planet-specific prompt
      */
     generatePlanetPrompt(planet) {
         let prompt = '';
-        
+
         if (planet.name === "Terra Nova") {
-            prompt = 'oceanic planet landscape, floating futuristic cities on ocean, elevated platforms above water, sci-fi ocean colony, blue ocean with white architecture, quantum bridges connecting floating structures, advanced technology floating cities, chrome and glass buildings rising from sea, orbital market platforms, ocean world civilization, archipelago of artificial islands, spaceport on water, 75% ocean coverage with floating metropolis';
+            prompt = 'alien ocean planet landscape, floating futuristic cities anchored by quantum pylons, elevated platforms above water, chrome and glass architecture, orbital elevators on horizon, sci-fi spaceport docks over a blue ocean, archipelago of artificial islands under a starry sky, atmospheric haze and volumetric light, otherworldly clouds and nebulae in the sky';
         } else if (planet.name === "Crimson Moon") {
-            prompt = 'volcanic planet surface, rivers of lava, molten rock, volcanic eruption, red hot magma, volcanic landscape, industrial mining equipment on lava planet, glowing red atmosphere, lava flows, pyroclastic clouds';
+            prompt = 'alien volcanic planet surface, rivers of lava and molten rock, glowing refineries and mining spires, incandescent atmosphere, lava flows and ash plumes, industrial machinery silhouettes, sci-fi mining colony lights, planetary horizon with stars, dramatic cinematic lighting, otherworldly geology';
         } else if (planet.name === "Ice World") {
-            prompt = 'frozen planet surface, ice crystals, snow covered landscape, arctic tundra, frozen wasteland, ice caves, research domes in snow, aurora in sky, frozen alien world, glaciers, ice formations';
+            prompt = 'alien frozen planet surface, crystalline ice formations and glaciers, research domes and antenna arrays embedded in snow, aurora borealis in a dark sky, starlight glittering on ice, sci-fi outpost lights, distant mountains, atmospheric perspective, serene and cold color palette';
         } else if (planet.name === "Mining Station") {
-            prompt = 'asteroid mining operation, space mining equipment, industrial machinery in space, metal structures, ore extractors, space station mining facility, starfield background, mining robots, conveyor belts';
+            prompt = 'asteroid mining station in orbit, articulated mechanical arms sorting rubble from ore, ring corridors lit with neon, cargo barges docking, starfield and nebulae backdrop, sci-fi industrial space facility, cinematic rim lighting, volumetric dust motes in zero-g';
         } else {
-            prompt = 'alien planet surface, extraterrestrial landscape, sci-fi planet environment, otherworldly terrain, alien colony structures, futuristic buildings';
+            prompt = 'alien planet landscape, extraterrestrial terrain, sci-fi colony structures, otherworldly geology, planetary horizon with stars and nebulae, cinematic composition and lighting';
         }
-        
-        prompt += ', digital art, concept art, matte painting, scenic view, landscape only, no text at all, no words anywhere, no writing, no letters, no typography, no labels, no signatures, no watermarks, textless image, wordless artwork, visual only, 8:9 aspect ratio, portrait orientation';
-        
+        // Strengthen constraints to avoid animals/humans and irrelevant content
+        prompt += ', science fiction concept art, matte painting, cinematic high detail, atmospheric perspective, planetary horizon, stars visible, no humans, no people, no animals, no wildlife, no creatures, no fox, no earthly forest, alien flora only, landscape only, no text, no watermark, portrait 8:9';
+
         return prompt;
     }
     

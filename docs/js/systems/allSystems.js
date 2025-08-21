@@ -1396,25 +1396,78 @@ export function updateAsteroids(asteroids, ship, pickups, explosions) {
             const relVy = ship.vy - asteroid.vy;
             const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
             
-            // Damage based on relative speed and asteroid size
-            const damage = Math.floor(relSpeed * asteroid.radius * 2);
+            // Damage scales with both speed and asteroid size
+            const baseDamage = Math.floor(relSpeed * asteroid.radius * 3); // Increased damage multiplier
+            const damage = Math.max(5, baseDamage); // Minimum 5 damage even for slow collisions
             
-            if (ship.shield > 0) {
-                ship.shield = Math.max(0, ship.shield - damage);
-            } else {
-                ship.health = Math.max(0, ship.health - damage);  // Clamp to 0, not negative
+            // Apply damage with visual/audio feedback
+            if (damage > 0) {
+                if (ship.shield > 0) {
+                    const shieldDamage = Math.min(ship.shield, damage);
+                    ship.shield = Math.max(0, ship.shield - shieldDamage);
+                    
+                    // Shield hit effect - blue flash
+                    if (window.audioSystem) {
+                        window.audioSystem.playShieldHit();
+                    }
+                    
+                    // Remaining damage goes to hull
+                    const hullDamage = damage - shieldDamage;
+                    if (hullDamage > 0) {
+                        ship.health = Math.max(0, ship.health - hullDamage);
+                    }
+                } else {
+                    ship.health = Math.max(0, ship.health - damage);
+                    
+                    // Hull hit effect - bigger explosion
+                    if (window.audioSystem) {
+                        window.audioSystem.playExplosion(damage < 20);
+                    }
+                }
+                
+                // Screen shake effect (store in ship for rendering)
+                ship.screenShake = Math.min(20, damage * 0.5);
+                ship.screenShakeDecay = 0.8;
+                
+                // Flash effect
+                ship.damageFlash = 1.0;
             }
             
-            // Bounce both objects
+            // Bounce physics - more dramatic
             const angle = Math.atan2(dy, dx);
-            const force = 0.5;
+            const force = 0.5 + relSpeed * 0.3; // Variable force based on impact speed
             ship.vx += Math.cos(angle) * force;
             ship.vy += Math.sin(angle) * force;
             asteroid.vx -= Math.cos(angle) * force * 0.5;
             asteroid.vy -= Math.sin(angle) * force * 0.5;
             
-            // Create impact effect
-            explosions.push(createExplosion(asteroid.x + dx * 0.5, asteroid.y + dy * 0.5, true));
+            // Create multiple impact effects
+            const impactX = asteroid.x + dx * 0.5;
+            const impactY = asteroid.y + dy * 0.5;
+            
+            // Main explosion at impact point
+            explosions.push(createExplosion(impactX, impactY, damage < 20));
+            
+            // Sparks flying off
+            for (let i = 0; i < Math.min(5, damage / 10); i++) {
+                const sparkAngle = angle + (Math.random() - 0.5) * Math.PI;
+                const sparkDist = 10 + Math.random() * 20;
+                explosions.push(createExplosion(
+                    impactX + Math.cos(sparkAngle) * sparkDist,
+                    impactY + Math.sin(sparkAngle) * sparkDist,
+                    true
+                ));
+            }
+            
+            // Warning message for heavy damage
+            if (damage > 30) {
+                const msg = document.createElement('div');
+                msg.className = 'game-notification error';
+                msg.style.cssText = 'animation: shake 0.3s;';
+                msg.textContent = `⚠ HULL DAMAGE: -${damage} HP`;
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 2000);
+            }
         }
         
         // Wrap around world boundaries

@@ -379,30 +379,106 @@ export class PhysicsSystem {
                 const relVy = ship.vy - asteroid.vy;
                 const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
                 
-                // Bounce both objects
+                // Calculate damage - scales with speed and asteroid size
+                const baseDamage = Math.floor(relSpeed * asteroid.radius * 3); // Increased multiplier
+                const damage = Math.max(5, baseDamage); // Minimum 5 damage
+                
+                // Apply damage
+                if (damage > 0) {
+                    let hullDamage = 0;
+                    
+                    if (ship.shield > 0) {
+                        const shieldDamage = Math.min(ship.shield, damage);
+                        ship.shield = Math.max(0, ship.shield - shieldDamage);
+                        hullDamage = damage - shieldDamage;
+                        
+                        // Emit shield hit event
+                        this.eventBus.emit(GameEvents.AUDIO_PLAY, {
+                            sound: 'shieldHit'
+                        });
+                    } else {
+                        hullDamage = damage;
+                    }
+                    
+                    if (hullDamage > 0) {
+                        ship.health = Math.max(0, ship.health - hullDamage);
+                        
+                        // Emit explosion sound
+                        this.eventBus.emit(GameEvents.AUDIO_PLAY, {
+                            sound: 'explosion',
+                            volume: hullDamage < 20 ? 0.5 : 1.0
+                        });
+                    }
+                    
+                    // Screen shake effect
+                    ship.screenShake = Math.min(20, damage * 0.5);
+                    ship.screenShakeDecay = 0.8;
+                    
+                    // Damage flash
+                    ship.damageFlash = 1.0;
+                    
+                    // Emit damage event
+                    this.eventBus.emit(GameEvents.SHIP_DAMAGE, {
+                        damage: damage,
+                        source: 'asteroid',
+                        asteroid: asteroid
+                    });
+                    
+                    // Show warning for heavy damage
+                    if (damage > 30) {
+                        this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                            message: `⚠ HULL DAMAGE: -${damage} HP`,
+                            type: 'error',
+                            duration: 2000,
+                            shake: true
+                        });
+                    }
+                }
+                
+                // Bounce physics - more dramatic
                 const angle = Math.atan2(dy, dx);
-                const force = 0.5;
+                const force = 0.5 + relSpeed * 0.3; // Variable force
                 ship.vx += Math.cos(angle) * force;
                 ship.vy += Math.sin(angle) * force;
                 asteroid.vx -= Math.cos(angle) * force * 0.5;
                 asteroid.vy -= Math.sin(angle) * force * 0.5;
+                
+                // Create impact effects
+                const impactX = asteroid.x + dx * 0.5;
+                const impactY = asteroid.y + dy * 0.5;
+                
+                // Main explosion
+                this.eventBus.emit(GameEvents.EXPLOSION, {
+                    x: impactX,
+                    y: impactY,
+                    size: damage < 20 ? 'small' : 'medium'
+                });
+                
+                // Sparks
+                for (let i = 0; i < Math.min(5, damage / 10); i++) {
+                    const sparkAngle = angle + (Math.random() - 0.5) * Math.PI;
+                    const sparkDist = 10 + Math.random() * 20;
+                    this.eventBus.emit(GameEvents.EXPLOSION, {
+                        x: impactX + Math.cos(sparkAngle) * sparkDist,
+                        y: impactY + Math.sin(sparkAngle) * sparkDist,
+                        size: 'small'
+                    });
+                }
                 
                 // Emit collision event
                 this.eventBus.emit(GameEvents.PHYSICS_COLLISION, {
                     type: 'ship-asteroid',
                     entity1: ship,
                     entity2: asteroid,
-                    damage: Math.floor(relSpeed * asteroid.radius * 2),
-                    point: {
-                        x: asteroid.x + dx * 0.5,
-                        y: asteroid.y + dy * 0.5
-                    }
+                    damage: damage,
+                    point: { x: impactX, y: impactY }
                 });
                 
                 // Record collision
                 state.physics.collisions.push({
                     type: 'ship-asteroid',
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    damage: damage
                 });
             }
         }

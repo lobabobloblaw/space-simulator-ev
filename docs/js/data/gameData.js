@@ -136,6 +136,7 @@ export const planets = [
     { 
         x: 700, y: 400, radius: 120, name: "Terra Nova", color: "#4A90E2", landable: true,
         description: "A lush oceanic world with floating cities connected by quantum bridges. The atmosphere hums with advanced technology and the scent of exotic spices from the orbital markets.",
+        longDescription: "Terra Nova is a glittering archipelago of floating cities, each one stabilized by quantum anchors sunk deep beneath the ocean. Merchant skiffs and shuttle ferries drift between chrome platforms while distant orbital elevators stitch the sky to the sea. Markets overflow with imported luxuries and clean technology; credits are earned quickly here—but spent even faster. Docking controllers speak in clipped, efficient phrases, and the night horizon glows with the soft arc of satellites sweeping overhead.",
         commodityPrices: {
             food: 15,
             ore: 70,
@@ -149,6 +150,7 @@ export const planets = [
     { 
         x: -1200, y: -900, radius: 180, name: "Crimson Moon", color: "#E74C3C", landable: true,
         description: "This volcanic mining colony glows red from the molten ore refineries. Hardy miners extract rare crystals from the unstable crust while dodging frequent seismic tremors.",
+        longDescription: "The Crimson Moon rumbles underfoot—industrial cathedrals belching steam into a copper sky. Conveyor lines crawl across the basalt, dragging ore toward refineries that cast everything in furnace light. Miners trade stories of vent quakes and pirate skirmishes in low orbit. Prices swing with each convoy arrival; a sharp pilot can turn turbulence into profit, but vigilance is survival: the siren of a breach alarm carries for miles across the slag plains.",
         commodityPrices: {
             food: 40,
             ore: 30,
@@ -162,6 +164,7 @@ export const planets = [
     { 
         x: 1600, y: -500, radius: 100, name: "Ice World", color: "#85C1E9", landable: true,
         description: "An arctic research station built into crystalline ice caverns. Scientists here study quantum ice formations that might hold the key to faster-than-light travel.",
+        longDescription: "Ice World is a chorus of wind through crystalline corridors. The research array clings to the glacier’s edge, its antennae haloed in auroras. Supply drones land with the precision of metronomes; inside the domes, frost-white labs hum with experiments and quiet arguments over exotic matter. Trade is pragmatic and lean—fuel cells and tech components move briskly, while luxury goods sit untouched beneath frost.",
         commodityPrices: {
             food: 35,
             ore: 90,
@@ -175,6 +178,7 @@ export const planets = [
     { 
         x: -600, y: 1200, radius: 75, name: "Mining Station", color: "#F39C12", landable: true,
         description: "A bustling asteroid processing facility where fortune-seekers trade rare metals. The station's mechanical arms constantly harvest resources from nearby debris fields.",
+        longDescription: "The Mining Station hangs in a halo of dust and light, a spider of steel with a dozen articulated arms sorting rubble from riches. Docking clamps shudder as ore barges lock in; along the ring corridor, vendors hawk repair kits and last-chance upgrades. Patrols are never far—but neither are opportunists sifting the lanes for unattended cargo. It’s loud, honest work here, and the sound of profit is the grind of rock against rock.",
         commodityPrices: {
             food: 50,
             ore: 25,

@@ -77,16 +77,26 @@
             <div class="hud-right">
                 <div class="controls-panel">
                     <div class="controls">
-                        <span class="control-key">W</span>
+                        <span class="control-key">W/↑</span>
                         <span class="control-action">THR</span>
                         <span class="control-key">A/D</span>
                         <span class="control-action">TURN</span>
+                        <span class="control-key">Space</span>
+                        <span class="control-action">BRAKE</span>
                         <span class="control-key">F</span>
                         <span class="control-action">FIRE</span>
+                        <span class="control-key">Q</span>
+                        <span class="control-action">SWITCH</span>
                         <span class="control-key">L</span>
                         <span class="control-action">LAND</span>
-                        <span class="control-key">S/O</span>
+                        <span class="control-key" id="muteKey" style="cursor:pointer">M</span>
+                        <span class="control-action" id="muteActionLabel">MUTE</span>
+                        <span class="control-key">F5</span>
                         <span class="control-action">SAVE</span>
+                        <span class="control-key">F9</span>
+                        <span class="control-action">LOAD</span>
+                        <span class="control-key">F12</span>
+                        <span class="control-action">CLEAR</span>
                     </div>
                 </div>
                 <div id="minimap">
@@ -111,11 +121,16 @@
                 <div id="landingDetails"></div>
             </div>
             <div id="tradingPanel">
-                <div class="cargo-status">
-                    <strong>CREDITS:</strong> <span id="tradeCredits">0</span> | 
-                    <strong>CARGO:</strong> <span id="tradeCargo">0/10</span>
+                <div class="trading-header">
+                    <div class="cargo-status">
+                        <strong>CREDITS:</strong> <span id="tradeCredits">0</span> | 
+                        <strong>CARGO:</strong> <span id="tradeCargo">0/10</span>
+                    </div>
+                    <div class="commodity-header">COMMODITIES MARKET</div>
                 </div>
-                <div id="commodityList"></div>
+                <div class="trading-content">
+                    <div id="commodityList"></div>
+                </div>
             </div>
             <div id="shopPanel">
                 <div class="cargo-status">

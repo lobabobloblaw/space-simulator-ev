@@ -168,6 +168,7 @@ export const GameEvents = {
     GAME_PAUSE_TOGGLE: 'game.pauseToggle',
     GAME_SAVE: 'game.save',
     GAME_LOAD: 'game.load',
+    GAME_CLEAR_SAVE: 'game.clearSave',
     
     // Input events - Raw
     INPUT_KEY_DOWN: 'input.keyDown',
@@ -198,6 +199,7 @@ export const GameEvents = {
     // Audio events
     AUDIO_TOGGLE: 'audio.toggle',
     AUDIO_PLAY: 'audio.play',
+    AUDIO_STATE_CHANGED: 'audio.state.changed',
     
     // Debug events
     DEBUG_TOGGLE: 'debug.toggle',

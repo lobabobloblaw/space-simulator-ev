@@ -317,8 +317,17 @@ function render() {
     // Save context
     ctx.save();
     
-    // Apply camera transform
-    ctx.translate(canvas.width / 2 - game.camera.x, canvas.height / 2 - game.camera.y);
+    // Apply screen shake if active
+    let shakeX = 0, shakeY = 0;
+    if (ship.screenShake && ship.screenShake > 0) {
+        shakeX = (Math.random() - 0.5) * ship.screenShake;
+        shakeY = (Math.random() - 0.5) * ship.screenShake;
+        ship.screenShake *= ship.screenShakeDecay || 0.8;
+        if (ship.screenShake < 0.5) ship.screenShake = 0;
+    }
+    
+    // Apply camera transform with shake
+    ctx.translate(canvas.width / 2 - game.camera.x + shakeX, canvas.height / 2 - game.camera.y + shakeY);
     
     // Draw nebula clouds in deep background for atmosphere
     ctx.globalAlpha = 0.03;
@@ -1014,6 +1023,14 @@ function render() {
     
     // Restore context
     ctx.restore();
+    
+    // Draw damage flash overlay
+    if (ship.damageFlash && ship.damageFlash > 0) {
+        ctx.fillStyle = `rgba(255, 0, 0, ${ship.damageFlash * 0.3})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ship.damageFlash -= 0.05;
+        if (ship.damageFlash < 0) ship.damageFlash = 0;
+    }
     
     // Draw minimap
     renderMinimap();
