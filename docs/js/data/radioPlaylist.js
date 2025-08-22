@@ -23,11 +23,11 @@
 // ];
 
 export const radioPlaylist = [
-  { name: 'Midnight Drive',           type: 'tracker', url: '../music/midnight_drive.xm' },
-  { name: 'Napping on a Cloud',       type: 'tracker', url: '../music/napping_on_a_cloud.xm' },
-  { name: 'A Light Waltz (k_jose)',   type: 'tracker', url: '../music/k_jose_-_a_light_waltz.it' },
-  { name: 'Fruity Radioactivity',     type: 'tracker', url: '../music/k_jose_-_fruity_radioactivity.s3m' },
-  { name: 'FX Poly 1',                type: 'tracker', url: '../music/fx-poly1.mod' },
-  { name: 'Subterrain',               type: 'tracker', url: '../music/subterrain.xm' },
-  { name: 'Glitch Abuse',             type: 'tracker', url: '../music/glitch_abuse.xm' },
+  { name: 'Midnight Drive',           type: 'tracker', url: './music/midnight_drive.xm' },
+  { name: 'Napping on a Cloud',       type: 'tracker', url: './music/napping_on_a_cloud.xm' },
+  { name: 'A Light Waltz (k_jose)',   type: 'tracker', url: './music/k_jose_-_a_light_waltz.it' },
+  { name: 'Fruity Radioactivity',     type: 'tracker', url: './music/k_jose_-_fruity_radioactivity.s3m' },
+  { name: 'FX Poly 1',                type: 'tracker', url: './music/fx-poly1.mod' },
+  { name: 'Subterrain',               type: 'tracker', url: './music/subterrain.xm' },
+  { name: 'Glitch Abuse',             type: 'tracker', url: './music/glitch_abuse.xm' },
 ];

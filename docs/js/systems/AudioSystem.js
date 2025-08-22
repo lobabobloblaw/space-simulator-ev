@@ -545,9 +545,9 @@ export class AudioSystem {
         };
 
         // Try a series of sources: local vendor, then multiple CDNs (chiptune2 then chiptune3)
-        // 1) Local ESM chiptune3 via dynamic import (absolute from site root)
-        if (await tryImportModule('/chiptune-3/chiptune3.min.js')) return true;
-        if (await tryImportModule('/chiptune-3/chiptune3.js')) return true;
+        // 1) Local ESM chiptune3 via dynamic import from docs vendor folder
+        if (await tryImportModule('/js/vendor/chiptune-3/chiptune3.min.js')) return true;
+        if (await tryImportModule('/js/vendor/chiptune-3/chiptune3.js')) return true;
         // 2) Local vendor UMD chiptune2/chiptune3 via script tag
         if (await tryLoadScript('./js/vendor/chiptune2.js', './js/vendor')) return true;
         if (await tryLoadScript('./js/vendor/chiptune3.js', './js/vendor')) return true;
