@@ -30,6 +30,7 @@ export class InputSystem {
             // Combat
             'f': 'fire',
             'q': 'switchWeapon',
+            'x': 'targetNext',
             
             // Interaction
             'l': 'land',
@@ -145,6 +146,9 @@ export class InputSystem {
                     break;
                 case 'switchWeapon':
                     this.eventBus.emit(GameEvents.INPUT_SWITCH_WEAPON);
+                    break;
+                case 'targetNext':
+                    this.eventBus.emit(GameEvents.TARGET_NEXT);
                     break;
                 case 'land':
                     this.eventBus.emit(GameEvents.INPUT_LAND);

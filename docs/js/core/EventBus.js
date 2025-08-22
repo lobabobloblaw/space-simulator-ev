@@ -233,4 +233,9 @@ export const GameEvents = {
     PHYSICS_PICKUP_COLLECTED: 'physics.pickup.collected',
     PHYSICS_PICKUP_EXPIRED: 'physics.pickup.expired',
     PHYSICS_IMPULSE_APPLIED: 'physics.impulse.applied'
+    ,
+    // Targeting events
+    TARGET_NEXT: 'target.next',
+    TARGET_SET: 'target.set',
+    TARGET_CLEAR: 'target.clear'
 };

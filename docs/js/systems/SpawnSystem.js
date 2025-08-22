@@ -414,7 +414,10 @@ export class SpawnSystem {
         }
         
         // Create NPC
+        const state2 = this.stateManager.state;
+        state2.nextEntityId = state2.nextEntityId || 1;
         const npc = {
+            id: state2.nextEntityId++,
             x: spawnX,
             y: spawnY,
             vx: initialVx,

@@ -20,6 +20,7 @@ import TradingSystem from './systems/TradingSystem.js';
 import ShopSystem from './systems/ShopSystem.js';  // Shop system for outfitter
 import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personalities
 import DebugSystem from './systems/DebugSystem.js';
+import TargetingSystem from './systems/TargetingSystem.js';
 import { GameConstants } from './utils/Constants.js';
 
 // We'll import game data dynamically in the initialization function
@@ -172,6 +173,7 @@ async function initializeGameState() {
         }
     };
     
+    state.nextEntityId = state.nextEntityId || 1;
     for (let i = 0; i < initialNPCCount; i++) {
         const type = npcTypes[Math.floor(Math.random() * npcTypes.length)];
         const template = npcTemplates[type];
@@ -195,6 +197,7 @@ async function initializeGameState() {
         }
         
         state.npcShips.push({
+            id: state.nextEntityId++,
             x: x,
             y: y,
             vx: vx,
@@ -626,6 +629,14 @@ async function initializeSystems() {
         console.log('✅ NPCSystem initialized with full AI');
     } catch (e) {
         console.error('❌ NPCSystem failed:', e);
+    }
+    
+    try {
+        systems.targeting = new TargetingSystem();
+        await systems.targeting.init();
+        console.log('✅ TargetingSystem initialized');
+    } catch (e) {
+        console.error('❌ TargetingSystem failed:', e);
     }
     
     try {

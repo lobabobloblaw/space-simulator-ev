@@ -676,7 +676,9 @@ export class RenderSystem {
 
             // Faction/hostility brackets (subtle corner brackets around hostiles)
             // Keep draw in screen space (no rotation), sized from npc size and scale
-            this.renderFactionBracket(npc, scaleMap[npc.type] || 1.4);
+            const selectedId = (this.stateManager.state.targeting && this.stateManager.state.targeting.selectedId) || null;
+            const isTargeted = selectedId && npc.id === selectedId;
+            this.renderFactionBracket(npc, scaleMap[npc.type] || 1.4, isTargeted);
             
             // State indicator icon
             if (npc.state) {
@@ -705,7 +707,7 @@ export class RenderSystem {
     /**
      * Subtle HUD-style corner brackets around ships based on faction/hostility
      */
-    renderFactionBracket(npc, npcScale = 1.0) {
+    renderFactionBracket(npc, npcScale = 1.0, isTargeted = false) {
         // Only show for hostiles (pirates) for now
         const isHostile = (npc.faction === 'pirate');
         if (!isHostile) return;
@@ -717,8 +719,8 @@ export class RenderSystem {
         const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
         this.ctx.save();
         this.ctx.strokeStyle = palette.accent || '#ff4444';
-        this.ctx.globalAlpha = 0.6;
-        this.ctx.lineWidth = 1.5;
+        this.ctx.globalAlpha = isTargeted ? (0.8 + 0.2 * Math.abs(Math.sin(Date.now()*0.006))) : 0.6;
+        this.ctx.lineWidth = isTargeted ? 2.5 : 1.5;
 
         // Four corner L-shapes around npc.x, npc.y
         // Top-left
@@ -745,6 +747,15 @@ export class RenderSystem {
         this.ctx.lineTo(npc.x + half, npc.y + half);
         this.ctx.lineTo(npc.x + half, npc.y + half - arm);
         this.ctx.stroke();
+
+        // Targeted center dot
+        if (isTargeted) {
+            this.ctx.fillStyle = palette.accent || '#ff4444';
+            this.ctx.globalAlpha = 0.9;
+            this.ctx.beginPath();
+            this.ctx.arc(npc.x, npc.y, Math.max(1.5, size*0.08), 0, Math.PI*2);
+            this.ctx.fill();
+        }
 
         this.ctx.restore();
     }
