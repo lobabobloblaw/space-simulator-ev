@@ -746,6 +746,8 @@ export class UISystem {
                 if (ship && commodities) {
                     this.updateTradingPanel(ship, commodities);
                 }
+                // Ensure delegated trading handlers are attached once
+                this.attachTradingDelegates();
             }
         } else if (panel === 'shop') {
             if (shopPanel) {
@@ -805,7 +807,7 @@ export class UISystem {
                     <div>Total value: ${totalValue}</div>
                 </div>
                 <div class="buy-sell-buttons">
-                    <button onclick="window.gameInstance.sellAllCargo()">Sell All</button>
+                    <button class="trade-btn" data-action="sellAll">Sell All</button>
                 </div>
             `;
             list.appendChild(sellAllRow);
@@ -837,13 +839,38 @@ export class UISystem {
                     </div>
                     <div class="price">${price}${priceIndicator}</div>
                     <div class="buy-sell-buttons">
-                        <button onclick="window.gameInstance.buyCommodity('${key}', ${price})">Buy</button>
-                        <button onclick="window.gameInstance.sellCommodity('${key}', ${price})" ${ownedQty === 0 ? 'disabled' : ''}>Sell</button>
+                        <button class="trade-btn" data-action="buy" data-type="${key}" data-price="${price}">Buy</button>
+                        <button class="trade-btn" data-action="sell" data-type="${key}" ${ownedQty === 0 ? 'disabled' : ''}>Sell</button>
                     </div>
                 `;
                 list.appendChild(row);
             }
         }
+    }
+
+    /**
+     * Delegate trading actions to EventBus (no globals)
+     */
+    attachTradingDelegates() {
+        const list = document.getElementById('commodityList');
+        if (!list || this._tradeDelegatesAttached) return;
+        this._tradeDelegatesAttached = true;
+        list.addEventListener('click', (e) => {
+            const btn = e.target.closest('.trade-btn');
+            if (!btn || btn.disabled) return;
+            const action = btn.getAttribute('data-action');
+            if (!action) return;
+            if (action === 'buy') {
+                const type = btn.getAttribute('data-type');
+                const price = Number(btn.getAttribute('data-price'));
+                this.eventBus.emit(GameEvents.TRADE_BUY, { type, price });
+            } else if (action === 'sell') {
+                const type = btn.getAttribute('data-type');
+                this.eventBus.emit(GameEvents.TRADE_SELL, { type });
+            } else if (action === 'sellAll') {
+                this.eventBus.emit(GameEvents.TRADE_SELL_ALL, {});
+            }
+        });
     }
     
     /**

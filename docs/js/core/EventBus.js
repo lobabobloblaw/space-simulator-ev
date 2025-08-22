@@ -161,6 +161,9 @@ export const GameEvents = {
     // Economy events
     TRADE_COMPLETE: 'economy.trade.complete',
     CREDITS_CHANGE: 'economy.credits.change',
+    TRADE_BUY: 'economy.trade.buy',
+    TRADE_SELL: 'economy.trade.sell',
+    TRADE_SELL_ALL: 'economy.trade.sellAll',
     SHOP_BUY: 'shop.buy',
     
     // Game state events

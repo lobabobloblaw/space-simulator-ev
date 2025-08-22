@@ -26,6 +26,19 @@ export default class TradingSystem {
             this.updateTradingUI();
         });
 
+        // Event-driven buy/sell requests
+        this.eventBus.on(GameEvents.TRADE_BUY, (data) => {
+            if (!data || !data.type) return;
+            this.buyCommodity(data.type, data.price);
+        });
+        this.eventBus.on(GameEvents.TRADE_SELL, (data) => {
+            if (!data || !data.type) return;
+            this.sellCommodity(data.type);
+        });
+        this.eventBus.on(GameEvents.TRADE_SELL_ALL, () => {
+            this.sellAllCargo();
+        });
+
         // Initialize cargo if not already done
         const state = this.stateManager.state;
         if (!state.ship.cargo) {
@@ -154,14 +167,46 @@ export default class TradingSystem {
             if (!btn || btn.disabled) return;
             const action = btn.getAttribute('data-action');
             const type = btn.getAttribute('data-type');
-            if (!action || !type) return;
-            if (action === 'buy') {
+            if (action === 'buy' && type) {
                 const price = Number(btn.getAttribute('data-price'));
                 this.buyCommodity(type, price);
-            } else if (action === 'sell') {
+            } else if (action === 'sell' && type) {
                 this.sellCommodity(type);
+            } else if (action === 'sellAll') {
+                this.sellAllCargo();
             }
         });
+    }
+
+    /**
+     * Sell all cargo accepted at current planet
+     */
+    sellAllCargo() {
+        const state = this.stateManager.state;
+        const planet = state.ship.landedPlanet;
+        if (!planet || !planet.commodityPrices) return;
+        if (!Array.isArray(state.ship.cargo) || state.ship.cargo.length === 0) return;
+        const repEff = this.getTraderRepEffect();
+        let total = 0;
+        for (let i = state.ship.cargo.length - 1; i >= 0; i--) {
+            const item = state.ship.cargo[i];
+            const sellPrice = planet.commodityPrices[item.type];
+            if (!Number.isFinite(sellPrice)) continue;
+            const adjusted = Math.max(1, Math.round(sellPrice * repEff.sellMult));
+            total += adjusted;
+            state.ship.cargo.splice(i, 1);
+        }
+        if (total > 0) {
+            state.ship.credits += total;
+            this.eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'sell' });
+            this.updateTradingUI();
+            this.eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Sold all cargo for §${total}`,
+                type: 'success',
+                duration: 2000
+            });
+        }
     }
 
     buyCommodity(type, price) {
