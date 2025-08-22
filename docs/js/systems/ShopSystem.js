@@ -19,9 +19,13 @@ export default class ShopSystem {
                 this.currentShopInventory = data.shopInventory || shopInventory;
             }
         });
+        // Handle delegated shop buy events (no globals)
+        this.eventBus.on(GameEvents.SHOP_BUY, (data) => {
+            if (!data || !data.itemId) return;
+            this.buyUpgrade(data.itemId);
+        });
 
-        // Make shop methods available globally for onclick handlers
-        window.shopSystem = this;
+        // No globals; UI emits events for actions
 
         console.log('[ShopSystem] Initialized');
     }
@@ -97,6 +101,19 @@ export default class ShopSystem {
             // Upgrade cargo capacity
             ship.cargoCapacity = item.value;
             purchaseSuccess = true;
+        } else if (item.type === 'radar') {
+            // Upgrade radar level (minimap detail)
+            const newLevel = Math.max(ship.radarLevel || 0, item.value || 0);
+            if (newLevel === (ship.radarLevel || 0)) {
+                this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                    message: 'Radar already at this level',
+                    type: 'warning',
+                    duration: 1800
+                });
+                return;
+            }
+            ship.radarLevel = newLevel;
+            purchaseSuccess = true;
         }
 
         if (purchaseSuccess) {
@@ -136,5 +153,4 @@ export default class ShopSystem {
     }
 }
 
-// Make it accessible for onclick handlers
-window.shopSystem = null;
+// No globals

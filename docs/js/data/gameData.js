@@ -129,6 +129,20 @@ export const shopInventory = {
         price: 1000, 
         value: 10,
         description: "Adds 10 cargo slots"
+    },
+    radar1: {
+        name: "Radar MK I",
+        type: "radar",
+        price: 350,
+        value: 1,
+        description: "Basic target separation on minimap"
+    },
+    radar2: {
+        name: "Radar MK II",
+        type: "radar",
+        price: 900,
+        value: 2,
+        description: "Faction colors and hostile pings on minimap"
     }
 };
 
@@ -145,7 +159,7 @@ export const planets = [
             weapons: 250,
             luxury: 280
         },
-        shopItems: ["weapon1", "shield1", "engine2", "weapon2"]
+        shopItems: ["weapon1", "shield1", "engine2", "weapon2", "radar1"]
     },
     { 
         x: -1200, y: -900, radius: 180, name: "Crimson Moon", color: "#E74C3C", landable: true,
@@ -173,7 +187,7 @@ export const planets = [
             weapons: 300,
             luxury: 200
         },
-        shopItems: ["shield2", "engine3", "cargo2"]
+        shopItems: ["shield2", "engine3", "cargo2", "radar2"]
     },
     { 
         x: -600, y: 1200, radius: 75, name: "Mining Station", color: "#F39C12", landable: true,

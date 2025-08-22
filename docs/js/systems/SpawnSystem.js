@@ -209,6 +209,8 @@ export class SpawnSystem {
         
         const state = this.stateManager.state;
         if (!state.explosions) state.explosions = [];
+        if (!state.pools) state.pools = {};
+        if (!state.pools.explosions) state.pools.explosions = [];
         
         // Determine explosion size parameters
         let radius, maxRadius, maxLifetime;
@@ -228,16 +230,20 @@ export class SpawnSystem {
             maxLifetime = 20;
         }
         
-        // Create explosion object
-        const explosion = {
-            x: data.x,
-            y: data.y,
-            radius: radius,
-            maxRadius: maxRadius,
-            lifetime: 0,
-            maxLifetime: maxLifetime
-        };
+        // Obtain explosion object from pool if available
+        const explosion = state.pools.explosions.pop() || {};
+        explosion.x = data.x;
+        explosion.y = data.y;
+        explosion.radius = radius;
+        explosion.maxRadius = maxRadius;
+        explosion.lifetime = 0;
+        explosion.maxLifetime = maxLifetime;
         
+        // Soft cap active explosions to prevent GC storms
+        if (state.explosions.length > 80) {
+            const oldest = state.explosions.shift();
+            if (oldest) state.pools.explosions.push(oldest);
+        }
         state.explosions.push(explosion);
     }
     
@@ -389,15 +395,22 @@ export class SpawnSystem {
             spawnEffect = Math.random() < 0.2 ? 'arrive' : null;
         }
         
-        // Create warp effect at spawn location if appropriate
+        // Create warp effect at spawn location if appropriate (with pooling)
         if (state.warpEffects && spawnEffect) {
-            state.warpEffects.push({
-                x: spawnX,
-                y: spawnY,
-                type: spawnEffect,
-                lifetime: 0,
-                maxLifetime: spawnEffect === 'arrive' || spawnEffect === 'depart' ? 30 : 20
-            });
+            if (!state.pools) state.pools = {};
+            if (!state.pools.warpEffects) state.pools.warpEffects = [];
+            const effect = state.pools.warpEffects.pop() || {};
+            effect.x = spawnX;
+            effect.y = spawnY;
+            effect.type = spawnEffect;
+            effect.lifetime = 0;
+            effect.maxLifetime = (spawnEffect === 'arrive' || spawnEffect === 'depart') ? 30 : 20;
+            // Soft-cap active warp effects
+            if (state.warpEffects.length > 40) {
+                const old = state.warpEffects.shift();
+                if (old) state.pools.warpEffects.push(old);
+            }
+            state.warpEffects.push(effect);
         }
         
         // Create NPC
@@ -541,23 +554,70 @@ export class SpawnSystem {
         
         // Update warp effects
         if (state.warpEffects) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.warpEffects) state.pools.warpEffects = [];
             for (let i = state.warpEffects.length - 1; i >= 0; i--) {
                 const effect = state.warpEffects[i];
                 effect.lifetime++;
-                
                 if (effect.lifetime >= effect.maxLifetime) {
+                    state.pools.warpEffects.push(effect);
                     state.warpEffects.splice(i, 1);
                 }
             }
         }
-        
+
+        // Update hitsparks
+        if (state.hitSparks) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.hitSparks) state.pools.hitSparks = [];
+            for (let i = state.hitSparks.length - 1; i >= 0; i--) {
+                const s = state.hitSparks[i];
+                s.lifetime++;
+                if (s.lifetime >= s.maxLifetime) {
+                    state.pools.hitSparks.push(s);
+                    state.hitSparks.splice(i, 1);
+                }
+            }
+        }
+
+        // Update muzzle flashes
+        if (state.muzzleFlashes) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.muzzleFlashes) state.pools.muzzleFlashes = [];
+            for (let i = state.muzzleFlashes.length - 1; i >= 0; i--) {
+                const m = state.muzzleFlashes[i];
+                m.lifetime++;
+                if (m.lifetime >= m.maxLifetime) {
+                    state.pools.muzzleFlashes.push(m);
+                    state.muzzleFlashes.splice(i, 1);
+                }
+            }
+        }
+
+        // Update shield hit rings
+        if (state.shieldHits) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.shieldHits) state.pools.shieldHits = [];
+            for (let i = state.shieldHits.length - 1; i >= 0; i--) {
+                const sh = state.shieldHits[i];
+                sh.lifetime++;
+                if (sh.lifetime >= sh.maxLifetime) {
+                    state.pools.shieldHits.push(sh);
+                    state.shieldHits.splice(i, 1);
+                }
+            }
+        }
+
         // Update explosions
         if (state.explosions) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.explosions) state.pools.explosions = [];
             for (let i = state.explosions.length - 1; i >= 0; i--) {
                 const exp = state.explosions[i];
                 exp.lifetime++;
                 
                 if (exp.lifetime >= exp.maxLifetime) {
+                    state.pools.explosions.push(exp);
                     state.explosions.splice(i, 1);
                 }
             }

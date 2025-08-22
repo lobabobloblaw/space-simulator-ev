@@ -73,6 +73,7 @@ export class SaveSystemAdapterFixed {
                     kills: state.ship.kills || 0,
                     engineLevel: state.ship.engineLevel || 1,
                     weaponLevel: state.ship.weaponLevel || 1,
+                    radarLevel: state.ship.radarLevel || 0,
                     maxShield: state.ship.maxShield || 0,
                     cargoCapacity: state.ship.cargoCapacity || 10,
                     tutorialStage: state.ship.tutorialStage || 'start'

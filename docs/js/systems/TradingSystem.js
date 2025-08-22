@@ -110,7 +110,7 @@ export default class TradingSystem {
                         <span class="commodity-name">${commodity.name} (${items.length})</span>
                         <span class="commodity-price ${profitClass}">${priceHtml}</span>
                         <button class="trade-btn sell-btn" ${!canSellHere ? 'disabled' : ''}
-                                onclick="${!canSellHere ? '' : `window.tradingSystem.sellCommodity('${type}')`}">
+                                data-action="sell" data-type="${type}">
                             ${!canSellHere ? 'NO BUYERS' : 'SELL'}
                         </button>
                     </div>
@@ -134,9 +134,8 @@ export default class TradingSystem {
                     <span class="commodity-icon">${commodity.icon}</span>
                     <span class="commodity-name">${commodity.name}</span>
                     <span class="commodity-price">§${adjustedBuy}${modStr}</span>
-                    <button class="trade-btn buy-btn" 
-                            ${!canBuy ? 'disabled' : ''} 
-                            onclick="window.tradingSystem.buyCommodity('${type}', ${price})">
+                    <button class="trade-btn buy-btn" ${!canBuy ? 'disabled' : ''}
+                            data-action="buy" data-type="${type}" data-price="${price}">
                         ${!hasSpace ? 'NO SPACE' : !canAfford ? 'NO FUNDS' : 'BUY'}
                     </button>
                 </div>
@@ -144,6 +143,25 @@ export default class TradingSystem {
         }
 
         this.commodityList.innerHTML = html;
+        this.attachDelegates();
+    }
+
+    attachDelegates() {
+        if (this._delegatesAttached || !this.commodityList) return;
+        this._delegatesAttached = true;
+        this.commodityList.addEventListener('click', (e) => {
+            const btn = e.target.closest('button.trade-btn');
+            if (!btn || btn.disabled) return;
+            const action = btn.getAttribute('data-action');
+            const type = btn.getAttribute('data-type');
+            if (!action || !type) return;
+            if (action === 'buy') {
+                const price = Number(btn.getAttribute('data-price'));
+                this.buyCommodity(type, price);
+            } else if (action === 'sell') {
+                this.sellCommodity(type);
+            }
+        });
     }
 
     buyCommodity(type, price) {
@@ -271,5 +289,4 @@ export default class TradingSystem {
     }
 }
 
-// Make it accessible for onclick handlers
-window.tradingSystem = null;
+// No globals

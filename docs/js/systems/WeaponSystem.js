@@ -172,7 +172,10 @@ export class WeaponSystem {
             shooter: shooter,
             lifetime: 0,
             damage: weapon.damage,
-            type: weapon.type
+            type: weapon.type,
+            // Visual tuning for trails
+            trailLen: (weapon.type === 'rapid') ? 7 : (weapon.type === 'plasma') ? 9 : 6,
+            trailWidth: (weapon.type === 'rapid') ? 2 : (weapon.type === 'plasma') ? 4 : 3
         };
         
         // Adjust velocity for specific weapon types
@@ -205,12 +208,34 @@ export class WeaponSystem {
             const add = (weapon.type === 'rapid') ? 0.4 : (weapon.type === 'plasma') ? 0.3 : 0.25;
             ship.spreadBloom = Math.min(6.0, (ship.spreadBloom || 0) + add);
         }
+
+        // Create short-lived muzzle flash at fire position (pooled)
+        try {
+            const state = this.stateManager.state;
+            if (!state.muzzleFlashes) state.muzzleFlashes = [];
+            if (!state.pools) state.pools = {};
+            if (!state.pools.muzzleFlashes) state.pools.muzzleFlashes = [];
+            const fx = state.pools.muzzleFlashes.pop() || {};
+            fx.x = projectile.x;
+            fx.y = projectile.y;
+            fx.angle = finalAngle;
+            fx.color = (weapon.type === 'plasma') ? '#88ffff' : (weapon.type === 'rapid') ? '#ffbb66' : '#ffffaa';
+            fx.lifetime = 0;
+            fx.maxLifetime = 6;
+            // Soft-cap
+            if (state.muzzleFlashes.length > 40) {
+                const old = state.muzzleFlashes.shift();
+                if (old) state.pools.muzzleFlashes.push(old);
+            }
+            state.muzzleFlashes.push(fx);
+        } catch (_) {}
     }
     
     /**
      * Update projectiles
      */
     updateProjectiles(ship, npcShips, asteroids, explosions, audioSystem) {
+        const state = this.stateManager.state;
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const proj = this.projectiles[i];
             
@@ -225,10 +250,9 @@ export class WeaponSystem {
             else if (proj.type === 'plasma') maxLifetime = 140;
             else if (proj.type === 'mining') maxLifetime = 100;
             // Apply optional debug multiplier
-            try {
-                const mult = (state?.debug?.projLifetimeMult) ?? 1;
-                maxLifetime = Math.floor(maxLifetime * mult);
-            } catch (_) {}
+            const mult = (state && state.debug && typeof state.debug.projLifetimeMult === 'number')
+                ? state.debug.projLifetimeMult : 1;
+            maxLifetime = Math.floor(maxLifetime * mult);
             // 'laser' uses default
             if (proj.lifetime > maxLifetime) {
                 this.projectiles.splice(i, 1);
@@ -301,6 +325,8 @@ export class WeaponSystem {
         if (explosions && this.createExplosion) {
             explosions.push(this.createExplosion(projectile.x, projectile.y, true));
         }
+        // Lightweight spark
+        this.createHitSpark(projectile.x, projectile.y, projectile.type);
         // Debug damage number
         this.eventBus.emit('debug.damage', { x: projectile.x, y: projectile.y, amount: dmg });
         
@@ -328,6 +354,8 @@ export class WeaponSystem {
         if (explosions && this.createExplosion) {
             explosions.push(this.createExplosion(projectile.x, projectile.y, true));
         }
+        // Lightweight spark
+        this.createHitSpark(projectile.x, projectile.y, projectile.type);
         // Debug damage number
         this.eventBus.emit('debug.damage', { x: projectile.x, y: projectile.y, amount: projectile.damage });
         
@@ -357,6 +385,8 @@ export class WeaponSystem {
         if (explosions && this.createExplosion) {
             explosions.push(this.createExplosion(projectile.x, projectile.y, true));
         }
+        // Lightweight spark
+        this.createHitSpark(projectile.x, projectile.y, 'mining');
         
         // Emit event
         this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
@@ -378,6 +408,30 @@ export class WeaponSystem {
             lifetime: 0,
             maxLifetime: 20
         };
+    }
+
+    /**
+     * Lightweight hitspark effect (pooled)
+     */
+    createHitSpark(x, y, type = 'laser') {
+        const state = this.stateManager.state;
+        if (!state.hitSparks) state.hitSparks = [];
+        if (!state.pools) state.pools = {};
+        if (!state.pools.hitSparks) state.pools.hitSparks = [];
+        const spark = state.pools.hitSparks.pop() || {};
+        spark.x = x;
+        spark.y = y;
+        spark.dir = Math.random() * Math.PI * 2;
+        spark.lifetime = 0;
+        spark.maxLifetime = 10;
+        spark.size = 6;
+        spark.color = (type === 'plasma') ? '#88ffff' : (type === 'rapid') ? '#ffbb66' : '#ffffaa';
+        // Soft-cap
+        if (state.hitSparks.length > 120) {
+            const old = state.hitSparks.shift();
+            if (old) state.pools.hitSparks.push(old);
+        }
+        state.hitSparks.push(spark);
     }
     
     /**
@@ -404,8 +458,13 @@ export class WeaponSystem {
             // Fire projectile
             this.fireProjectile(ship, ship.angle, true, weapon);
             
-            // Set cooldown
-            ship.weaponCooldown = weapon.cooldown;
+            // Set cooldown (with slight cadence variance for rapid fire)
+            if (weapon.type === 'rapid') {
+                const jitter = (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.5 ? 0 : 1);
+                ship.weaponCooldown = Math.max(3, weapon.cooldown + jitter);
+            } else {
+                ship.weaponCooldown = weapon.cooldown;
+            }
             
             // Play sound (with proper context binding)
             if (audioSystem && audioSystem.playLaser) {
@@ -467,8 +526,13 @@ export class WeaponSystem {
         // Fire projectile
         this.fireProjectile(npc, angle, false, npc.weapon);
         
-        // Set cooldown
-        npc.weaponCooldown = npc.weapon.cooldown;
+        // Set cooldown (with slight cadence variance for rapid fire)
+        if (npc.weapon.type === 'rapid') {
+            const jitter = (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.5 ? 0 : 1);
+            npc.weaponCooldown = Math.max(3, npc.weapon.cooldown + jitter);
+        } else {
+            npc.weaponCooldown = npc.weapon.cooldown;
+        }
         
         // Emit event
         this.eventBus.emit(GameEvents.WEAPON_FIRED, {

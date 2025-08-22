@@ -123,6 +123,7 @@ async function initializeGameState() {
         maxShield: shipData?.maxShield ?? 0,
         engineLevel: shipData?.engineLevel ?? 1,
         weaponLevel: shipData?.weaponLevel ?? 1,
+        radarLevel: shipData?.radarLevel ?? 0,
         currentPlanet: null,
         pirateKills: shipData?.pirateKills ?? 0
     };
@@ -606,7 +607,6 @@ async function initializeSystems() {
     try {
         systems.trading = new TradingSystem();
         await systems.trading.init();
-        window.tradingSystem = systems.trading; // For onclick handlers
         console.log('✅ TradingSystem initialized');
     } catch (e) {
         console.error('❌ TradingSystem failed:', e);
@@ -615,7 +615,6 @@ async function initializeSystems() {
     try {
         systems.shop = new ShopSystem();
         await systems.shop.init();
-        window.shopSystem = systems.shop; // For onclick handlers
         console.log('✅ ShopSystem initialized');
     } catch (e) {
         console.error('❌ ShopSystem failed:', e);

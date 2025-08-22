@@ -287,7 +287,7 @@ export class UISystem {
         };
         
         updateElement('health', Math.max(0, Math.round(ship.health)) + '%');
-        updateElement('shield', ship.shield > 0 ? Math.round(ship.shield) : 'OFFLINE');
+        updateElement('shield', ship.shield > 0 ? Math.round(ship.shield) : 'EQUIP');
         updateElement('fuel', Math.round(ship.fuel) + '%');
         updateElement('speed', (Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy) * 100).toFixed(1));
         
@@ -753,6 +753,8 @@ export class UISystem {
                 if (ship && shopInventory) {
                     this.updateShopPanel(ship, shopInventory);
                 }
+                // Ensure delegated handlers are attached once
+                this.attachShopDelegates();
             }
         }
     }
@@ -896,7 +898,7 @@ export class UISystem {
                     </div>
                     <div class="price">${item.price}</div>
                     <button class="shop-buy-button" 
-                            onclick="window.shopSystem.buyUpgrade('${itemId}')" 
+                            data-item-id="${itemId}" 
                             ${alreadyOwned || ship.credits < item.price ? 'disabled' : ''}>
                         ${alreadyOwned ? 'Owned' : 'Buy'}
                     </button>
@@ -908,6 +910,22 @@ export class UISystem {
         if (itemsToShow.length === 0) {
             list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No items available at this station</div>';
         }
+    }
+
+    /**
+     * Delegate click handling for shop buy buttons (no global functions)
+     */
+    attachShopDelegates() {
+        const list = document.getElementById('shopList');
+        if (!list || this._shopDelegatesAttached) return;
+        this._shopDelegatesAttached = true;
+        list.addEventListener('click', (e) => {
+            const btn = e.target.closest('.shop-buy-button');
+            if (!btn || btn.disabled) return;
+            const itemId = btn.getAttribute('data-item-id');
+            if (!itemId) return;
+            this.eventBus.emit(GameEvents.SHOP_BUY, { itemId });
+        });
     }
     
     

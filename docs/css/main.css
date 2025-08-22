@@ -109,15 +109,27 @@ body {
 
 #shipRadio.radio-radial {
     position: relative;
-    width: 112px;
-    min-width: 112px;
-    height: 112px;
+    width: 192px; /* dial + side buttons region */
+    min-width: 192px;
+    height: 140px; /* larger than HUD (110px) to overflow top/bottom */
     padding: 0; /* radial uses absolute children */
     grid-template-columns: none;
     grid-auto-rows: initial;
     background: transparent !important; /* remove box */
     border: none !important;
-    overflow: visible;
+    overflow: visible; /* allow the dial to exceed HUD bounds */
+    /* layout variables for precise alignment */
+    --dial-size: 128px;
+    --dial-offset: 6px;
+    --button-col-right: 8px; /* legacy; not used when docking to dial */
+    --dot-hit: 24px;   /* reduced hit area to bring dots closer */
+    --dot-size: 14px;  /* keep visual dot sizeable */
+    --btn-w: var(--dot-hit);
+    --btn-h: var(--dot-hit); /* uniform circular hit area for all buttons */
+    --dot-gap: 2px;    /* tighter visual space between dots */
+    --dial-center: calc(var(--dial-offset) + (var(--dial-size) / 2));
+    --half-h: calc(var(--btn-h) / 2);
+    --onehalf-h: calc(var(--btn-h) + var(--half-h));
 }
 
 /* Hide linear viz in radial mode */
@@ -126,8 +138,8 @@ body {
 /* Radial dial visuals */
 #radioDial {
     position: absolute;
-    top: 6px; left: 6px;
-    width: 100px; height: 100px;
+    top: var(--dial-offset); left: var(--dial-offset);
+    width: var(--dial-size); height: var(--dial-size); /* fixed dial, leaves room for side buttons */
     border-radius: 50%;
     border: 1px solid var(--accent-border);
     background:
@@ -169,12 +181,12 @@ body {
 /* Readout centered in dial */
 #shipRadio.radio-radial #radioTitle {
     position: absolute;
-    top: 38px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 78px;
+    top: calc(var(--dial-offset) + (var(--dial-size) / 2));
+    left: calc(var(--dial-offset) + (var(--dial-size) / 2));
+    transform: translate(-50%, -50%);
+    width: 110px; /* constrained to dial interior */
     font-family: 'VT323', monospace;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 1px;
     border: none;
     background: transparent;
@@ -184,20 +196,71 @@ body {
     text-shadow: 0 0 6px rgba(0,255,255,0.18);
 }
 
-/* Buttons positioned around the dial */
+/* Buttons moved to a right-hand side column (stereo receiver feel) */
 #shipRadio.radio-radial #radioPrev,
 #shipRadio.radio-radial #radioPlay,
 #shipRadio.radio-radial #radioNext {
     position: absolute;
-    width: 24px; height: 24px;
+    left: calc(var(--dial-offset) + var(--dial-size) + 6px); /* tuck next to dial rim */
+    right: auto;
+    width: var(--btn-w); height: var(--btn-h);
     border-radius: 50%;
     display: grid; place-items: center;
-    background: rgba(0,0,0,0.35);
+    background: transparent; /* visual dot handled by ::before */
+    border: none;
+    color: transparent; /* hide glyphs */
+    font-size: 0; line-height: 0; /* ensure no visible text */
 }
 
-#shipRadio.radio-radial #radioPrev { left: 0; top: 50%; transform: translateY(-50%); }
-#shipRadio.radio-radial #radioNext { right: 0; top: 50%; transform: translateY(-50%); }
-#shipRadio.radio-radial #radioPlay { left: 50%; bottom: 0; transform: translateX(-50%); width: 28px; height: 28px; }
+/* Visual dot inside each button, keeps large hit area */
+#shipRadio.radio-radial #radioPrev::before,
+#shipRadio.radio-radial #radioPlay::before,
+#shipRadio.radio-radial #radioNext::before {
+    content: '';
+    width: var(--dot-size);
+    height: var(--dot-size);
+    border-radius: 50%;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--accent-border);
+    box-shadow: 0 0 4px rgba(0,255,255,0.15), inset 0 0 6px rgba(0,255,255,0.08);
+}
+
+#shipRadio.radio-radial #radioPrev:hover::before,
+#shipRadio.radio-radial #radioPlay:hover::before,
+#shipRadio.radio-radial #radioNext:hover::before {
+    background: var(--accent-subtle);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 10px var(--accent-glow), inset 0 0 6px rgba(0,255,255,0.15);
+}
+
+#shipRadio.radio-radial #radioPrev:active::before,
+#shipRadio.radio-radial #radioPlay:active::before,
+#shipRadio.radio-radial #radioNext:active::before {
+    transform: scale(0.92);
+}
+
+/* Tiny glyphs centered within dots */
+#shipRadio.radio-radial #radioPrev::after,
+#shipRadio.radio-radial #radioPlay::after,
+#shipRadio.radio-radial #radioNext::after {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 9px; /* readable glyph inside 14px dot */
+    line-height: 1;
+    color: var(--accent-primary);
+    text-shadow: 0 0 6px rgba(0,255,255,0.18);
+    pointer-events: none;
+}
+
+#shipRadio.radio-radial #radioPrev::after { content: '<'; }
+#shipRadio.radio-radial #radioPlay::after { content: '~'; }
+#shipRadio.radio-radial #radioNext::after { content: '>'; }
+
+/* Place buttons with exact equal spacing around dial center (gap is space between edges) */
+#shipRadio.radio-radial #radioPlay { top: calc(var(--dial-center) - var(--half-h)); }
+#shipRadio.radio-radial #radioPrev { top: calc(var(--dial-center) - (var(--btn-h) + var(--dot-gap)) - var(--half-h)); }
+#shipRadio.radio-radial #radioNext { top: calc(var(--dial-center) + (var(--btn-h) + var(--dot-gap)) - var(--half-h)); }
 
 #shipRadio button {
     background: transparent;

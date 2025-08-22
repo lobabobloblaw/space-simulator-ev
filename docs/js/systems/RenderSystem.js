@@ -39,6 +39,7 @@ export class RenderSystem {
         
         // Bind methods
         this.handleCanvasResize = this.handleCanvasResize.bind(this);
+        this.handleShieldHit = this.handleShieldHit.bind(this);
         
         console.log('[RenderSystem] Created');
     }
@@ -172,6 +173,9 @@ export class RenderSystem {
         this.eventBus.on('render.toggleParticles', () => {
             this.showParticles = !this.showParticles;
         });
+
+        // Shield hit visual ping
+        this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit);
     }
     
     // Stars are now generated in main_eventbus_pure.js and stored in state
@@ -211,7 +215,10 @@ export class RenderSystem {
         this.renderPickups(state);
         this.renderNPCs(state);
         this.renderProjectiles(state);
+        this.renderMuzzleFlashes(state);
+        this.renderHitSparks(state);
         this.renderShip(state);
+        this.renderShieldHits(state);
         this.renderExplosions(state);
         this.renderWarpEffects(state);
 
@@ -235,6 +242,59 @@ export class RenderSystem {
         // Render touch controls if needed
         if (window.touchControls) {
             window.touchControls.render();
+        }
+    }
+
+    /**
+     * Handle shield hit event to spawn a short-lived ring effect
+     */
+    handleShieldHit(data) {
+        try {
+            const state = this.stateManager.state;
+            if (!state.shieldHits) state.shieldHits = [];
+            if (!state.pools) state.pools = {};
+            if (!state.pools.shieldHits) state.pools.shieldHits = [];
+            const ship = data?.ship || state.ship;
+            const fx = state.pools.shieldHits.pop() || {};
+            fx.x = ship.x; fx.y = ship.y;
+            fx.radius = (ship.size || 10) * 2.2;
+            fx.lifetime = 0;
+            fx.maxLifetime = 14;
+            fx.color = '#66e0ff';
+            // Soft-cap
+            if (state.shieldHits.length > 24) {
+                const old = state.shieldHits.shift();
+                if (old) state.pools.shieldHits.push(old);
+            }
+            state.shieldHits.push(fx);
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    /**
+     * Render shield hit rings
+     */
+    renderShieldHits(state) {
+        const hits = state.shieldHits || [];
+        if (hits.length === 0) return;
+        const viewLeft = this.camera.x - this.screenCenter.x - 100;
+        const viewTop = this.camera.y - this.screenCenter.y - 100;
+        const viewRight = this.camera.x + this.screenCenter.x + 100;
+        const viewBottom = this.camera.y + this.screenCenter.y + 100;
+        for (const fx of hits) {
+            if (fx.x < viewLeft || fx.x > viewRight || fx.y < viewTop || fx.y > viewBottom) continue;
+            const t = fx.lifetime / fx.maxLifetime;
+            const alpha = Math.max(0, 1 - t);
+            const r = fx.radius * (1 + t * 0.4);
+            this.ctx.save();
+            this.ctx.strokeStyle = fx.color || '#66e0ff';
+            this.ctx.globalAlpha = alpha * 0.8;
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.arc(fx.x, fx.y, r, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.restore();
         }
     }
     
@@ -528,8 +588,14 @@ export class RenderSystem {
      */
     renderPickups(state) {
         const pickups = state.pickups || [];
-        
+        // Frustum cull to avoid off-screen gradients
+        const viewLeft = this.camera.x - this.screenCenter.x - 50;
+        const viewTop = this.camera.y - this.screenCenter.y - 50;
+        const viewRight = this.camera.x + this.screenCenter.x + 50;
+        const viewBottom = this.camera.y + this.screenCenter.y + 50;
+
         for (let pickup of pickups) {
+            if (pickup.x < viewLeft || pickup.x > viewRight || pickup.y < viewTop || pickup.y > viewBottom) continue;
             const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
             
             // Glow effect
@@ -602,6 +668,10 @@ export class RenderSystem {
             this.renderNPCShip(npc);
             
             this.ctx.restore();
+
+            // Faction/hostility brackets (subtle corner brackets around hostiles)
+            // Keep draw in screen space (no rotation), sized from npc size and scale
+            this.renderFactionBracket(npc, scaleMap[npc.type] || 1.4);
             
             // State indicator icon
             if (npc.state) {
@@ -625,6 +695,53 @@ export class RenderSystem {
                                 barWidth * (npc.health / npc.maxHealth), barHeight);
             }
         }
+    }
+
+    /**
+     * Subtle HUD-style corner brackets around ships based on faction/hostility
+     */
+    renderFactionBracket(npc, npcScale = 1.0) {
+        // Only show for hostiles (pirates) for now
+        const isHostile = (npc.faction === 'pirate');
+        if (!isHostile) return;
+
+        const size = (npc.size || 10) * npcScale;
+        const half = size * 1.1;
+        const arm = Math.max(5, Math.min(9, size * 0.5));
+
+        const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
+        this.ctx.save();
+        this.ctx.strokeStyle = palette.accent || '#ff4444';
+        this.ctx.globalAlpha = 0.6;
+        this.ctx.lineWidth = 1.5;
+
+        // Four corner L-shapes around npc.x, npc.y
+        // Top-left
+        this.ctx.beginPath();
+        this.ctx.moveTo(npc.x - half, npc.y - half + arm);
+        this.ctx.lineTo(npc.x - half, npc.y - half);
+        this.ctx.lineTo(npc.x - half + arm, npc.y - half);
+        this.ctx.stroke();
+        // Top-right
+        this.ctx.beginPath();
+        this.ctx.moveTo(npc.x + half - arm, npc.y - half);
+        this.ctx.lineTo(npc.x + half, npc.y - half);
+        this.ctx.lineTo(npc.x + half, npc.y - half + arm);
+        this.ctx.stroke();
+        // Bottom-left
+        this.ctx.beginPath();
+        this.ctx.moveTo(npc.x - half, npc.y + half - arm);
+        this.ctx.lineTo(npc.x - half, npc.y + half);
+        this.ctx.lineTo(npc.x - half + arm, npc.y + half);
+        this.ctx.stroke();
+        // Bottom-right
+        this.ctx.beginPath();
+        this.ctx.moveTo(npc.x + half - arm, npc.y + half);
+        this.ctx.lineTo(npc.x + half, npc.y + half);
+        this.ctx.lineTo(npc.x + half, npc.y + half - arm);
+        this.ctx.stroke();
+
+        this.ctx.restore();
     }
     
     /**
@@ -928,11 +1045,18 @@ export class RenderSystem {
      */
     renderProjectiles(state) {
         const projectiles = state.projectiles || [];
-        
+        const viewLeft = this.camera.x - this.screenCenter.x - 100;
+        const viewTop = this.camera.y - this.screenCenter.y - 100;
+        const viewRight = this.camera.x + this.screenCenter.x + 100;
+        const viewBottom = this.camera.y + this.screenCenter.y + 100;
+
         for (let proj of projectiles) {
+            // Frustum cull projectiles outside the viewport with margin
+            if (proj.x < viewLeft || proj.x > viewRight || proj.y < viewTop || proj.y > viewBottom) continue;
             // Trail effect
+            const seg = Math.max(3, Math.min(12, proj.trailLen || 5));
             const trailGradient = this.ctx.createLinearGradient(
-                proj.x - proj.vx * 5, proj.y - proj.vy * 5,
+                proj.x - proj.vx * seg, proj.y - proj.vy * seg,
                 proj.x, proj.y
             );
             
@@ -950,9 +1074,9 @@ export class RenderSystem {
             trailGradient.addColorStop(1, color);
             
             this.ctx.strokeStyle = trailGradient;
-            this.ctx.lineWidth = 3;
+            this.ctx.lineWidth = Math.max(1.5, Math.min(5, proj.trailWidth || 3));
             this.ctx.beginPath();
-            this.ctx.moveTo(proj.x - proj.vx * 5, proj.y - proj.vy * 5);
+            this.ctx.moveTo(proj.x - proj.vx * seg, proj.y - proj.vy * seg);
             this.ctx.lineTo(proj.x, proj.y);
             this.ctx.stroke();
             
@@ -1072,8 +1196,17 @@ export class RenderSystem {
      */
     renderExplosions(state) {
         const explosions = state.explosions || [];
-        
+        const viewLeft = this.camera.x - this.screenCenter.x - 150;
+        const viewTop = this.camera.y - this.screenCenter.y - 150;
+        const viewRight = this.camera.x + this.screenCenter.x + 150;
+        const viewBottom = this.camera.y + this.screenCenter.y + 150;
+
         for (let exp of explosions) {
+            // Frustum cull explosions outside viewport with margin
+            if (exp.x + exp.maxRadius < viewLeft || exp.x - exp.maxRadius > viewRight ||
+                exp.y + exp.maxRadius < viewTop || exp.y - exp.maxRadius > viewBottom) {
+                continue;
+            }
             const progress = exp.lifetime / exp.maxLifetime;
             const radius = exp.radius + (exp.maxRadius - exp.radius) * progress;
             
@@ -1109,6 +1242,66 @@ export class RenderSystem {
                     this.ctx.fillRect(sparkX - 1, sparkY - 1, 2, 2);
                 }
             }
+        }
+    }
+
+    /**
+     * Render lightweight hit sparks
+     */
+    renderHitSparks(state) {
+        const sparks = state.hitSparks || [];
+        if (sparks.length === 0) return;
+        const viewLeft = this.camera.x - this.screenCenter.x - 50;
+        const viewTop = this.camera.y - this.screenCenter.y - 50;
+        const viewRight = this.camera.x + this.screenCenter.x + 50;
+        const viewBottom = this.camera.y + this.screenCenter.y + 50;
+        for (const s of sparks) {
+            if (s.x < viewLeft || s.x > viewRight || s.y < viewTop || s.y > viewBottom) continue;
+            const t = s.lifetime / s.maxLifetime;
+            const alpha = 1 - t;
+            const len = s.size * (1 - t * 0.5);
+            this.ctx.save();
+            this.ctx.strokeStyle = s.color || '#ffffaa';
+            this.ctx.globalAlpha = Math.max(0, alpha);
+            this.ctx.lineWidth = 1;
+            // Draw small star burst (4 rays)
+            this.ctx.beginPath();
+            this.ctx.moveTo(s.x - len, s.y);
+            this.ctx.lineTo(s.x + len, s.y);
+            this.ctx.moveTo(s.x, s.y - len);
+            this.ctx.lineTo(s.x, s.y + len);
+            this.ctx.stroke();
+            this.ctx.restore();
+        }
+    }
+
+    /**
+     * Render short-lived muzzle flashes
+     */
+    renderMuzzleFlashes(state) {
+        const flashes = state.muzzleFlashes || [];
+        if (flashes.length === 0) return;
+        const viewLeft = this.camera.x - this.screenCenter.x - 50;
+        const viewTop = this.camera.y - this.screenCenter.y - 50;
+        const viewRight = this.camera.x + this.screenCenter.x + 50;
+        const viewBottom = this.camera.y + this.screenCenter.y + 50;
+        for (const fx of flashes) {
+            if (fx.x < viewLeft || fx.x > viewRight || fx.y < viewTop || fx.y > viewBottom) continue;
+            const t = fx.lifetime / fx.maxLifetime;
+            const alpha = 1 - t;
+            const length = 10 * (1 - t * 0.7);
+            const width = 4 * (1 - t * 0.7);
+            const x2 = fx.x + Math.cos(fx.angle) * length;
+            const y2 = fx.y + Math.sin(fx.angle) * length;
+            this.ctx.save();
+            this.ctx.strokeStyle = fx.color || '#ffffaa';
+            this.ctx.globalAlpha = Math.max(0, alpha * 0.9);
+            this.ctx.lineWidth = width;
+            this.ctx.beginPath();
+            this.ctx.moveTo(fx.x, fx.y);
+            this.ctx.lineTo(x2, y2);
+            this.ctx.stroke();
+            this.ctx.restore();
         }
     }
     
@@ -1249,40 +1442,68 @@ export class RenderSystem {
         this.minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.9)';
         this.minimapCtx.fillRect(0, 0, 100, 100);
         
-        // Range circles
-        this.minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-        this.minimapCtx.lineWidth = 1;
-        for (let r = 15; r <= 45; r += 15) {
-            this.minimapCtx.beginPath();
-            this.minimapCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
-            this.minimapCtx.stroke();
-        }
-        
-        // Planets
-        const planets = state.planets || [];
-        this.minimapCtx.fillStyle = '#ffffff';
-        this.minimapCtx.shadowColor = '#ffffff';
-        this.minimapCtx.shadowBlur = 3;
-        
-        for (let planet of planets) {
-            const dx = (planet.x - state.ship.x) * this.minimapScale;
-            const dy = (planet.y - state.ship.y) * this.minimapScale;
-            if (Math.abs(dx) < maxRadius && Math.abs(dy) < maxRadius) {
+        // Range circles gated by radar level (featureless at level 0)
+        const radarLevel = state.ship?.radarLevel || 0;
+        if (radarLevel >= 1) {
+            this.minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            this.minimapCtx.lineWidth = 1;
+            for (let r = 15; r <= 45; r += 15) {
                 this.minimapCtx.beginPath();
-                this.minimapCtx.arc(centerX + dx, centerY + dy, 3, 0, Math.PI * 2);
-                this.minimapCtx.fill();
+                this.minimapCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
+                this.minimapCtx.stroke();
             }
         }
-        this.minimapCtx.shadowBlur = 0;
         
+        // radarLevel already defined above
+
+        // Planets
+        const planets = state.planets || [];
+        if (radarLevel >= 1) {
+            // Basic separation: planets as slightly larger dots (still white at lvl1)
+            this.minimapCtx.fillStyle = '#ffffff';
+            this.minimapCtx.shadowColor = '#ffffff';
+            this.minimapCtx.shadowBlur = radarLevel >= 2 ? 3 : 0;
+            for (let planet of planets) {
+                const dx = (planet.x - state.ship.x) * this.minimapScale;
+                const dy = (planet.y - state.ship.y) * this.minimapScale;
+                if (Math.abs(dx) < maxRadius && Math.abs(dy) < maxRadius) {
+                    this.minimapCtx.beginPath();
+                    this.minimapCtx.arc(centerX + dx, centerY + dy, 3, 0, Math.PI * 2);
+                    this.minimapCtx.fill();
+                }
+            }
+            this.minimapCtx.shadowBlur = 0;
+        }
+
         // NPCs
         const npcShips = state.npcShips || [];
-        this.minimapCtx.fillStyle = '#ffffff';
         for (let npc of npcShips) {
             const dx = (npc.x - state.ship.x) * this.minimapScale;
             const dy = (npc.y - state.ship.y) * this.minimapScale;
             if (Math.abs(dx) < maxRadius && Math.abs(dy) < maxRadius) {
-                this.minimapCtx.fillRect(centerX + dx - 1, centerY + dy - 1, 2, 2);
+                const x = Math.floor(centerX + dx);
+                const y = Math.floor(centerY + dy);
+                if (radarLevel <= 0) {
+                    // Level 0: featureless white pixels for everything
+                    this.minimapCtx.fillStyle = '#ffffff';
+                    this.minimapCtx.fillRect(x, y, 1, 1);
+                } else if (radarLevel === 1) {
+                    // Level 1: NPCs as small white squares, planets handled above
+                    this.minimapCtx.fillStyle = '#ffffff';
+                    this.minimapCtx.fillRect(x - 1, y - 1, 2, 2);
+                } else {
+                    // Level 2+: faction colors and hostile outline ring
+                    const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
+                    this.minimapCtx.fillStyle = palette.accent || '#ffffff';
+                    this.minimapCtx.fillRect(x - 1, y - 1, 2, 2);
+                    if (npc.faction === 'pirate') {
+                        this.minimapCtx.strokeStyle = (palette.accent || '#ff4444');
+                        this.minimapCtx.lineWidth = 1;
+                        this.minimapCtx.beginPath();
+                        this.minimapCtx.arc(x, y, 3, 0, Math.PI * 2);
+                        this.minimapCtx.stroke();
+                    }
+                }
             }
         }
         
@@ -1339,7 +1560,13 @@ export class RenderSystem {
      * Clean up render system
      */
     destroy() {
-        // Clear any render-specific resources
+        // Unsubscribe from events
+        if (this.eventBus && this.handleCanvasResize) {
+            this.eventBus.off('canvas.resize', this.handleCanvasResize);
+        }
+        if (this.eventBus && this.handleShieldHit) {
+            this.eventBus.off(GameEvents.SHIELD_HIT, this.handleShieldHit);
+        }
         console.log('[RenderSystem] Destroyed');
     }
 }
