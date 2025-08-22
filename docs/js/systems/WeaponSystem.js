@@ -308,6 +308,7 @@ export class WeaponSystem {
      * Handle projectile hitting the player ship
      */
     handleProjectileHitShip(projectile, ship, explosions, audioSystem) {
+        const hadShield = ship.shield > 0;
         const dmg = projectile.damage;
         const god = this.stateManager.state.debug?.godMode;
         if (!god) {
@@ -325,8 +326,8 @@ export class WeaponSystem {
         if (explosions && this.createExplosion) {
             explosions.push(this.createExplosion(projectile.x, projectile.y, true));
         }
-        // Lightweight spark
-        this.createHitSpark(projectile.x, projectile.y, projectile.type);
+        // Lightweight spark (reduced when shield absorbed)
+        this.createHitSpark(projectile.x, projectile.y, hadShield ? 'shield' : projectile.type, { scale: hadShield ? 0.6 : 1 });
         // Debug damage number
         this.eventBus.emit('debug.damage', { x: projectile.x, y: projectile.y, amount: dmg });
         
@@ -413,7 +414,7 @@ export class WeaponSystem {
     /**
      * Lightweight hitspark effect (pooled)
      */
-    createHitSpark(x, y, type = 'laser') {
+    createHitSpark(x, y, type = 'laser', opts = {}) {
         const state = this.stateManager.state;
         if (!state.hitSparks) state.hitSparks = [];
         if (!state.pools) state.pools = {};
@@ -424,8 +425,9 @@ export class WeaponSystem {
         spark.dir = Math.random() * Math.PI * 2;
         spark.lifetime = 0;
         spark.maxLifetime = 10;
-        spark.size = 6;
-        spark.color = (type === 'plasma') ? '#88ffff' : (type === 'rapid') ? '#ffbb66' : '#ffffaa';
+        const scale = Math.max(0.3, Math.min(1.5, opts.scale || 1));
+        spark.size = 6 * scale;
+        spark.color = (type === 'plasma') ? '#88ffff' : (type === 'rapid') ? '#ffbb66' : (type === 'shield') ? '#66e0ff' : '#ffffaa';
         // Soft-cap
         if (state.hitSparks.length > 120) {
             const old = state.hitSparks.shift();

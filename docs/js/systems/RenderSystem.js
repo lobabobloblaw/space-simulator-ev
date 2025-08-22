@@ -597,33 +597,38 @@ export class RenderSystem {
         for (let pickup of pickups) {
             if (pickup.x < viewLeft || pickup.x > viewRight || pickup.y < viewTop || pickup.y > viewBottom) continue;
             const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
-            
-            // Glow effect
-            const glowGradient = this.ctx.createRadialGradient(
-                pickup.x, pickup.y, 0,
-                pickup.x, pickup.y, 15
-            );
-            
-            if (pickup.type === 'ore') {
-                glowGradient.addColorStop(0, 'rgba(136, 136, 136, 0.8)');
-                glowGradient.addColorStop(1, 'transparent');
+            if (this.quality === 'low') {
+                // Simple core only for low quality
+                this.ctx.globalAlpha = 1;
+                this.ctx.fillStyle = pickup.type === 'ore' ? '#aaa' : '#ffd700';
+                this.ctx.beginPath();
+                this.ctx.arc(pickup.x, pickup.y, 4, 0, Math.PI * 2);
+                this.ctx.fill();
             } else {
-                glowGradient.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
-                glowGradient.addColorStop(1, 'transparent');
+                // Glow effect
+                const glowGradient = this.ctx.createRadialGradient(
+                    pickup.x, pickup.y, 0,
+                    pickup.x, pickup.y, 15
+                );
+                if (pickup.type === 'ore') {
+                    glowGradient.addColorStop(0, 'rgba(136, 136, 136, 0.8)');
+                    glowGradient.addColorStop(1, 'transparent');
+                } else {
+                    glowGradient.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
+                    glowGradient.addColorStop(1, 'transparent');
+                }
+                this.ctx.globalAlpha = pulse;
+                this.ctx.fillStyle = glowGradient;
+                this.ctx.beginPath();
+                this.ctx.arc(pickup.x, pickup.y, 15, 0, Math.PI * 2);
+                this.ctx.fill();
+                // Core
+                this.ctx.globalAlpha = 1;
+                this.ctx.fillStyle = pickup.type === 'ore' ? '#888' : '#ffd700';
+                this.ctx.beginPath();
+                this.ctx.arc(pickup.x, pickup.y, 5, 0, Math.PI * 2);
+                this.ctx.fill();
             }
-            
-            this.ctx.globalAlpha = pulse;
-            this.ctx.fillStyle = glowGradient;
-            this.ctx.beginPath();
-            this.ctx.arc(pickup.x, pickup.y, 15, 0, Math.PI * 2);
-            this.ctx.fill();
-            
-            // Core
-            this.ctx.globalAlpha = 1;
-            this.ctx.fillStyle = pickup.type === 'ore' ? '#888' : '#ffd700';
-            this.ctx.beginPath();
-            this.ctx.arc(pickup.x, pickup.y, 5, 0, Math.PI * 2);
-            this.ctx.fill();
         }
     }
     
@@ -1209,32 +1214,38 @@ export class RenderSystem {
             }
             const progress = exp.lifetime / exp.maxLifetime;
             const radius = exp.radius + (exp.maxRadius - exp.radius) * progress;
-            
-            // Multiple explosion rings
-            for (let i = 0; i < 3; i++) {
+            // Multiple explosion rings (quality-aware)
+            const ringCount = this.quality === 'low' ? 1 : (this.quality === 'medium' ? 2 : 3);
+            for (let i = 0; i < ringCount; i++) {
                 const ringProgress = Math.max(0, progress - i * 0.1);
                 const ringRadius = radius * (1 - i * 0.2);
                 const alpha = (1 - ringProgress) * (1 - i * 0.3);
-                
-                const gradient = this.ctx.createRadialGradient(
-                    exp.x, exp.y, ringRadius * 0.5,
-                    exp.x, exp.y, ringRadius
-                );
-                gradient.addColorStop(0, `rgba(255, 255, 200, ${alpha})`);
-                gradient.addColorStop(0.3, `rgba(255, 150, 0, ${alpha * 0.8})`);
-                gradient.addColorStop(0.7, `rgba(255, 50, 0, ${alpha * 0.5})`);
-                gradient.addColorStop(1, 'transparent');
-                
-                this.ctx.fillStyle = gradient;
-                this.ctx.beginPath();
-                this.ctx.arc(exp.x, exp.y, ringRadius, 0, Math.PI * 2);
-                this.ctx.fill();
+                if (this.quality === 'low') {
+                    this.ctx.fillStyle = `rgba(255, 140, 40, ${alpha * 0.6})`;
+                    this.ctx.beginPath();
+                    this.ctx.arc(exp.x, exp.y, ringRadius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                } else {
+                    const gradient = this.ctx.createRadialGradient(
+                        exp.x, exp.y, ringRadius * 0.5,
+                        exp.x, exp.y, ringRadius
+                    );
+                    gradient.addColorStop(0, `rgba(255, 255, 200, ${alpha})`);
+                    gradient.addColorStop(0.3, `rgba(255, 150, 0, ${alpha * 0.8})`);
+                    gradient.addColorStop(0.7, `rgba(255, 50, 0, ${alpha * 0.5})`);
+                    gradient.addColorStop(1, 'transparent');
+                    this.ctx.fillStyle = gradient;
+                    this.ctx.beginPath();
+                    this.ctx.arc(exp.x, exp.y, ringRadius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
             }
             
             // Sparks
             if (progress < 0.5 && this.showParticles) {
                 this.ctx.fillStyle = `rgba(255, 255, 0, ${1 - progress * 2})`;
-                for (let i = 0; i < 8; i++) {
+                const sparkCount = this.quality === 'low' ? 3 : 8;
+                for (let i = 0; i < sparkCount; i++) {
                     const angle = (Math.PI * 2 / 8) * i;
                     const dist = radius * 1.5 * progress;
                     const sparkX = exp.x + Math.cos(angle) * dist;
