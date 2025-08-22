@@ -1,10 +1,11 @@
-Session 46 Handoff — UI polish, Radio redesign, Audio defaults
+Session 46 Handoff — HUD polish, Radio redesign (radial), Audio defaults
 
 Scope
 - Tightened HUD spacing to keep elements visible on smaller windows.
 - Reworked center logo and key stats presentation to reduce elongation.
-- Major Radio UI iterations: compact/vertical, then compact rectangular with scan bar, and a new radial “frequency module”.
+- Radio UI: compact rectangular scan-bar version (backup) AND a new radial “frequency module” (default).
 - Audio: SFX muted by default; music (“frequencies”) decoupled and louder by default.
+- GitHub Pages fix: added missing modules so docs/ build runs online.
 
 Architecture Guardrails
 - Pure EventBus architecture maintained. No new global variables.
@@ -17,9 +18,9 @@ docs/index.html
 - HUD center: Two-line logo (GALAXY / TRADER). Removed the old “/// SYSTEM ONLINE” subtitle.
 - Key stats (credits/weapon/kills) moved under the logo; now a compact inline subline.
 - Radio markup:
-  - Removed volume slider (replaced with a scanner readout concept).
-  - Rectangular radio kept (readout + scan bar + buttons), then extended to a radial variant.
-  - Current default has `class="radio-radial"` and includes an extra `#radioDial` element.
+  - Removed volume slider (replaced with scanner readout).
+  - Rectangular radio kept (readout + scan bar + buttons), plus a radial variant.
+  - Current default has `class="radio-radial"` and includes a `#radioDial` element.
 
 docs/css/main.css
 - HUD spacing tightened:
@@ -32,8 +33,8 @@ docs/css/main.css
   - Reduced subline font size and spacing.
 - Radio UI:
   - Rectangular backup: readout (dot-matrix), thin animated scan bar, buttons in a single row.
-  - Radial mode (current): round dial (#radioDial) with subtle tick marks and a sweeping arc; digital readout centered; buttons positioned around the dial.
-  - Radial container made transparent to avoid a boxy look; dial/readout layered (z-index) to keep text visible.
+  - Radial mode (default): round dial (#radioDial) with subtle tick marks and a sweeping arc; digital readout centered; buttons positioned around the dial.
+  - Fixed the initial “pizza/wireframe” look: reduced tick density, removed rectangular background, layered text above dial.
 
 docs/js/systems/UISystem.js
 - Radio behavior:
@@ -41,7 +42,7 @@ docs/js/systems/UISystem.js
   - Added scanning animation (interval + timeout) to roll fake frequencies during SCANNING…; locks to a tuned readout.
   - Applies/removes `scanning`/`tuned` classes on `#shipRadio` to control radial sweep animation.
 - HUD defaults for context:
-  - Shield: OFFLINE when 0 (was “None”).
+  - Shield: EQUIP when 0 (was OFFLINE/None).
   - Weapon: UNARMED when none (was “NONE”).
   - Kills: NO KILLS until first kill (was “0”).
 
@@ -55,6 +56,12 @@ docs/js/systems/AudioSystem.js
   - Added `musicMaster = 0.9` and increased default music volume to 0.6.
   - Raised pad/lead gains to make music audibly present vs SFX.
 
+GitHub Pages
+- Added missing runtime modules to fix 404s and black screen in the online build:
+  - `docs/js/systems/DebugSystem.js`
+  - `docs/js/systems/FactionVisuals.js`
+  - `docs/js/systems/ShipDesigns.js`
+
 docs/js/main_eventbus_pure.js
 - Default audio state:
   - `enabled: false` (SFX muted at start), `musicVolume: 0.6`.
@@ -67,13 +74,14 @@ Testing Hints
 - Radio
   - Prev/Next triggers a short SCANNING… animation and then locks to a tuned fake frequency.
   - Play toggles ambient “frequencies” regardless of SFX mute.
+- Radial sweep animates during SCANNING; dims when tuned.
 - Audio
   - SFX start muted (label shows UNMUTE). Toggle with M.
   - Music volume defaults to 0.6 and uses a separate master (`musicMaster`).
 
 Potential Next Steps
 - Radio
-  - Toggle scan sweep only while scanning; dim/stop during playback (partial: classes are wired; visuals can be tuned further).
+  - Optional: refine radial sweep width/opacity; add discrete signal bars; shorten readout strings to avoid ellipsis at narrow widths.
   - Optional: small signal meter (3‑5 bars) inside the dial; increase on tuned.
 - HUD
   - Slightly expand radio width to 128–132px if “SCANNING…” ellipsizes; or shorten readout strings.
@@ -90,5 +98,7 @@ Notes for Future Agents
 - The radio UI is purely DOM/CSS and UI logic; audio generation remains in AudioSystem (Web Audio API).
 - The minimap is still square for consistency; expanding it can be done without touching systems.
 
-End of Session 46.
+Small polish applied at end of session
+- Shield status text changed to “EQUIP” when no shields are installed.
 
+End of Session 46.

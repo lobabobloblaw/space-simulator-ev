@@ -7,12 +7,12 @@ Copy and paste this entire prompt to start your next session:
 I'm working on Galaxy Trader, a 2D space trading/combat game built with a pure EventBus architecture. The project is at `/Users/alexvoigt/Documents/Claude/space-simulator-ev/`.
 
 ## Current Status
-The game is fully functional and deployed. In the last session (45) we:
-- Added reputation-based trade price modifiers; patrol hails and pirate taunts
-- Aligned Outfitter UI with Commodities Market (header + fixed credits, scrollable list)
-- Improved combat dynamics (spread + recoil bloom, longer projectile lifetimes, NPC arrive/strafe/damping/flee)
-- Added a robust Debug overlay (TAB) with quick actions (+9999cr, grant weapons, next weapon), damage numbers, and spread control
-- Fixed shop weapon install (proper stats) and weapon switching (no double-advance)
+The game is fully functional and deployed. In the last session (46) we:
+- Tightened HUD spacing to keep elements visible on smaller windows.
+- Switched the center logo to a two-line mark and made credits/weapon/kills a compact inline subline.
+- Redesigned the Radio: removed volume knob, added a scanner readout and a thin scan bar (rectangular backup), plus a new radial “frequency module” (default) with a subtle sweep.
+- Decoupled audio: SFX are muted by default (M toggles SFX only); music is louder by default and independent.
+- Fixed GitHub Pages black screen by adding missing runtime modules.
 
 ## Critical Information
 - **ACTIVE FILE:** `docs/js/main_eventbus_pure.js` (NOT `main.js`)
@@ -21,7 +21,7 @@ The game is fully functional and deployed. In the last session (45) we:
 
 ## Quick Orientation
 Read these first:
-1. `SESSION_45_HANDOFF.md` - Detailed last session info
+1. `SESSION_46_HANDOFF.md` - Detailed last session info
 2. `SESSION_40_QUICK_START.md` - Quick orientation
 3. `SESSION_SUMMARY.md` - Overall project status
 
@@ -37,7 +37,7 @@ Read these first:
 - Trading across 4 planets; shop/upgrades; mission system
 - Save/Load (F5/F9/F12); Respawn (R)
 - Planet images (Pollinations flux + Unsplash + Lexica fallback) with HQ flow
-- Ship Radio (prev/play/next + volume, procedural ambient tracks)
+- Ship Radio (prev/play/next; scanner readout; radial dial; procedural ambient tracks)
 
 ## My Preferences
 - Be concise and focus on relevant code only
@@ -46,11 +46,11 @@ Read these first:
 - Ask for permission rather than assuming limitations
 
 ## Potential Tasks (choose based on what I ask for)
-1. Lower UI polish (primary): tighten HUD bottom band; clarify credits/weapon/kills; separators
-2. Radio polish: add progress/scan bar and channel labels; baseline alignment
-3. Visual polish: faction decals on minimap and HUD target brackets
-4. Performance: pool/cull explosion particles and trails
-5. Combat tweaks: tracer variance; micro spread/cadence tuning
+1. Radio polish: refine radial sweep, add signal-strength bars, tune readout strings.
+2. Lower UI polish: adjust radio width/margins; micro-tune center stats spacing.
+3. Visual polish: faction decals on minimap and HUD target brackets.
+4. Performance: pool/cull explosion particles and trails.
+5. Combat tweaks: tracer variance; micro spread/cadence tuning.
 6. Or debug any issues I mention
 
 ## Testing Commands
