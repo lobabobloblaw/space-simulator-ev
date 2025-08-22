@@ -20,6 +20,7 @@ export default class DebugSystem {
         this.toggle = this.toggle.bind(this);
         this.handleKey = this.handleKey.bind(this);
         this.handleFPS = this.handleFPS.bind(this);
+        this.cycleQuality = this.cycleQuality.bind(this);
     }
 
     async init() {
@@ -106,8 +107,20 @@ export default class DebugSystem {
             this.spawnNPC('patrol');
         } else if (key === 'l' && data?.shiftKey) {
             this.forceLandingOverlay();
+        } else if (key === 'f3') {
+            this.cycleQuality();
         }
         this.renderOverlay();
+    }
+
+    cycleQuality() {
+        const dbg = this.stateManager.state.debug;
+        const order = ['high', 'medium', 'low'];
+        const current = (dbg.renderQuality && order.includes(dbg.renderQuality)) ? dbg.renderQuality : 'high';
+        const next = order[(order.indexOf(current) + 1) % order.length];
+        dbg.renderQuality = next;
+        this.eventBus.emit('render.quality', { quality: next });
+        this.eventBus.emit('ui.message', { message: `Render quality: ${next}`, type: 'info', duration: 1000 });
     }
 
     handleFPS(stats) {
@@ -166,6 +179,7 @@ export default class DebugSystem {
             <div>Weapon: ${wepStr}</div>
             <div>Rep: T${rep.trader||0} / PTRL${rep.patrol||0} / PIR${rep.pirate||0}</div>
             <div>Spread: x${(dbg.spreadMult??1).toFixed(1)} ( [ / ] )</div>
+            <div>Quality: ${dbg.renderQuality||'high'} (F3 to cycle)</div>
             <div style="margin-top:6px; color:#aaa;">1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo</div>
             <div style="color:#8ac;">[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj</div>
             <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
