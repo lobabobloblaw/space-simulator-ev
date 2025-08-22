@@ -50,7 +50,21 @@ python3 -m http.server 8000
 - Saves ship state, credits, weapons, cargo
 
 ## Recent Sessions
-### Session 43 (Latest)
+### Session 47 (Latest)
+- Radar progression added: `radarLevel` gates minimap detail (L0 featureless; L1 planets/NPC basics; L2+ faction colors + pirate ring). Range rings hidden at L0.
+- Targeting: press X to cycle nearest hostile; targeted hostiles get emphasized brackets and a small center dot.
+- Radio: enlarged radial dial; moved controls to a right-side dot cluster with glyphs.
+- Performance: pooled explosions/warp/hit-sparks/muzzle flashes; frustum culling; quality-aware rendering (F3 cycles high/medium/low).
+- Combat feel: per-weapon tracer tuning; slight rapid cadence jitter; shield-hit ring + cyan sparks.
+- Architecture: shop/trading UI now uses delegated handlers and EventBus (no globals). `radarLevel` persisted in saves.
+
+### Session 46
+- HUD spacing tightened for smaller windows; two-line logo with compact inline key stats.
+- Radio redesign: radial “frequency module” with scanning sweep; rectangular backup retained.
+- Audio decoupling: SFX muted by default (M toggles SFX only); louder music by default.
+- GitHub Pages black screen fixed by adding missing runtime modules.
+
+### Session 44–45
 - High-quality planet landscapes via Pollinations (model=flux, enhance optional), with deterministic seeds and tightened prompts (no animals/humans)
 - Provider flow with fallback (Unsplash, Pollinations, procedural) and robust timeouts; provider overlay now disabled by default
 - Fixed duplicate planet visual code causing forced low-res images; unified draw path

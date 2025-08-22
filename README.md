@@ -64,13 +64,17 @@ git push
 - Mission system
 - Cyberpunk UI with particle effects
 
-## Latest Updates (Session 44)
+## Latest Updates (Session 47)
 
-- Planet visuals: added signal-processing intro (scanlines + chromatic offset) and a pixelated “processing” band that fades into the final image; preserves HQ Pollinations/Unsplash/lexica logic without UI provider switches.
-- Ships: new procedural silhouettes via `ShipDesigns.js`, larger sprite-like rendering, unified NPC designs by type, and per-faction palettes/decals via `FactionVisuals.js`.
-- Factions + reputation: generic `civilian/trader/patrol/pirate/merc/miner` palettes; basic `state.reputation.{trader, patrol, pirate}` with events. Trader rep increases on buy/sell; patrol rep increases on pirate kills.
-- Respawn: press R after death to respawn near the nearest planet; small credit penalty applied; projectiles cleared.
-- Trading fixes: cannot sell goods at planets that don’t buy them (“No buyers” shown). Cargo display hardened to avoid NaN.
-- Ship Radio: compact in-HUD music widget (prev/play/next + volume). Procedural ambient tracks; volume persists across tracks and sessions; muted by M.
+- Radar progression: `radarLevel` gates minimap detail.
+  - L0: featureless white specks; range rings hidden.
+  - L1: planets as dots; NPCs as white squares; rings shown.
+  - L2+: faction-colored NPC dots; pirates outlined.
+- Targeting: press X to cycle nearest hostile (pirate). Targeted hostiles get thicker, gently pulsing brackets and a small center dot.
+- Radio UI: enlarged radial dial; right-side dot buttons with tiny glyphs; tuned spacing.
+- Performance: pooled explosions/warp/hit-sparks/muzzle flashes; frustum culling; quality-aware explosions/pickups/trails.
+- Combat feel: per-weapon tracer tuning; slight rapid cadence jitter; shield-hit ring + cyan sparks.
+- Debug: press F3 to cycle render quality (high/medium/low).
+- Architecture: Shop/Trading UI uses delegated handlers and EventBus; no window globals. `radarLevel` persisted.
 
 Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
