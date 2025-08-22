@@ -50,7 +50,12 @@ python3 -m http.server 8000
 - Saves ship state, credits, weapons, cargo
 
 ## Recent Sessions
-### Session 47 (Latest)
+### Session 48 (Latest)
+- Targeting/Viewport: Unified X targeting cycles all ships; Shift+X clears. New target cam viewport shows live-rotating silhouette and a direction wedge; persistent ring/wedge during switching with a brief silhouette gap + fade-in and selection blip. Auto-clears on NPC death.
+- Radio: Local tracker modules via chiptune-3 (with CDN + synth fallbacks). Playlist wired to `/music` CC0 modules; all tracks enabled. Added 660ms tuning static between tracks. Removed signal bars and click rings; refined molded dial/backplate; fixed concentric ring alignment and button bar spacing.
+- Stability: Fixed UI music-state handler binding; added null guards in viewport.
+
+### Session 47
 - Radar progression added: `radarLevel` gates minimap detail (L0 featureless; L1 planets/NPC basics; L2+ faction colors + pirate ring). Range rings hidden at L0.
 - Targeting: press X to cycle nearest hostile; targeted hostiles get emphasized brackets and a small center dot.
 - Radio: enlarged radial dial; moved controls to a right-side dot cluster with glyphs.

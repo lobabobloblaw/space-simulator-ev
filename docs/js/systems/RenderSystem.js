@@ -31,6 +31,22 @@ export class RenderSystem {
         this.minimapCanvas = document.getElementById('minimapCanvas');
         this.minimapCtx = this.minimapCanvas ? this.minimapCanvas.getContext('2d') : null;
         this.minimapScale = 0.018;
+
+        // Target cam viewport (center viewport next to controls)
+        this.targetCanvas = document.getElementById('centerViewportCanvas');
+        this.targetCtx = this.targetCanvas ? this.targetCanvas.getContext('2d') : null;
+        // Static overlay buffer for target cam
+        this.staticNoise = {
+            canvas: (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 64; return c; })(),
+            ctx: null,
+            lastTime: 0,
+            phase: 0
+        };
+        this.staticNoise.ctx = this.staticNoise.canvas.getContext('2d');
+        // Target cam blip effect state
+        this.targetCamBlip = null;
+        // Target cam transition (adds a small visual gap & fade-in)
+        this.targetCamTransition = null; // { fromId, toId, start, duration, hold }
         
         // Initialize procedural planet renderer
         this.planetRenderer = new ProceduralPlanetRenderer();
@@ -176,6 +192,23 @@ export class RenderSystem {
 
         // Shield hit visual ping
         this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit);
+
+        // Target set/clear: trigger a brief blip and start transition
+        this.eventBus.on(GameEvents.TARGET_SET, () => {
+            const now = performance.now();
+            this.targetCamBlip = { start: now, duration: 320 };
+            const state = this.stateManager.state;
+            const toId = (state.targeting && state.targeting.selectedId) || null;
+            const fromId = this._lastSilhouetteId || null;
+            this.targetCamTransition = {
+                fromId,
+                toId,
+                start: now,
+                duration: 320,
+                hold: 140
+            };
+        });
+        this.eventBus.on(GameEvents.TARGET_CLEAR, () => { this.targetCamBlip = null; });
     }
     
     // Stars are now generated in main_eventbus_pure.js and stored in state
@@ -238,11 +271,224 @@ export class RenderSystem {
         
         // Render UI elements (not affected by camera)
         this.renderMinimap(state);
+        this.renderTargetCam(state);
         
         // Render touch controls if needed
         if (window.touchControls) {
             window.touchControls.render();
         }
+    }
+
+    /**
+     * Render target camera viewport showing silhouette of targeted ship
+     */
+    renderTargetCam(state) {
+        if (!this.targetCtx || !this.targetCanvas) return;
+        const w = this.targetCanvas.width || 100;
+        const h = this.targetCanvas.height || 100;
+        this.targetCtx.clearRect(0, 0, w, h);
+
+        let targetId = (state.targeting && state.targeting.selectedId) || null;
+        // Transition: enforce brief gap + fade-in for new selection
+        let silhouetteAlpha = 1.0;
+        let silhouetteScale = 1.0;
+        let drawSilhouette = true;
+        if (this.targetCamTransition) {
+            const now = performance.now();
+            const t = (now - this.targetCamTransition.start) / this.targetCamTransition.duration;
+            if (t >= 1) {
+                this._lastSilhouetteId = this.targetCamTransition.toId || targetId || null;
+                this.targetCamTransition = null;
+            } else {
+                // Always aim wedge at the incoming target during transition
+                targetId = this.targetCamTransition.toId || targetId;
+                if (t * this.targetCamTransition.duration < this.targetCamTransition.hold) {
+                    // Hold: keep ring/wedge but delay silhouette
+                    drawSilhouette = false;
+                } else {
+                    // Fade-in and slight overshoot scale for punch
+                    const fadeT = (now - (this.targetCamTransition.start + this.targetCamTransition.hold)) /
+                                  (this.targetCamTransition.duration - this.targetCamTransition.hold);
+                    silhouetteAlpha = Math.max(0, Math.min(1, fadeT));
+                    silhouetteScale = 1.05 - 0.05 * silhouetteAlpha; // 1.05 -> 1.00
+                }
+            }
+        }
+        // Fetch npc for wedge/silhouette if we have a target id
+        const npc = targetId ? (state.npcShips || []).find(n => n && n.id === targetId) : null;
+
+        // Static overlay behind + over content for a realistic feed
+        this.drawStaticNoise(w, h, 0.10);
+        this.drawScanlines(w, h, 0.08);
+
+        // Center the drawing
+        const ctx = this.targetCtx;
+        ctx.save();
+        const cx = w / 2, cy = h / 2;
+        ctx.translate(cx, cy);
+
+        // Direction indicator around perimeter
+        let ang = 0;
+        if (npc) {
+            const dx = npc.x - state.ship.x;
+            const dy = npc.y - state.ship.y;
+            ang = Math.atan2(dy, dx);
+        }
+        const radius = Math.min(w, h) * 0.5 - 4;
+
+        // Outer faint ring
+        ctx.save();
+        // Ring flash on transition start for extra punch
+        let ringAlpha = 0.25;
+        if (this.targetCamTransition) {
+            const now = performance.now();
+            const t = (now - this.targetCamTransition.start) / this.targetCamTransition.duration;
+            if (t < 0.25) ringAlpha = 0.6 - t * 1.2; // brief bright flash decaying
+        }
+        ctx.globalAlpha = Math.max(0.15, ringAlpha);
+        ctx.strokeStyle = '#aef';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        // Marker wedge pointing to target direction (only if target exists)
+        if (npc) {
+            ctx.save();
+            ctx.rotate(ang);
+            ctx.fillStyle = '#cff';
+            const mr = radius;
+            ctx.beginPath();
+            ctx.moveTo(mr, 0);
+            ctx.lineTo(mr - 8, -4);
+            ctx.lineTo(mr - 8, 4);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Blip: expanding ring from center on target change
+        if (this.targetCamBlip) {
+            const now = performance.now();
+            const t = (now - this.targetCamBlip.start) / this.targetCamBlip.duration;
+            if (t >= 1) {
+                this.targetCamBlip = null;
+            } else {
+                const r = (0.2 + 0.8 * t) * radius;
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, 1 - t) * 0.6;
+                ctx.strokeStyle = '#cff';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // Draw live silhouette rotated with NPC angle (if allowed by transition)
+        if (npc && drawSilhouette) {
+            ctx.save();
+            let base = Math.max(16, Math.min(28, (npc.size || 10) * 1.6));
+            base *= silhouetteScale;
+            const palette = { hullA: '#e8f6ff', hullB: '#e8f6ff', stroke: '#e8f6ff', cockpit: 'rgba(255,255,255,0.55)' };
+            try {
+                const design = (npc.type === 'pirate') ? 'raider' :
+                               (npc.type === 'patrol') ? 'wing' :
+                               (npc.type === 'freighter') ? 'hauler' :
+                               (npc.type === 'trader') ? 'oval' :
+                               (npc.type === 'interceptor') ? 'dart' : 'delta';
+                ctx.rotate(npc.angle || 0);
+                ctx.globalAlpha = silhouetteAlpha;
+                ShipDesigns.draw(ctx, design, base, palette);
+            } catch (e) {
+                ctx.fillStyle = '#e8f6ff';
+                ctx.globalAlpha = silhouetteAlpha;
+                ctx.beginPath();
+                ctx.moveTo(base, 0);
+                ctx.lineTo(-base * 0.6, -base * 0.5);
+                ctx.lineTo(-base * 0.6, base * 0.5);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        // Overlay a light static pass above content
+        this.drawStaticNoise(w, h, 0.06, true);
+        // Occasional rolling band
+        this.drawRollingBand(w, h, 0.08);
+
+        ctx.restore();
+    }
+
+    /**
+     * Generate and draw subtle static noise
+     * intensity: 0..1, if overlay is true draw above content with lower alpha
+     */
+    drawStaticNoise(w, h, intensity = 0.1, overlay = false) {
+        const now = Date.now();
+        const sn = this.staticNoise;
+        if (now - sn.lastTime > 80) { // ~12.5 Hz update
+            const nctx = sn.ctx;
+            const img = nctx.createImageData(sn.canvas.width, sn.canvas.height);
+            for (let i = 0; i < img.data.length; i += 4) {
+                const v = Math.random() * 255;
+                img.data[i] = v;     // r
+                img.data[i+1] = v;   // g
+                img.data[i+2] = v;   // b
+                img.data[i+3] = 255; // a
+            }
+            nctx.putImageData(img, 0, 0);
+            sn.lastTime = now;
+            sn.phase = (sn.phase + 1) % 1000;
+        }
+        const ctx = this.targetCtx;
+        ctx.save();
+        // Draw in viewport coordinates regardless of prior transforms
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = Math.max(0, Math.min(0.4, intensity));
+        // Slight jitter to avoid a fixed pattern feel
+        const jx = (Math.random() - 0.5) * 2;
+        const jy = (Math.random() - 0.5) * 2;
+        ctx.imageSmoothingEnabled = false;
+        ctx.translate(jx, jy);
+        ctx.drawImage(this.staticNoise.canvas, 0, 0, w, h);
+        ctx.restore();
+    }
+
+    /**
+     * Thin horizontal scanlines overlay
+     */
+    drawScanlines(w, h, alpha = 0.06) {
+        const ctx = this.targetCtx;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#000';
+        for (let y = 0; y < h; y += 2) {
+            ctx.fillRect(0, y, w, 1);
+        }
+        ctx.restore();
+    }
+
+    /**
+     * Soft rolling band to mimic signal fluctuation
+     */
+    drawRollingBand(w, h, alpha = 0.06) {
+        const ctx = this.targetCtx;
+        const t = Date.now() * 0.0015;
+        const bandY = (h * 0.5) + Math.sin(t) * (h * 0.5);
+        const grad = ctx.createLinearGradient(0, bandY - 8, 0, bandY + 8);
+        grad.addColorStop(0, 'rgba(200,255,255,0)');
+        grad.addColorStop(0.5, `rgba(200,255,255,${alpha})`);
+        grad.addColorStop(1, 'rgba(200,255,255,0)');
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, Math.max(0, bandY - 8), w, 16);
+        ctx.restore();
     }
 
     /**
@@ -1460,9 +1706,8 @@ export class RenderSystem {
         const centerY = 50;
         const maxRadius = 45;
         
-        // Clear with dark background
-        this.minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-        this.minimapCtx.fillRect(0, 0, 100, 100);
+        // Clear to transparent so CSS background shows through
+        this.minimapCtx.clearRect(0, 0, 100, 100);
         
         // Range circles gated by radar level (featureless at level 0)
         const radarLevel = state.ship?.radarLevel || 0;
@@ -1589,6 +1834,7 @@ export class RenderSystem {
         if (this.eventBus && this.handleShieldHit) {
             this.eventBus.off(GameEvents.SHIELD_HIT, this.handleShieldHit);
         }
+        // No persistent listeners kept for TARGET_SET/CLEAR here as system lifetime == app
         console.log('[RenderSystem] Destroyed');
     }
 }

@@ -115,13 +115,29 @@ export class InputSystem {
      */
     handleKeyDown(e) {
         const key = e.key.toLowerCase();
-        
+
+        // Special-case targeting BEFORE repeat guard: process once per physical press
+        if (key === 'x') {
+            if (e.repeat) return; // avoid auto-repeat cycling
+            if (e.shiftKey) {
+                this.eventBus.emit(GameEvents.TARGET_CLEAR);
+            } else {
+                this.eventBus.emit(GameEvents.TARGET_NEXT);
+            }
+            // Track pressed state for consistency
+            this.keys.add(key);
+            this.eventBus.emit(GameEvents.INPUT_KEY_DOWN, { key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
+            return;
+        }
+
         // Ignore if already pressed (key repeat)
         if (this.keys.has(key)) return;
         
         // Add to pressed keys
         this.keys.add(key);
-        
+
+        // Removed separate cam cycling; X handles unified targeting
+
         // Get mapped action
         const action = this.keyMap[key];
         
@@ -147,9 +163,7 @@ export class InputSystem {
                 case 'switchWeapon':
                     this.eventBus.emit(GameEvents.INPUT_SWITCH_WEAPON);
                     break;
-                case 'targetNext':
-                    this.eventBus.emit(GameEvents.TARGET_NEXT);
-                    break;
+                // 'x' handled above (includes Shift+X clear)
                 case 'land':
                     this.eventBus.emit(GameEvents.INPUT_LAND);
                     break;

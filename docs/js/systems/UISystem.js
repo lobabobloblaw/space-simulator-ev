@@ -26,6 +26,8 @@ export class UISystem {
         this.handleUIMessage = this.handleUIMessage.bind(this);
         this.handleTutorialUpdate = this.handleTutorialUpdate.bind(this);
         this.handleAudioStateChanged = this.handleAudioStateChanged.bind(this);
+        // Bind music state handler to keep "this" context when called via EventBus
+        this.handleMusicState = this.handleMusicState.bind(this);
         
         console.log('[UISystem] Created');
 
@@ -116,7 +118,7 @@ export class UISystem {
         // Make sure HUD elements exist
         const hudElements = [
             'health', 'shield', 'fuel', 'speed', 
-            'cargo', 'location', 'credits', 'weapon', 'kills'
+            'cargo', 'location', 'credits', 'weapon'
         ];
         
         for (let id of hudElements) {
@@ -274,6 +276,8 @@ export class UISystem {
             play.textContent = data.playing ? '⏸' : '▶';
         }
     }
+
+    // signal bars removed per design preference
     
     /**
      * Update HUD elements
@@ -299,7 +303,7 @@ export class UISystem {
         updateElement('credits', ship.credits || 0);
         updateElement('weapon', ship.weapons && ship.weapons.length > 0 ? 
             ship.weapons[ship.currentWeapon].type.toUpperCase() : 'UNARMED');
-        updateElement('kills', (ship.kills && ship.kills > 0) ? ship.kills : 'NO KILLS');
+        // Kills and target readouts removed from HUD by design
     }
     
     /**

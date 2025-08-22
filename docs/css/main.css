@@ -115,7 +115,7 @@ body {
     padding: 0; /* radial uses absolute children */
     grid-template-columns: none;
     grid-auto-rows: initial;
-    background: transparent !important; /* remove box */
+    background: transparent !important; /* backplate handled via pseudo-elements */
     border: none !important;
     overflow: visible; /* allow the dial to exceed HUD bounds */
     /* layout variables for precise alignment */
@@ -135,6 +135,38 @@ body {
 /* Hide linear viz in radial mode */
 #shipRadio.radio-radial #radioViz { display: none; }
 
+/* Molded backplate around the dial and button column */
+#shipRadio.radio-radial::before,
+#shipRadio.radio-radial::after {
+    content: '';
+    position: absolute;
+    z-index: 0; /* behind dial/title/buttons */
+    background: var(--bg-dark);
+    border: 1px solid var(--accent-border);
+    box-shadow: 0 0 18px rgba(0,0,0,0.6), 0 0 12px var(--accent-subtle) inset;
+    pointer-events: none; /* never block button clicks */
+}
+/* Circular backplate for dial */
+#shipRadio.radio-radial::before {
+    /* Center the circular backplate precisely on the dial center to keep rings concentric */
+    top: calc(var(--dial-offset) + (var(--dial-size) / 2));
+    left: calc(var(--dial-offset) + (var(--dial-size) / 2));
+    transform: translate(-50%, -50%);
+    width: calc(var(--dial-size) + 16px);
+    height: calc(var(--dial-size) + 16px);
+    border-radius: 50%;
+}
+/* Rounded-rect backplate for the right-side button column */
+#shipRadio.radio-radial::after {
+    /* Tighten to hug the three buttons with even padding and move slightly under dial edge */
+    top: calc(var(--dial-center) - (var(--btn-h) * 1.5) - 4px);
+    left: calc(var(--dial-offset) + var(--dial-size) - 2px); /* slight overlap */
+    width: calc(var(--btn-w) + 4px); /* narrower bar for symmetric padding */
+    height: calc(var(--btn-h) * 3 + 8px);
+    border-radius: 8px;
+    z-index: 2; /* ensure bar sits above dial ring at overlap */
+}
+
 /* Radial dial visuals */
 #radioDial {
     position: absolute;
@@ -142,6 +174,7 @@ body {
     width: var(--dial-size); height: var(--dial-size); /* fixed dial, leaves room for side buttons */
     border-radius: 50%;
     border: 1px solid var(--accent-border);
+    background-color: var(--bg-black); /* ensure opaque interior */
     background:
         radial-gradient(circle at 50% 50%, rgba(0,255,255,0.06) 0 38%, transparent 39%),
         repeating-conic-gradient(
@@ -151,6 +184,7 @@ body {
         radial-gradient(circle, rgba(0,0,0,0.6) 62%, rgba(0,0,0,0.2) 84%, rgba(0,0,0,0.0) 100%);
     box-shadow: inset 0 0 10px rgba(0,255,255,0.08), 0 0 10px rgba(0,255,255,0.04);
     overflow: hidden;
+    z-index: 1;
 }
 
 #shipRadio.radio-radial.scanning #radioDial::after,
@@ -192,7 +226,7 @@ body {
     background: transparent;
     text-align: center;
     padding: 0;
-    z-index: 2; /* above dial */
+    z-index: 3; /* above dial */
     text-shadow: 0 0 6px rgba(0,255,255,0.18);
 }
 
@@ -201,7 +235,8 @@ body {
 #shipRadio.radio-radial #radioPlay,
 #shipRadio.radio-radial #radioNext {
     position: absolute;
-    left: calc(var(--dial-offset) + var(--dial-size) + 6px); /* tuck next to dial rim */
+    /* Keep buttons centered within the tightened backplate */
+    left: calc(var(--dial-offset) + var(--dial-size) + 0px);
     right: auto;
     width: var(--btn-w); height: var(--btn-h);
     border-radius: 50%;
@@ -210,7 +245,14 @@ body {
     border: none;
     color: transparent; /* hide glyphs */
     font-size: 0; line-height: 0; /* ensure no visible text */
+    z-index: 4; /* above bar backplate and dial */
 }
+
+/* Remove focus rings/ink for radio buttons */
+#shipRadio button,
+#shipRadio.radio-radial button { outline: none; -webkit-tap-highlight-color: transparent; }
+#shipRadio button:focus,
+#shipRadio.radio-radial button:focus { outline: none; }
 
 /* Visual dot inside each button, keeps large hit area */
 #shipRadio.radio-radial #radioPrev::before,
@@ -236,7 +278,7 @@ body {
 #shipRadio.radio-radial #radioPrev:active::before,
 #shipRadio.radio-radial #radioPlay:active::before,
 #shipRadio.radio-radial #radioNext:active::before {
-    transform: scale(0.92);
+    transform: none; /* no click ring/scale */
 }
 
 /* Tiny glyphs centered within dots */
@@ -334,6 +376,7 @@ body {
 
 /* Radio keeps vertical layout across sizes; no collapse */
 
+
 /* Left Panel - Ship Status */
 .hud-left {
     height: 100%;  /* Full height */
@@ -352,7 +395,7 @@ body {
 
 .status-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-rows: repeat(2, 1fr);
     gap: 4px 6px;  /* Tighter horizontal gap */
     width: calc(100% - 8px);
@@ -476,41 +519,10 @@ body {
 /* removed subtitle element in HTML */
 
 /* Compact stats line inside the logo block */
-#logo-container .key-stats {
-    display: flex;
-    justify-content: center;
-    align-items: baseline;
-    gap: 6px;
-    padding: 0;
-    margin-top: 2px;
-}
-
-#logo-container .key-stat { padding: 0; }
-#logo-container .key-stat .status-label { display: none; }
-#logo-container .key-stat .status-value { font-size: 10px; }
-
-/* Divider dots between stats */
-#logo-container .key-stat + .key-stat::before {
-    content: '•';
-    color: var(--text-dim);
-    margin-right: 4px;
-}
-
-/* Prefix credits with § symbol */
-#logo-container .credits-value::before {
-    content: '§';
-    color: var(--accent-primary);
-    margin-right: 2px;
-}
+/* Removed compact key-stats under logo; credits/weapon moved left */
 
 /* Key Stats Bar */
-.key-stats {
-    display: flex;
-    gap: var(--spacing-lg);
-    padding: 6px var(--spacing-md);
-    margin-top: auto;
-    margin-bottom: 4px;
-}
+/* removed global key-stats row */
 
 .key-stat {
     display: flex;
@@ -552,8 +564,8 @@ body {
     margin: var(--spacing-xs) 0;
 }
 
-/* Minimap sizing stays compact */
-#minimap { width: 80px; height: 80px; }
+/* Viewport + Minimap sizing stay compact */
+#centerViewport, #minimap { width: 80px; height: 80px; }
 
 /* Controls Panel */
 .controls-panel {
@@ -585,8 +597,8 @@ body {
     white-space: nowrap;
 }
 
-/* Minimap - Cyberpunk Radar */
-#minimap {
+/* Minimap/Viewport - Cyberpunk Radar */
+#centerViewport, #minimap {
     width: 80px;
     height: 80px;
     background: radial-gradient(circle,
@@ -598,7 +610,7 @@ body {
     overflow: hidden;
 }
 
-#minimap::before {
+#centerViewport::before, #minimap::before {
     content: '';
     position: absolute;
     top: 50%;
@@ -610,7 +622,7 @@ body {
     opacity: 0.3;
 }
 
-#minimap::after {
+#centerViewport::after, #minimap::after {
     content: '';
     position: absolute;
     top: 50%;
@@ -622,12 +634,14 @@ body {
     opacity: 0.3;
 }
 
-#minimapCanvas {
+#minimapCanvas, #centerViewportCanvas {
     width: 100%;
     height: 100%;
     position: relative;
     z-index: 1;
 }
+
+/* Center viewport is styled same as minimap; no special centering */
 
 /* Landing Overlay - Cyberpunk Terminal */
 #landingOverlay {
@@ -1112,7 +1126,7 @@ body {
     .controls { font-size: 8px; gap: 1px var(--spacing-xs); }
     .control-key { font-size: 8px; }
     .control-action { font-size: 7px; }
-    #minimap { width: 70px; height: 70px; }
+    #centerViewport, #minimap { width: 70px; height: 70px; }
 }
 
 @media (max-width: 768px) {
@@ -1152,10 +1166,7 @@ body {
         gap: var(--spacing-sm);
     }
     
-    #minimap {
-        width: 60px;
-        height: 60px;
-    }
+    #centerViewport, #minimap { width: 60px; height: 60px; }
 }
 
 /* Game notifications - unified style */

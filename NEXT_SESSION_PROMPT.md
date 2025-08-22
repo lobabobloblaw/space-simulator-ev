@@ -7,13 +7,10 @@ Copy and paste this entire prompt to start your next session:
 I'm working on Galaxy Trader, a 2D space trading/combat game built with a pure EventBus architecture. The project is at `/Users/alexvoigt/Documents/Claude/space-simulator-ev/`.
 
 ## Current Status
-The game is fully functional and deployed. In the last session (47) we:
-- Added radar progression (radarLevel) with shop upgrades (MK I/II); minimap detail gated by level; range rings hidden at L0.
-- Implemented minimal targeting: press X to cycle nearest hostile (pirate); targeted hostiles show emphasized brackets and a center dot.
-- Enlarged the radio radial UI; moved controls to a right-side dot cluster with tiny glyphs; tuned spacing.
-- Performance: pooled explosions/warp/hit-sparks/muzzle flashes; frustum culling; quality-aware rendering; F3 cycles quality.
-- Combat/FX: per-weapon tracer tuning; slight rapid cadence jitter; shield-hit ring + cyan sparks.
-- Architecture: Shop/Trading UI now uses delegated handlers + EventBus (no globals).
+The game is fully functional and deployed. In the last session (48) we:
+- Targeting/Viewport: unified X targeting cycles all ships (Shift+X clears); added a center viewport showing live-rotating silhouette + direction wedge; persistent ring/wedge during switching with a brief silhouette gap + fade-in and a selection blip.
+- Radio: integrated tracker playback via local chiptune-3 (CDN/synth fallback); enabled all `/music` CC0 modules; added 660ms tuning static between tracks; removed signal bars and click rings; molded dial backplate, concentric ring alignment, and tightened button bar.
+- Stability: fixed UI music-state handler binding; added null-guard fixes in viewport.
 
 ## Critical Information
 - **ACTIVE FILE:** `docs/js/main_eventbus_pure.js` (NOT `main.js`)
@@ -39,8 +36,8 @@ Read these first:
 - Trading across 4 planets; shop/upgrades; mission system
 - Save/Load (F5/F9/F12); Respawn (R)
 - Planet images (Pollinations flux + Unsplash + Lexica fallback) with HQ flow
-- Ship Radio (prev/play/next; scanner readout; radial dial; procedural ambient tracks)
-- Targeting (X cycles nearest hostile); Radar levels gate minimap detail
+- Ship Radio (prev/play/next; molded radial dial; tracker modules or synth fallback; tuning static)
+- Targeting (X cycles ships; viewport silhouette + wedge; Radar levels gate minimap detail)
 - Debug: F3 cycles render quality (high/medium/low)
 
 ## My Preferences
@@ -50,10 +47,10 @@ Read these first:
 - Ask for permission rather than assuming limitations
 
 ## Potential Tasks (choose based on what I ask for)
-1. Targeting polish: add HUD “TARGET” label + distance; optional clear-target (Shift+X).
+1. Targeting polish: optional hostiles-only cycle via modifier; viewport distance ring/grid; timing tweaks.
 2. Radar MK III: ship-type icons or directional pings; minimap LOD by distance.
-3. Radio polish: subtle sweep refinement; add signal-strength bars; tune readout strings.
-4. UI polish: final radio margins; micro-tune center stats spacing.
+3. Radio polish: crossfade between tracks; alternate tuning burst; optional local vendor for chiptune2.
+4. UI polish: final radio margins; micro-tune center stats spacing; optional viewport styling.
 5. Performance: cache gradients for medium/high; distance-based explosion LOD.
 6. Combat tweaks: recoil ceiling; muzzle glow variance; aim tuning by range.
 7. Or debug any issues I mention

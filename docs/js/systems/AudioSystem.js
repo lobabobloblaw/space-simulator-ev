@@ -25,6 +25,11 @@ export class AudioSystem {
             trackNames: ['Drift', 'Pulse', 'Nebula'],
             interval: null,
             nodes: [],
+            mode: 'synth', // legacy hint; actual playback determined per track
+            playlist: [],
+            audio: null,
+            tracker: { player: null, playing: false },
+            forceSynth: false,
         };
         
         // Bind event handlers
@@ -73,6 +78,9 @@ export class AudioSystem {
             if (typeof audioState.musicVolume === 'number') {
                 this.music.volume = Math.max(0, Math.min(1, audioState.musicVolume));
             }
+            // Try to load external playlist (optional)
+            this.tryLoadPlaylist();
+
             // Emit initial UI state for radio
             this.emitMusicState();
             
@@ -80,6 +88,23 @@ export class AudioSystem {
         } catch (e) {
             console.log('[AudioSystem] Web Audio API not supported:', e);
             this.enabled = false;
+        }
+    }
+
+    async tryLoadPlaylist() {
+        try {
+            const mod = await import('../data/radioPlaylist.js');
+            const list = (mod && mod.radioPlaylist) || [];
+            if (Array.isArray(list) && list.length > 0) {
+                this.music.playlist = list.slice();
+                this.music.trackNames = list.map(t => t.name || 'Track');
+                console.log('[AudioSystem] Radio playlist loaded:', this.music.trackNames);
+                this.emitMusicState();
+            } else {
+                console.log('[AudioSystem] No external radio playlist; using synth.');
+            }
+        } catch (e) {
+            console.log('[AudioSystem] Playlist module not found; using synth radio');
         }
     }
     
@@ -409,9 +434,14 @@ export class AudioSystem {
 
     // ===== Music/Radio =====
     emitMusicState() {
+        const playing = this.music.enabled && (
+            !!this.music.interval ||
+            !!(this.music.audio && !this.music.audio.paused) ||
+            !!(this.music.tracker && this.music.tracker.playing)
+        );
         this.eventBus.emit(GameEvents.AUDIO_MUSIC_STATE, {
-            playing: this.music.enabled && !!this.music.interval,
-            track: this.music.trackNames[this.music.trackIndex],
+            playing,
+            track: this.music.trackNames[this.music.trackIndex] || 'RADIO',
             volume: this.music.volume
         });
     }
@@ -422,6 +452,12 @@ export class AudioSystem {
         const audioState = this.stateManager.state.audio || {};
         audioState.musicVolume = this.music.volume;
         this.stateManager.state.audio = audioState;
+        if (this.music.audio) {
+            try { this.music.audio.volume = this.music.volume * this.musicMaster; } catch(_) {}
+        }
+        if (this.music.tracker && this.music.tracker.player && this.music.tracker.player.setVolume) {
+            try { this.music.tracker.player.setVolume(this.music.volume * this.musicMaster); } catch(_) {}
+        }
         if (this.music.nodes) {
             for (const n of this.music.nodes) {
                 if (n && n.gain) n.gain.gain.setValueAtTime(this.music.volume * this.musicMaster, this.context.currentTime);
@@ -430,11 +466,151 @@ export class AudioSystem {
         this.emitMusicState();
     }
 
+    // Short tuning noise between tracks
+    playRadioTuningCue(durationMs = 200) {
+        try {
+            if (!this.context) return;
+            const ctx = this.context;
+            const length = Math.max(1, Math.floor(ctx.sampleRate * (durationMs / 1000)));
+            const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < length; i++) {
+                // white noise with slight tilt
+                data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+            }
+            const src = ctx.createBufferSource();
+            src.buffer = buffer;
+            const bp = ctx.createBiquadFilter();
+            bp.type = 'bandpass';
+            bp.frequency.value = 1400;
+            bp.Q.value = 0.7;
+            const gn = ctx.createGain();
+            gn.gain.setValueAtTime(0.0, ctx.currentTime);
+            gn.gain.linearRampToValueAtTime(0.18 * this.music.volume * this.musicMaster, ctx.currentTime + 0.02);
+            gn.gain.linearRampToValueAtTime(0.0, ctx.currentTime + durationMs / 1000);
+            src.connect(bp); bp.connect(gn); gn.connect(ctx.destination);
+            src.start();
+            src.stop(ctx.currentTime + durationMs / 1000);
+        } catch (_) {}
+    }
+
+    playStream(itemParam = null) {
+        try {
+            const list = this.music.playlist;
+            const item = itemParam || ((list && list.length) ? list[(this.music.trackIndex % list.length + list.length) % list.length] : null);
+            if (!item) { this.playMusic(); return; }
+            if (this.music.audio) { try { this.music.audio.pause(); } catch(_) {} }
+            const audio = new Audio(item.url);
+            audio.crossOrigin = 'anonymous';
+            audio.loop = true;
+            audio.volume = this.music.volume * this.musicMaster;
+            audio.addEventListener('canplay', () => {
+                try { audio.play(); } catch(_) {}
+            });
+            this.music.audio = audio;
+            this.emitMusicState();
+        } catch (e) {
+            console.warn('[AudioSystem] Stream failed, falling back to synth', e);
+            this.playMusic();
+        }
+    }
+
+    async ensureChiptune() {
+        if (window.ChiptuneJsPlayer) return true;
+
+        const tryLoadScript = (src, wasmBase = null) => new Promise((resolve) => {
+            try {
+                if (wasmBase) {
+                    // Hint to Emscripten where to fetch the wasm from
+                    window.Module = { locateFile: (path) => `${wasmBase}/${path}` };
+                }
+                const s = document.createElement('script');
+                s.src = src;
+                s.async = true;
+                s.onload = () => resolve(!!window.ChiptuneJsPlayer);
+                s.onerror = () => resolve(false);
+                document.head.appendChild(s);
+            } catch (_) { resolve(false); }
+        });
+        const tryImportModule = async (src) => {
+            try {
+                const mod = await import(src);
+                const Player = mod?.ChiptuneJsPlayer || mod?.default?.ChiptuneJsPlayer || mod?.default;
+                if (Player) {
+                    window.ChiptuneJsPlayer = Player;
+                    return true;
+                }
+            } catch (_) {}
+            return false;
+        };
+
+        // Try a series of sources: local vendor, then multiple CDNs (chiptune2 then chiptune3)
+        // 1) Local ESM chiptune3 via dynamic import (absolute from site root)
+        if (await tryImportModule('/chiptune-3/chiptune3.min.js')) return true;
+        if (await tryImportModule('/chiptune-3/chiptune3.js')) return true;
+        // 2) Local vendor UMD chiptune2/chiptune3 via script tag
+        if (await tryLoadScript('./js/vendor/chiptune2.js', './js/vendor')) return true;
+        if (await tryLoadScript('./js/vendor/chiptune3.js', './js/vendor')) return true;
+        // 3) CDN fallbacks
+        if (await tryLoadScript('https://cdn.jsdelivr.net/npm/chiptune2@2.4.1/dist/chiptune2.js', 'https://cdn.jsdelivr.net/npm/chiptune2@2.4.1/dist')) return true;
+        if (await tryLoadScript('https://unpkg.com/chiptune2@2.4.1/dist/chiptune2.js', 'https://unpkg.com/chiptune2@2.4.1/dist')) return true;
+        if (await tryImportModule('https://cdn.jsdelivr.net/gh/DrSnuggles/chiptune/dist/chiptune.min.js')) return true;
+        if (await tryImportModule('https://unpkg.com/chiptune@latest/dist/chiptune.min.js')) return true;
+        return false;
+    }
+
+    async playTracker(item) {
+        try {
+            const ok = await this.ensureChiptune();
+            if (!ok || !window.ChiptuneJsPlayer) {
+                console.warn('[AudioSystem] Tracker lib unavailable; falling back to synth');
+                this.music.forceSynth = true;
+                return this.playMusic();
+            }
+            const t = this.music.tracker || (this.music.tracker = { player: null, playing: false });
+            if (!t.player) {
+                t.player = new window.ChiptuneJsPlayer({ repeatCount: 0 });
+                try { t.player.onEnded(() => { if (this.music.enabled) this.playTracker(item); }); } catch(_) {}
+            }
+            try { t.player.stop(); } catch(_) {}
+            // Set volume using either setVol (chiptune3) or setVolume (chiptune2)
+            const vol = this.music.volume * this.musicMaster;
+            try {
+                if (typeof t.player.setVol === 'function') t.player.setVol(vol);
+                else if (typeof t.player.setVolume === 'function') t.player.setVolume(vol);
+            } catch(_) {}
+            // Load and play from URL (chiptune3 supports load(url) which fetches and plays)
+            if (typeof t.player.load === 'function') {
+                t.player.load(item.url);
+                t.playing = true;
+                this.emitMusicState();
+            } else {
+                console.warn('[AudioSystem] Tracker player lacks load(); falling back to synth');
+                this.music.forceSynth = true;
+                this.playMusic();
+            }
+        } catch (e) {
+            console.warn('[AudioSystem] Tracker play failed; falling back to synth', e);
+            this.music.forceSynth = true;
+            this.playMusic();
+        }
+    }
+
     playMusic() {
         if (!this.context) return;
-        if (this.music.interval) return; // already playing
+        if (this.music.interval || this.music.audio || (this.music.tracker && this.music.tracker.playing)) return;
         this.music.enabled = true;
-        // Create simple synth nodes for a pad + lead
+
+        // Playlist selection
+        const list = this.music.playlist || [];
+        if (!this.music.forceSynth && list.length > 0) {
+            const idx = (this.music.trackIndex % list.length + list.length) % list.length;
+            const item = list[idx];
+            const type = (item && item.type) || 'stream';
+            if (type === 'tracker') { this.playTracker(item); return; }
+            if (type === 'stream')  { this.playStream(item);  return; }
+        }
+        // Fallback: Create simple synth nodes for a pad + lead
         const padOsc = this.context.createOscillator();
         const padGain = this.context.createGain();
         const padFilter = this.context.createBiquadFilter();
@@ -456,26 +632,31 @@ export class AudioSystem {
 
         this.music.nodes = [ { osc: padOsc, gain: padGain }, { osc: leadOsc, gain: leadGain } ];
 
-        // Note patterns per track
+        // Note patterns per track (ethereal/tracker-like arps)
         const tracks = [
-            { name: 'Drift', notes: [220, 246.9, 261.6, 196, 174.6, 196] },
-            { name: 'Pulse', notes: [329.6, 293.7, 261.6, 220, 246.9, 261.6] },
-            { name: 'Nebula', notes: [261.6, 233.1, 207.7, 233.1, 261.6, 311.1] }
+            { name: 'Drift',  notes: [220, 277.2, 329.6, 415.3, 329.6, 277.2] },
+            { name: 'Pulse',  notes: [246.9, 293.7, 370.0, 440.0, 370.0, 293.7] },
+            { name: 'Nebula', notes: [207.7, 261.6, 311.1, 392.0, 311.1, 261.6] }
         ];
         const current = tracks[this.music.trackIndex % tracks.length];
         this.music.trackNames = tracks.map(t => t.name);
 
         let step = 0;
-        // Lightweight interval sequencer
+        // Lightweight interval sequencer with slight jitter
         this.music.interval = setInterval(() => {
             if (!this.music.enabled) return; // paused
             const note = current.notes[step % current.notes.length];
-            // Pad slowly glides
-            padOsc.frequency.exponentialRampToValueAtTime(note / 2, this.context.currentTime + 0.15);
-            // Lead steps
+            // Pad slowly glides with subtle randomization
+            const padNote = (note / 2) * (1 + (Math.random()-0.5)*0.02);
+            padOsc.frequency.exponentialRampToValueAtTime(padNote, this.context.currentTime + 0.2);
+            // Lead steps with tiny vibrato
             leadOsc.frequency.setValueAtTime(note, this.context.currentTime);
+            try {
+                leadOsc.frequency.linearRampToValueAtTime(note * 1.01, this.context.currentTime + 0.1);
+                leadOsc.frequency.linearRampToValueAtTime(note, this.context.currentTime + 0.2);
+            } catch(_) {}
             step++;
-        }, 450);
+        }, 520);
 
         this.emitMusicState();
     }
@@ -486,6 +667,14 @@ export class AudioSystem {
             clearInterval(this.music.interval);
             this.music.interval = null;
         }
+        if (this.music.audio) {
+            try { this.music.audio.pause(); } catch(_) {}
+            this.music.audio = null;
+        }
+        if (this.music.tracker && this.music.tracker.player) {
+            try { this.music.tracker.player.stop(); } catch(_) {}
+            this.music.tracker.playing = false;
+        }
         for (const n of this.music.nodes) {
             try { n.gain.gain.exponentialRampToValueAtTime(0.0001, this.context.currentTime + 0.2); } catch(_) {}
             try { n.osc.stop(this.context.currentTime + 0.25); } catch(_) {}
@@ -495,13 +684,23 @@ export class AudioSystem {
     }
 
     nextTrack() {
-        this.music.trackIndex = (this.music.trackIndex + 1) % this.music.trackNames.length;
-        if (this.music.interval) { this.pauseMusic(); this.playMusic(); }
+        const len = this.music.trackNames.length || 1;
+        this.music.trackIndex = (this.music.trackIndex + 1) % len;
+        if (this.music.enabled) {
+            this.pauseMusic();
+            this.playRadioTuningCue(660);
+            setTimeout(() => this.playMusic(), 660);
+        }
     }
 
     prevTrack() {
-        this.music.trackIndex = (this.music.trackIndex - 1 + this.music.trackNames.length) % this.music.trackNames.length;
-        if (this.music.interval) { this.pauseMusic(); this.playMusic(); }
+        const len = this.music.trackNames.length || 1;
+        this.music.trackIndex = (this.music.trackIndex - 1 + len) % len;
+        if (this.music.enabled) {
+            this.pauseMusic();
+            this.playRadioTuningCue(660);
+            setTimeout(() => this.playMusic(), 660);
+        }
     }
     
     /**

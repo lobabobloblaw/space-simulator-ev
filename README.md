@@ -64,17 +64,16 @@ git push
 - Mission system
 - Cyberpunk UI with particle effects
 
-## Latest Updates (Session 47)
+## Latest Updates (Session 48)
 
-- Radar progression: `radarLevel` gates minimap detail.
-  - L0: featureless white specks; range rings hidden.
-  - L1: planets as dots; NPCs as white squares; rings shown.
-  - L2+: faction-colored NPC dots; pirates outlined.
-- Targeting: press X to cycle nearest hostile (pirate). Targeted hostiles get thicker, gently pulsing brackets and a small center dot.
-- Radio UI: enlarged radial dial; right-side dot buttons with tiny glyphs; tuned spacing.
-- Performance: pooled explosions/warp/hit-sparks/muzzle flashes; frustum culling; quality-aware explosions/pickups/trails.
-- Combat feel: per-weapon tracer tuning; slight rapid cadence jitter; shield-hit ring + cyan sparks.
-- Debug: press F3 to cycle render quality (high/medium/low).
-- Architecture: Shop/Trading UI uses delegated handlers and EventBus; no window globals. `radarLevel` persisted.
+- Targeting/Viewport:
+  - X cycles across all ships; Shift+X clears.
+  - Center viewport shows live-rotating silhouette and direction wedge; persistent ring/wedge during switch with a brief silhouette gap + fade-in and selection blip.
+- Radio:
+  - Tracker modules via local chiptune-3 loader (fallbacks to CDN/synth if unavailable).
+  - `/music` CC0 modules wired into the in-game playlist; all tracks enabled.
+  - 660ms tuning static between tracks; no text hints; no shuffle/loop.
+  - Molded dial backplate; concentric ring alignment; tightened button bar; disabled click rings.
+- Stability: bound UI music-state handler; defensive null guards in viewport.
 
 Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
