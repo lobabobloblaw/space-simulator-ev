@@ -11,6 +11,8 @@
 # Logs
 *.log
 npm-debug.log*
+server.pid
+server.log
 
 # Dependencies (for future)
 node_modules/

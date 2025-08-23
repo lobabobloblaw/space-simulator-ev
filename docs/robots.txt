@@ -1,0 +1,7 @@
+User-agent: *
+# Keep dev/debug and tests out of indexes
+Disallow: /*debug*
+Disallow: /*test*
+Disallow: /eventbus-debug.html
+Disallow: /diagnostic.html
+Disallow: /pure-diagnostic.html
