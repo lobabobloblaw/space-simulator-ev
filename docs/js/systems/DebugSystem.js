@@ -171,6 +171,7 @@ export default class DebugSystem {
         const weapon = (ship.weapons && ship.weapons[ship.currentWeapon]) || null;
         const wepStr = weapon ? `${weapon.type} (cd:${ship.weaponCooldown||0})` : 'none';
 
+        const useSprites = !!(s.renderSettings && s.renderSettings.useSprites);
         this.panel.innerHTML = `
             <div style="color:#0ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Debug</div>
             <div>FPS: ${fps.current||0} (avg ${fps.average||0}) • U:${fps.update||0}ms R:${fps.render||0}ms</div>
@@ -180,6 +181,7 @@ export default class DebugSystem {
             <div>Rep: T${rep.trader||0} / PTRL${rep.patrol||0} / PIR${rep.pirate||0}</div>
             <div>Spread: x${(dbg.spreadMult??1).toFixed(1)} ( [ / ] )</div>
             <div>Quality: ${dbg.renderQuality||'high'} (F3 to cycle)</div>
+            <div>Sprites: ${useSprites ? 'ON' : 'OFF'}</div>
             <div style="margin-top:6px; color:#aaa;">1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo</div>
             <div style="color:#8ac;">[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj</div>
             <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -188,6 +190,7 @@ export default class DebugSystem {
                 <button data-dbg="plasma" style="font-size:10px; padding:2px 6px;">Grant Plasma</button>
                 <button data-dbg="mining" style="font-size:10px; padding:2px 6px;">Grant Mining</button>
                 <button data-dbg="switch" style="font-size:10px; padding:2px 6px;">Next Weapon</button>
+                <button data-dbg="sprites" style="font-size:10px; padding:2px 6px;">Toggle Sprites</button>
                 <span style="color:#faa; margin-left:auto;">G:God ${dbg.godMode?'ON':'OFF'}</span>
             </div>
         `;
@@ -198,6 +201,7 @@ export default class DebugSystem {
             const btnP = this.panel.querySelector('button[data-dbg="plasma"]');
             const btnM = this.panel.querySelector('button[data-dbg="mining"]');
             const btnS = this.panel.querySelector('button[data-dbg="switch"]');
+            const btnSpr = this.panel.querySelector('button[data-dbg="sprites"]');
             const arm = (btn, fn) => {
                 if (!btn) return;
                 btn.onclick = async () => {
@@ -217,6 +221,15 @@ export default class DebugSystem {
             arm(btnP, async () => this.grantWeapon('weapon3'));
             arm(btnM, async () => this.grantWeapon('mining'));
             arm(btnS, async () => { this.eventBus.emit('input.switchWeapon'); });
+            arm(btnSpr, async () => {
+                const st = this.stateManager.state;
+                st.renderSettings = st.renderSettings || {};
+                const next = !st.renderSettings.useSprites;
+                st.renderSettings.useSprites = next;
+                this.eventBus.emit('render.useSprites', { enabled: next });
+                this.eventBus.emit('ui.message', { message: `Sprites ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 1000 });
+                this.renderOverlay();
+            });
         } catch (_) {}
     }
 
