@@ -1164,7 +1164,7 @@ export class RenderSystem {
         if ((this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites) && (this.stateManager.state.assets && this.stateManager.state.assets.ready)) {
             const assets = this.stateManager.state.assets;
             const idMap = { pirate: 'ships/pirate_0', trader: 'ships/trader_0', patrol:'ships/patrol_0', freighter:'ships/freighter_0', interceptor:'ships/interceptor_0' };
-            const spriteId = idMap[npc.type] || 'ships/raider_0';
+            const spriteId = idMap[npc.type] || 'ships/pirate_0';
             // Prefer standalone sprite image if available
             const sprite = assets.sprites && assets.sprites[spriteId];
             if (sprite && sprite.image) {
@@ -1174,9 +1174,20 @@ export class RenderSystem {
                 const dw = sw * scale, dh = sh * scale;
                 try { this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh); return; } catch(_) {}
             }
-            // Fallback to placeholder atlas frame
+            // Fallback to placeholder atlas frame (with alias to existing demo frames)
             const atlas = assets.atlases && assets.atlases.placeholder;
-            const frame = atlas && atlas.frames && atlas.frames[spriteId];
+            let frame = atlas && atlas.frames && atlas.frames[spriteId];
+            if (!frame && atlas && atlas.frames) {
+                const alias = {
+                    'ships/pirate_0': 'ships/raider_0',
+                    'ships/interceptor_0': 'ships/raider_0',
+                    'ships/patrol_0': 'ships/trader_0',
+                    'ships/freighter_0': 'ships/trader_0',
+                    'ships/shuttle_0': 'ships/trader_0'
+                };
+                const alt = alias[spriteId];
+                if (alt && atlas.frames[alt]) frame = atlas.frames[alt];
+            }
             if (atlas && frame) {
                 const sw = frame.w, sh = frame.h;
                 const target = Math.max(12, npc.size * 2.0);
@@ -1490,7 +1501,18 @@ export class RenderSystem {
             // Fallback to placeholder atlas
             if (!drewSprite) {
                 const atlas = assets.atlases && assets.atlases.placeholder;
-                const frame = atlas && atlas.frames && atlas.frames[spriteId];
+                let frame = atlas && atlas.frames && atlas.frames[spriteId];
+                if (!frame && atlas && atlas.frames) {
+                    const alias = {
+                        'ships/pirate_0': 'ships/raider_0',
+                        'ships/interceptor_0': 'ships/raider_0',
+                        'ships/patrol_0': 'ships/trader_0',
+                        'ships/freighter_0': 'ships/trader_0',
+                        'ships/shuttle_0': 'ships/trader_0'
+                    };
+                    const alt = alias[spriteId];
+                    if (alt && atlas.frames[alt]) frame = atlas.frames[alt];
+                }
                 if (atlas && frame) {
                     const sw = frame.w, sh = frame.h;
                     const target = Math.max(12, ship.size * 2.0);
