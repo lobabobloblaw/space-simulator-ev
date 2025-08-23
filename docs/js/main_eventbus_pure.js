@@ -249,7 +249,8 @@ async function initializeGameState() {
     const STAR_DENSITY = 2.0; // 1.0 = baseline; increase for denser fields
     state.renderSettings = state.renderSettings || {};
     state.renderSettings.starDensity = STAR_DENSITY;
-    state.renderSettings.useSprites = state.renderSettings.useSprites ?? false;
+    // Default to sprites ON now that the pipeline exists (can be toggled via debug)
+    state.renderSettings.useSprites = state.renderSettings.useSprites ?? true;
     state.stars = { far: [], mid: [], near: [] };
     
     // Far stars
