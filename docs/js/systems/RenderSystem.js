@@ -1180,7 +1180,7 @@ export class RenderSystem {
             const spriteId = idMap[npc.type] || 'ships/pirate_0';
             if (window.DEBUG_SPRITES) {
                 const has = !!(assets.sprites && assets.sprites[spriteId]);
-                console.debug('[RenderSystem] NPC try', npc.type, '->', spriteId, 'hasPNG', has);
+                console.log('[RenderSystem] NPC try', npc.type, '->', spriteId, 'hasPNG', has);
             }
             // Prefer standalone sprite image if available
             const sprite = assets.sprites && assets.sprites[spriteId];
@@ -1193,7 +1193,7 @@ export class RenderSystem {
                     this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
                     // Debug border to verify sprite draw
                     // this.ctx.strokeStyle = '#0f0'; this.ctx.lineWidth = 0.5; this.ctx.strokeRect(-dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.debug('[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
+                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
                     return;
                 } catch(_) {}
             }
@@ -1218,7 +1218,7 @@ export class RenderSystem {
                 const dw = sw * scale, dh = sh * scale;
                 try {
                     this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.debug('[RenderSystem] NPC atlas sprite', spriteId, 'alias used?', !!alias && !!alias[spriteId]);
+                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC atlas sprite', spriteId, 'alias used?', !!alias && !!alias[spriteId]);
                     return;
                 } catch(_) {}
             }
@@ -1226,7 +1226,7 @@ export class RenderSystem {
             try {
                 this.ctx.fillStyle = 'rgba(255,0,255,0.5)';
                 this.ctx.fillRect(-npc.size, -npc.size, npc.size*2, npc.size*2);
-                if (window.DEBUG_SPRITES) console.debug('[RenderSystem] NPC sprite placeholder', spriteId);
+                if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC sprite placeholder', spriteId);
                 return;
             } catch(_) {}
         }
@@ -1525,7 +1525,7 @@ export class RenderSystem {
             const spriteId = classMap[state.ship.class] || 'ships/trader_0';
             if (window.DEBUG_SPRITES) {
                 const has = !!(assets.sprites && assets.sprites[spriteId]);
-                console.debug('[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
+                console.log('[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
             }
             // Prefer standalone sprite
             const sprite = assets.sprites && assets.sprites[spriteId];
@@ -1536,7 +1536,7 @@ export class RenderSystem {
                 const dw = sw * scale, dh = sh * scale;
                 try {
                     this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
+                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
                     drewSprite = true;
                 } catch(_) {}
             }
@@ -1562,7 +1562,7 @@ export class RenderSystem {
                     const dw = sw * scale, dh = sh * scale;
                     try {
                         this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                        if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player atlas sprite', spriteId);
+                        if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player atlas sprite', spriteId);
                         drewSprite = true;
                     } catch(_) {}
                 }
@@ -1584,7 +1584,7 @@ export class RenderSystem {
             if (!drewSprite) {
                 this.ctx.fillStyle = 'rgba(255,0,255,0.5)';
                 this.ctx.fillRect(-ship.size, -ship.size, ship.size*2, ship.size*2);
-                if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player sprite placeholder', spriteId);
+                if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player sprite placeholder', spriteId);
                 drewSprite = true;
             }
         }
