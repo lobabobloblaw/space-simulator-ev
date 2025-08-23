@@ -1191,15 +1191,14 @@ export class RenderSystem {
                 const dw = sw * scale, dh = sh * scale;
                 try {
                     this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
-                    // Debug border to verify sprite draw
-                    // this.ctx.strokeStyle = '#0f0'; this.ctx.lineWidth = 0.5; this.ctx.strokeRect(-dw/2, -dh/2, dw, dh);
                     if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
                     return;
-                } catch(_) {}
+                } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC drawImage error', spriteId, e, 'sw/sh', sw, sh, 'dw/dh', dw, dh); }
             }
             // Fallback to placeholder atlas frame (with alias to existing demo frames)
             const atlas = assets.atlases && assets.atlases.placeholder;
             let frame = atlas && atlas.frames && atlas.frames[spriteId];
+            let aliasUsed = false;
             if (!frame && atlas && atlas.frames) {
                 const alias = {
                     'ships/pirate_0': 'ships/raider_0',
@@ -1209,18 +1208,18 @@ export class RenderSystem {
                     'ships/shuttle_0': 'ships/trader_0'
                 };
                 const alt = alias[spriteId];
-                if (alt && atlas.frames[alt]) frame = atlas.frames[alt];
+                if (alt && atlas.frames[alt]) { frame = atlas.frames[alt]; aliasUsed = true; }
             }
-            if (atlas && frame) {
+            if (atlas && frame && atlas.image && (atlas.image instanceof HTMLImageElement)) {
                 const sw = frame.w, sh = frame.h;
                 const target = Math.max(12, npc.size * 2.0);
                 const scale = target / Math.max(sw, sh);
                 const dw = sw * scale, dh = sh * scale;
                 try {
                     this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC atlas sprite', spriteId, 'alias used?', !!alias && !!alias[spriteId]);
+                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC atlas sprite', spriteId, 'aliasUsed', aliasUsed);
                     return;
-                } catch(_) {}
+                } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC atlas drawImage error', spriteId, e, 'image=', atlas.image); }
             }
             // If sprites are requested but neither PNG nor atlas frame available, draw a placeholder and return
             try {
@@ -1538,7 +1537,7 @@ export class RenderSystem {
                     this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
                     if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
                     drewSprite = true;
-                } catch(_) {}
+                } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player drawImage error', spriteId, e, 'sw/sh', sw, sh, 'dw/dh', dw, dh); }
             }
             // Fallback to placeholder atlas
             if (!drewSprite) {
@@ -1564,7 +1563,7 @@ export class RenderSystem {
                         this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
                         if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player atlas sprite', spriteId);
                         drewSprite = true;
-                    } catch(_) {}
+                    } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player atlas drawImage error', spriteId, e); }
                 }
             }
             // Last-chance fallback to direct path using cache
