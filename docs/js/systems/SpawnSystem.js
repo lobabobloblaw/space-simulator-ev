@@ -102,6 +102,10 @@ export class SpawnSystem {
         this.eventBus.on('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.on('pickup.expired', this.handlePickupExpired);
         this.eventBus.on(GameEvents.EXPLOSION, this.handleExplosion);
+        // Small debris on projectile hits
+        this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, (data) => {
+            try { this.handleProjectileHitDebris(data); } catch(_) {}
+        });
     }
     
     /**
@@ -200,6 +204,43 @@ export class SpawnSystem {
     handlePickupExpired(data) {
         // Could add visual effect when pickup expires
     }
+
+    /**
+     * Spawn small debris on projectile hits (ships/NPCs)
+     */
+    handleProjectileHitDebris(data) {
+        if (!data || !data.projectile) return;
+        const state = this.stateManager.state;
+        if (!state.debris) state.debris = [];
+        if (!state.pools) state.pools = {};
+        if (!state.pools.debris) state.pools.debris = [];
+        const { projectile, target } = data;
+        // Skip asteroids (they have their own shards already)
+        if (data.isAsteroid) return;
+        const count = 2 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < count; i++) {
+            const d = state.pools.debris.pop() || {};
+            d.x = projectile.x; d.y = projectile.y;
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 0.8 + Math.random() * 1.6;
+            d.vx = Math.cos(ang) * spd + (target?.vx||0)*0.2;
+            d.vy = Math.sin(ang) * spd + (target?.vy||0)*0.2;
+            d.angle = Math.random() * Math.PI * 2;
+            d.va = (Math.random()-0.5) * 0.2;
+            d.size = 2 + Math.random()*3;
+            d.color = target?.color || '#ccc';
+            d.lifetime = 0;
+            d.maxLifetime = 40 + Math.floor(Math.random()*20);
+            // Tiny triangle shard
+            d.shape = 'shard';
+            state.debris.push(d);
+        }
+        // Soft-cap
+        if (state.debris.length > 200) {
+            const old = state.debris.splice(0, state.debris.length - 200);
+            for (const o of old) state.pools.debris.push(o);
+        }
+    }
     
     /**
      * Handle explosion creation
@@ -211,23 +252,32 @@ export class SpawnSystem {
         if (!state.explosions) state.explosions = [];
         if (!state.pools) state.pools = {};
         if (!state.pools.explosions) state.pools.explosions = [];
+        if (!state.hitSparks) state.hitSparks = [];
+        if (!state.pools.hitSparks) state.pools.hitSparks = [];
         
         // Determine explosion size parameters
         let radius, maxRadius, maxLifetime;
         
+        const isImpact = data.impactKind === 'ship-asteroid' || data.isImpact;
         if (data.size === 'small') {
             radius = 5;
             maxRadius = 15;
-            maxLifetime = 20;
+            maxLifetime = 18;
         } else if (data.size === 'large') {
-            radius = 15;
-            maxRadius = 40;
-            maxLifetime = 20;
+            radius = 22;
+            maxRadius = 80;
+            maxLifetime = 30;
         } else {
             // Default medium
-            radius = 10;
-            maxRadius = 25;
-            maxLifetime = 20;
+            radius = 14;
+            maxRadius = 40;
+            maxLifetime = 24;
+        }
+        // If this is a ship-asteroid impact, force a smaller, snappier pop
+        if (isImpact) {
+            radius = 4;
+            maxRadius = 14;
+            maxLifetime = 14;
         }
         
         // Obtain explosion object from pool if available
@@ -238,6 +288,8 @@ export class SpawnSystem {
         explosion.maxRadius = maxRadius;
         explosion.lifetime = 0;
         explosion.maxLifetime = maxLifetime;
+        explosion.shockwave = !isImpact;
+        explosion.isImpact = !!isImpact;
         
         // Soft cap active explosions to prevent GC storms
         if (state.explosions.length > 80) {
@@ -245,6 +297,100 @@ export class SpawnSystem {
             if (oldest) state.pools.explosions.push(oldest);
         }
         state.explosions.push(explosion);
+        
+        // Layered secondary blast for richer look
+        if (!isImpact && maxRadius >= 40) {
+            const e2 = state.pools.explosions.pop() || {};
+            e2.x = data.x;
+            e2.y = data.y;
+            e2.radius = Math.max(6, Math.floor(radius * 0.55));
+            e2.maxRadius = Math.max(22, Math.floor(maxRadius * 0.65));
+            e2.lifetime = 0;
+            e2.maxLifetime = Math.max(16, Math.floor(maxLifetime * 0.8));
+            e2.shockwave = false;
+            state.explosions.push(e2);
+        }
+
+        // Emit fiery hit sparks (debris/embers)
+        const sparkCount = data.size === 'large' ? 20 : (data.size === 'small' ? 8 : 14);
+        for (let i = 0; i < sparkCount; i++) {
+            const s = state.pools.hitSparks.pop() || {};
+            s.x = data.x; s.y = data.y;
+            s.dir = Math.random() * Math.PI * 2;
+            s.lifetime = 0;
+            s.maxLifetime = (data.size === 'large' ? 22 : 16) + Math.floor(Math.random() * 6);
+            s.size = (data.size === 'large' ? 8 : 6) + Math.random() * 4;
+            s.color = '#ffdd88';
+            if (state.hitSparks.length > 140) {
+                const old = state.hitSparks.shift();
+                if (old) state.pools.hitSparks.push(old);
+            }
+            state.hitSparks.push(s);
+        }
+
+        // Screen shake if near player
+        try {
+            const ship = state.ship;
+            const dx = (data.x - ship.x), dy = (data.y - ship.y);
+            const dist = Math.hypot(dx, dy);
+            const maxDist = 700;
+            if (dist < maxDist) {
+                const intensity = Math.max(6, (data.size === 'large' ? 18 : data.size === 'small' ? 8 : 12) * (1 - dist / maxDist));
+                ship.screenShake = Math.max(ship.screenShake || 0, intensity);
+                ship.screenShakeDecay = 0.85;
+            }
+        } catch(_) {}
+
+        // Launch flipbook explosion anim if available (skip for impact pops)
+        try {
+            const fb = state.assets?.effects?.explosionFlipbook;
+            if (!isImpact && fb && Array.isArray(fb.frames) && fb.frames.length) {
+                if (!state.explosionAnims) state.explosionAnims = [];
+                const base = fb.frames[0];
+                const baseMax = Math.max(base.naturalWidth||base.width||16, base.naturalHeight||base.height||16);
+                // Scale to ~2x radius (diameter), then reduce ~20% per request
+                const scale = Math.max(0.5, (maxRadius * 2.2) / baseMax) * 0.8;
+                const fps = (fb.fps || 24) * 1.8; // speed up ~80%
+                state.explosionAnims.push({
+                    x: data.x,
+                    y: data.y,
+                    start: performance.now ? performance.now() : Date.now(),
+                    idx: 0,
+                    fps,
+                    frames: fb.frames,
+                    scale,
+                    alpha: 1.0,
+                    isImpact: false
+                });
+            }
+        } catch(_) {}
+
+        // Eject irregular debris chunks on final explosion
+        try {
+            if (!state.debris) state.debris = [];
+            if (!state.pools) state.pools = {};
+            if (!state.pools.debris) state.pools.debris = [];
+            const chunkCount = data.size === 'large' ? 10 : (data.size === 'small' ? 4 : 7);
+            for (let i = 0; i < chunkCount; i++) {
+                const d = state.pools.debris.pop() || {};
+                d.x = data.x; d.y = data.y;
+                const ang = Math.random() * Math.PI * 2;
+                const spd = (data.size === 'large' ? 2.2 : 1.6) + Math.random() * 1.8;
+                d.vx = Math.cos(ang) * spd; d.vy = Math.sin(ang) * spd;
+                d.angle = Math.random() * Math.PI * 2;
+                d.va = (Math.random()-0.5) * 0.15;
+                d.size = (data.size === 'large' ? 8 : 5) + Math.random() * 6;
+                d.color = '#777';
+                d.lifetime = 0;
+                d.maxLifetime = 90 + Math.floor(Math.random()*60);
+                // Irregular polygon points like asteroids
+                const sides = 5 + Math.floor(Math.random()*3);
+                d.shape = 'poly';
+                d.points = [];
+                for (let j=0;j<sides;j++){ d.points.push(0.6 + Math.random()*0.6); }
+                state.debris.push(d);
+            }
+        } catch(_) {}
     }
     
     /**
@@ -579,6 +725,39 @@ export class SpawnSystem {
                 if (s.lifetime >= s.maxLifetime) {
                     state.pools.hitSparks.push(s);
                     state.hitSparks.splice(i, 1);
+                }
+            }
+        }
+
+        // Update debris
+        if (state.debris) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.debris) state.pools.debris = [];
+            for (let i = state.debris.length - 1; i >= 0; i--) {
+                const d = state.debris[i];
+                d.lifetime++;
+                d.x += d.vx; d.y += d.vy;
+                d.vx *= 0.985; d.vy *= 0.985;
+                d.angle += d.va;
+                if (d.lifetime >= d.maxLifetime) {
+                    state.pools.debris.push(d);
+                    state.debris.splice(i, 1);
+                }
+            }
+        }
+
+        // Update explosion flipbook animations
+        if (state.explosionAnims && state.explosionAnims.length) {
+            const now = performance.now ? performance.now() : Date.now();
+            for (let i = state.explosionAnims.length - 1; i >= 0; i--) {
+                const a = state.explosionAnims[i];
+                const elapsed = (now - a.start) / 1000;
+                const frame = Math.floor(elapsed * (a.fps || 24));
+                if (frame >= a.frames.length) {
+                    state.explosionAnims.splice(i, 1);
+                } else {
+                    a.idx = frame;
+                    a.alpha = Math.max(0, 1 - (frame / a.frames.length));
                 }
             }
         }

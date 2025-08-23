@@ -1606,14 +1606,14 @@ export function updateTutorialHint(ship) {
     switch(ship.tutorialStage) {
         case 'start':
             if (ship.weapons.length === 0) {
-                message = "WARNING: UNARMED // LOCATE PLANET AND TRADE FOR WEAPONS";
+                message = "WEAPONS OFFLINE";
             } else {
                 ship.tutorialStage = 'armed';
             }
             break;
             
         case 'armed':
-            message = "WEAPONS ONLINE // F: FIRE / Q: SWITCH / ENGAGE HOSTILES";
+            message = "WEAPONS ONLINE";
             setTimeout(() => {
                 ship.tutorialStage = 'combat';
             }, 5000);

@@ -172,6 +172,7 @@ export default class DebugSystem {
         const wepStr = weapon ? `${weapon.type} (cd:${ship.weaponCooldown||0})` : 'none';
 
         const useSprites = !!(s.renderSettings && s.renderSettings.useSprites);
+        const spriteCount = (s.assets && s.assets.sprites) ? Object.keys(s.assets.sprites).length : 0;
         this.panel.innerHTML = `
             <div style="color:#0ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Debug</div>
             <div>FPS: ${fps.current||0} (avg ${fps.average||0}) • U:${fps.update||0}ms R:${fps.render||0}ms</div>
@@ -181,7 +182,7 @@ export default class DebugSystem {
             <div>Rep: T${rep.trader||0} / PTRL${rep.patrol||0} / PIR${rep.pirate||0}</div>
             <div>Spread: x${(dbg.spreadMult??1).toFixed(1)} ( [ / ] )</div>
             <div>Quality: ${dbg.renderQuality||'high'} (F3 to cycle)</div>
-            <div>Sprites: ${useSprites ? 'ON' : 'OFF'}</div>
+            <div>Sprites: ${useSprites ? 'ON' : 'OFF'} • Loaded: ${spriteCount}</div>
             <div style="margin-top:6px; color:#aaa;">1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo</div>
             <div style="color:#8ac;">[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj</div>
             <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -227,7 +228,6 @@ export default class DebugSystem {
                 const next = !st.renderSettings.useSprites;
                 st.renderSettings.useSprites = next;
                 this.eventBus.emit('render.useSprites', { enabled: next });
-                window.DEBUG_SPRITES = next;
                 this.eventBus.emit('ui.message', { message: `Sprites ${next ? "ON" : "OFF"}`, type: "info", duration: 1000 });
                 this.renderOverlay();
             });

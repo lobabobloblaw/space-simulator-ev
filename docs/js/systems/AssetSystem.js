@@ -14,13 +14,18 @@ export default class AssetSystem {
             const state = this.stateManager.state;
             state.assets = state.assets || { atlases: {} };
             state.assets.atlases.placeholder = atlas;
+            // Generate a tiny effects atlas (thruster/explosion) procedurally
+            const effects = await this.generateEffectsAtlas();
+            state.assets.atlases.effects = effects;
+            // Try to load an external explosion flipbook (PNG sequence) or build a tiny fallback
+            await this.loadExplosionFlipbook();
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
             state.assets.ready = true;
-            // Auto-enable sprites on first load; user can toggle via debug
+            // Default to sprites OFF; user can toggle via debug overlay
             state.renderSettings = state.renderSettings || {};
             if (typeof state.renderSettings.useSprites === 'undefined') {
-                state.renderSettings.useSprites = true;
+                state.renderSettings.useSprites = false;
             }
             try { this.eventBus.emit('render.useSprites', { enabled: state.renderSettings.useSprites }); } catch(_) {}
             this.ready = true;
@@ -110,6 +115,57 @@ export default class AssetSystem {
         return { image: img, frames: meta.frames || {}, tileSize: { w: tw, h: th } };
     }
 
+    async generateEffectsAtlas() {
+        // Build a small canvas atlas with 3 thruster frames and 3 explosion puffs
+        const tw = 16, th = 16, cols = 6, rows = 1;
+        const canvas = document.createElement('canvas');
+        canvas.width = tw * cols; canvas.height = th * rows;
+        const ctx = canvas.getContext('2d');
+        // Thruster frames 0..2
+        for (let i = 0; i < 3; i++) {
+            const x = i * tw, y = 0;
+            ctx.save();
+            ctx.translate(x + tw/2, y + th/2);
+            const len = 5 + i*2;
+            const grad = ctx.createLinearGradient(-len, 0, len, 0);
+            grad.addColorStop(0, 'rgba(255,140,0,0.0)');
+            grad.addColorStop(0.5, 'rgba(255,200,80,0.8)');
+            grad.addColorStop(1, 'rgba(255,255,255,0.95)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(-len, 0);
+            ctx.lineTo(0, -3);
+            ctx.lineTo(0, 3);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+        // Explosion puffs 0..2
+        for (let i = 0; i < 3; i++) {
+            const x = (3 + i) * tw, y = 0;
+            ctx.save();
+            ctx.translate(x + tw/2, y + th/2);
+            const r = 3 + i*2;
+            const g = ctx.createRadialGradient(0,0, r*0.3, 0,0, r);
+            g.addColorStop(0, 'rgba(255,255,200,0.9)');
+            g.addColorStop(0.5, 'rgba(255,150,0,0.8)');
+            g.addColorStop(1, 'rgba(255,50,0,0.0)');
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(0,0, r, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+        const img = await this.canvasToImage(canvas);
+        const frames = {
+            'effects/thruster_0': { x: 0*tw, y: 0, w: tw, h: th },
+            'effects/thruster_1': { x: 1*tw, y: 0, w: tw, h: th },
+            'effects/thruster_2': { x: 2*tw, y: 0, w: tw, h: th },
+            'effects/explosion_0': { x: 3*tw, y: 0, w: tw, h: th },
+            'effects/explosion_1': { x: 4*tw, y: 0, w: tw, h: th },
+            'effects/explosion_2': { x: 5*tw, y: 0, w: tw, h: th }
+        };
+        return { image: img, frames, tileSize: { w: tw, h: th } };
+    }
+
     canvasToImage(canvas) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -125,5 +181,45 @@ export default class AssetSystem {
             img.onerror = (e) => reject(e);
             img.src = src;
         });
+    }
+
+    async loadExplosionFlipbook() {
+        try {
+            const url = new URL('../assets/explosion.json', import.meta.url).href;
+            const res = await fetch(url, { cache: 'no-cache' });
+            if (!res.ok) throw new Error('no flipbook manifest');
+            const manifest = await res.json();
+            if (!manifest || !Array.isArray(manifest.frames) || manifest.frames.length === 0) throw new Error('empty flipbook');
+            const fps = Math.max(6, Math.min(60, manifest.fps || 24));
+            const imgs = await Promise.all(manifest.frames.map(src => this.loadImage(src)));
+            const state = this.stateManager.state;
+            state.assets.effects = state.assets.effects || {};
+            state.assets.effects.explosionFlipbook = { fps, frames: imgs };
+            console.log(`[AssetSystem] Explosion flipbook loaded (${imgs.length} frames @ ${fps}fps)`);
+        } catch (_) {
+            // Fallback: synthesize a 6-frame flipbook from effects atlas explosion frames
+            try {
+                const state = this.stateManager.state;
+                const effects = state.assets?.atlases?.effects;
+                if (!effects?.image || !effects?.frames) return;
+                const srcFrames = ['effects/explosion_0','effects/explosion_1','effects/explosion_2'];
+                const frames = [];
+                for (let i = 0; i < 6; i++) {
+                    const key = srcFrames[Math.min(srcFrames.length-1, Math.floor(i/2))];
+                    const f = effects.frames[key];
+                    const c = document.createElement('canvas');
+                    c.width = f.w; c.height = f.h; const ctx = c.getContext('2d');
+                    ctx.drawImage(effects.image, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+                    // subtle tint variation per frame
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.fillStyle = `rgba(255,200,100,${0.15 + (i*0.02)})`;
+                    ctx.fillRect(0,0,c.width,c.height);
+                    frames.push(await this.canvasToImage(c));
+                }
+                state.assets.effects = state.assets.effects || {};
+                state.assets.effects.explosionFlipbook = { fps: 18, frames };
+                console.log('[AssetSystem] Explosion flipbook synthesized (6 frames)');
+            } catch (_) {}
+        }
     }
 }

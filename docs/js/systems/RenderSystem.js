@@ -53,10 +53,24 @@ export class RenderSystem {
         
         // Don't generate stars here - we'll use the ones from state
         
+        // Local cache for direct sprite path fallback
+        this.spriteCache = {};
+
+        // Debug throttle state
+        this._dbg = { last: new Map() };
+
         // Bind methods
         this.handleCanvasResize = this.handleCanvasResize.bind(this);
         this.handleShieldHit = this.handleShieldHit.bind(this);
+        this._dbgLog = this._dbgLog.bind(this);
         
+        // Global size multiplier for ships (sprites and vectors)
+        this.sizeMultiplier = 1.25; // gentle nudge (~+25% total)
+
+        // Sprite orientation: offset added to entity angle when sprites enabled
+        // Adjust so art that faces "up" aligns nose-right in world
+        this.spriteRotationOffset = Math.PI / 2; // +90° clockwise for sprites
+
         console.log('[RenderSystem] Created');
     }
     
@@ -231,6 +245,15 @@ export class RenderSystem {
             return null;
         } catch (_) { return null; }
     }
+
+    _dbgLog(key, ...args) {
+        if (window.DEBUG_SPRITES !== 'verbose') return;
+        const now = performance.now ? performance.now() : Date.now();
+        const last = this._dbg.last.get(key) || 0;
+        if (now - last < 1200) return; // throttle harder
+        console.log(...args);
+        this._dbg.last.set(key, now);
+    }
     
     // Stars are now generated in main_eventbus_pure.js and stored in state
     // This provides consistency across all systems
@@ -239,6 +262,13 @@ export class RenderSystem {
      * Main render method - called each frame
      */
     render(state, deltaTime) {
+        // Hard reset context state to avoid any leaked transforms from prior frame
+        // Ensure sane defaults at frame start
+        try { this.ctx.setTransform(1, 0, 0, 1, 0, 0); } catch(_) {}
+        this.ctx.globalAlpha = 1;
+        this.ctx.shadowBlur = 0;
+        this.ctx.lineWidth = 1;
+
         // Update camera to follow ship
         this.camera.x = state.ship.x;
         this.camera.y = state.ship.y;
@@ -258,8 +288,10 @@ export class RenderSystem {
             if (state.ship.screenShake < 0.5) state.ship.screenShake = 0;
         }
         
-        // Apply camera transform with shake
-        this.ctx.translate(this.screenCenter.x - this.camera.x + shakeX, this.screenCenter.y - this.camera.y + shakeY);
+        // Apply camera transform with shake using translate (safer with canvas state stack)
+        const tx = this.screenCenter.x - this.camera.x + shakeX;
+        const ty = this.screenCenter.y - this.camera.y + shakeY;
+        this.ctx.translate(tx, ty);
         
         // Render layers in order (back to front)
         this.renderNebula();
@@ -267,6 +299,7 @@ export class RenderSystem {
         this.renderPlanets(state);
         this.renderAsteroids(state);
         this.renderPickups(state);
+        this.renderDebris(state);
         this.renderNPCs(state);
         this.renderProjectiles(state);
         this.renderMuzzleFlashes(state);
@@ -297,6 +330,55 @@ export class RenderSystem {
         // Render touch controls if needed
         if (window.touchControls) {
             window.touchControls.render();
+        }
+    }
+
+    /**
+     * Render debris shards and chunks
+     */
+    renderDebris(state) {
+        const debris = state.debris || [];
+        if (debris.length === 0) return;
+        const viewLeft = this.camera.x - this.screenCenter.x - 100;
+        const viewTop = this.camera.y - this.screenCenter.y - 100;
+        const viewRight = this.camera.x + this.screenCenter.x + 100;
+        const viewBottom = this.camera.y + this.screenCenter.y + 100;
+        for (const d of debris) {
+            if (d.x < viewLeft || d.x > viewRight || d.y < viewTop || d.y > viewBottom) continue;
+            const t = d.lifetime / (d.maxLifetime || 60);
+            const alpha = Math.max(0, 1 - t);
+            this.ctx.save();
+            this.ctx.translate(d.x, d.y);
+            this.ctx.rotate(d.angle || 0);
+            this.ctx.globalAlpha = alpha;
+            if (d.shape === 'poly' && Array.isArray(d.points)) {
+                const r = d.size || 6;
+                this.ctx.fillStyle = d.color || '#777';
+                this.ctx.strokeStyle = '#444';
+                this.ctx.lineWidth = 0.8;
+                this.ctx.beginPath();
+                for (let i = 0; i < d.points.length; i++) {
+                    const a = (Math.PI * 2 / d.points.length) * i;
+                    const rad = r * d.points[i];
+                    const px = Math.cos(a) * rad;
+                    const py = Math.sin(a) * rad;
+                    if (i === 0) this.ctx.moveTo(px, py); else this.ctx.lineTo(px, py);
+                }
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+            } else {
+                // shard: tiny triangle
+                const s = d.size || 3;
+                this.ctx.fillStyle = d.color || '#aaa';
+                this.ctx.beginPath();
+                this.ctx.moveTo(s, 0);
+                this.ctx.lineTo(-s*0.6, -s*0.5);
+                this.ctx.lineTo(-s*0.6, s*0.5);
+                this.ctx.closePath();
+                this.ctx.fill();
+            }
+            this.ctx.restore();
         }
     }
 
@@ -919,15 +1001,26 @@ export class RenderSystem {
      */
     renderNPCs(state) {
         const npcShips = state.npcShips || [];
-        
+        const canUseSprites = !!(state.renderSettings && state.renderSettings.useSprites && state.assets && state.assets.ready);
+        // Gentle culling with a large margin (opt-in)
+        const enableCulling = !!(state.renderSettings && state.renderSettings.spriteCulling);
+        const margin = 240;
+        const viewLeft = this.camera.x - this.screenCenter.x - margin;
+        const viewTop = this.camera.y - this.screenCenter.y - margin;
+        const viewRight = this.camera.x + this.screenCenter.x + margin;
+        const viewBottom = this.camera.y + this.screenCenter.y + margin;
         for (let npc of npcShips) {
+            const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
+            const visScale = (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
+            const pad = (npc.size || 10) * visScale * 1.8;
+            if (enableCulling && (npc.x + pad < viewLeft || npc.x - pad > viewRight || npc.y + pad < viewTop || npc.y - pad > viewBottom)) continue;
             this.ctx.save();
             this.ctx.translate(npc.x, npc.y);
             this.ctx.rotate(npc.angle);
             // Upscale NPCs based on type for clearer silhouettes
-            const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
             const npcScale = scaleMap[npc.type] || 1.4;
-            this.ctx.scale(npcScale, npcScale);
+            // Apply outer scale only for vector path; sprite path sizes by pixels
+            if (!canUseSprites) this.ctx.scale(npcScale * this.sizeMultiplier, npcScale * this.sizeMultiplier);
             
             // Engine thrust effect
             if (npc.thrusting && this.showEffects) {
@@ -947,12 +1040,55 @@ export class RenderSystem {
                 this.ctx.lineTo(-npc.size, 3);
                 this.ctx.closePath();
                 this.ctx.fill();
+                // Optional sprite-based flame overlay if effects atlas is available (opt-in)
+                if (state.renderSettings && state.renderSettings.useEffectsSprites) {
+                    try {
+                        const effects = state.assets?.atlases?.effects;
+                        const frames = effects?.frames;
+                        if (effects?.image && frames && frames['effects/thruster_0']) {
+                            const idx = Math.floor(Date.now() / 90) % 3;
+                            const frm = frames[`effects/thruster_${idx}`] || frames['effects/thruster_0'];
+                            const sw = frm.w, sh = frm.h;
+                            const target = Math.max(10, npc.size * 1.2) * this.sizeMultiplier;
+                            const scale = target / Math.max(sw, sh);
+                            const dw = sw * scale, dh = sh * scale;
+                            this.ctx.save();
+                            // place behind ship along -x
+                            this.ctx.translate(-npc.size - dw*0.4, 0);
+                            this.ctx.drawImage(effects.image, frm.x, frm.y, sw, sh, -dw/2, -dh/2, dw, dh);
+                            this.ctx.restore();
+                        }
+                    } catch(_) {}
+                }
             }
             
 
             
-            // Ship body
-            this.renderNPCShip(npc);
+            // Ship body (with destruct pre-explosion effect)
+            const seq = npc.deathSeq;
+            if (seq) {
+                const now = performance.now ? performance.now() : Date.now();
+                const t = Math.min(1, (now - seq.start) / (seq.duration || 450));
+                // Pulsing white core and flicker before destruction
+                const pulse = 0.5 + 0.5 * Math.sin(now * 0.025);
+                // Hide sprite in the last part of the sequence
+                if (t < 0.6) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = 0.6 * (1 - t) + 0.4 * pulse;
+                    this.renderNPCShip(npc);
+                    this.ctx.restore();
+                }
+                // Overheat glow
+                const glowR = npc.size * (1.2 + t * 1.8) * (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
+                const gg = this.ctx.createRadialGradient(0, 0, glowR * 0.1, 0, 0, glowR);
+                gg.addColorStop(0, `rgba(255,255,255,${0.5 * (1 - t)})`);
+                gg.addColorStop(0.3, `rgba(255,200,80,${0.35 * (1 - t)})`);
+                gg.addColorStop(1, 'transparent');
+                this.ctx.fillStyle = gg;
+                this.ctx.beginPath(); this.ctx.arc(0, 0, glowR, 0, Math.PI*2); this.ctx.fill();
+            } else {
+                this.renderNPCShip(npc);
+            }
             
             this.ctx.restore();
 
@@ -960,7 +1096,7 @@ export class RenderSystem {
             // Keep draw in screen space (no rotation), sized from npc size and scale
             const selectedId = (this.stateManager.state.targeting && this.stateManager.state.targeting.selectedId) || null;
             const isTargeted = selectedId && npc.id === selectedId;
-            this.renderFactionBracket(npc, scaleMap[npc.type] || 1.4, isTargeted);
+            this.renderFactionBracket(npc, (scaleMap[npc.type] || 1.4) * this.sizeMultiplier, isTargeted);
             
             // State indicator icon
             if (npc.state) {
@@ -1177,59 +1313,90 @@ export class RenderSystem {
         if ((this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites) && (this.stateManager.state.assets && this.stateManager.state.assets.ready)) {
             const assets = this.stateManager.state.assets;
             const idMap = { pirate: 'ships/pirate_0', trader: 'ships/trader_0', patrol:'ships/patrol_0', freighter:'ships/freighter_0', interceptor:'ships/interceptor_0' };
-            const spriteId = idMap[npc.type] || 'ships/pirate_0';
-            if (window.DEBUG_SPRITES) {
-                const has = !!(assets.sprites && assets.sprites[spriteId]);
-                console.log('[RenderSystem] NPC try', npc.type, '->', spriteId, 'hasPNG', has);
-            }
-            // Prefer standalone sprite image if available
+            const spriteId = npc.spriteId || idMap[npc.type] || 'ships/pirate_0';
+            // For sprites, we are not applying outer scale in renderNPCs
+            let drew = false;
+            const has = !!(assets.sprites && assets.sprites[spriteId]);
+            this._dbgLog('npc-try-'+spriteId, '[RenderSystem] NPC try', npc.type, '->', spriteId, 'hasPNG', has);
+            // Prefer standalone sprite image if available and ready
             const sprite = assets.sprites && assets.sprites[spriteId];
             if (sprite && sprite.image) {
-                const sw = sprite.w || sprite.image.width, sh = sprite.h || sprite.image.height;
-                const target = Math.max(12, npc.size * 2.0); // diameter ~= 2*size
-                const scale = target / Math.max(sw, sh);
-                const dw = sw * scale, dh = sh * scale;
-                try {
-                    this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
-                    return;
-                } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC drawImage error', spriteId, e, 'sw/sh', sw, sh, 'dw/dh', dw, dh); }
+                const img = sprite.image;
+                if (img.complete && (img.naturalWidth || img.width)) {
+                    const sw = sprite.w || img.naturalWidth || img.width;
+                    const sh = sprite.h || img.naturalHeight || img.height;
+                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
+                    // Match silhouette scale: include type scale and global multiplier
+                    const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
+                    const npcScale = scaleMap[npc.type] || 1.4;
+                    const target = Math.max(12, npc.size * 2.0 * npcScale) * qScale * this.sizeMultiplier;
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    this.ctx.save();
+                    try {
+                        this.ctx.rotate(this.spriteRotationOffset);
+                        this.ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
+                        this._dbgLog('npc-sprite-'+spriteId, '[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
+                        drew = true;
+                    } catch(e) { if (window.DEBUG_SPRITES === 'verbose') console.log('[RenderSystem] NPC drawImage error', spriteId, e, 'sw/sh', sw, sh, 'dw/dh', dw, dh); }
+                    finally { this.ctx.restore(); }
+                }
             }
             // Fallback to placeholder atlas frame (with alias to existing demo frames)
-            const atlas = assets.atlases && assets.atlases.placeholder;
-            let frame = atlas && atlas.frames && atlas.frames[spriteId];
-            let aliasUsed = false;
-            if (!frame && atlas && atlas.frames) {
-                const alias = {
-                    'ships/pirate_0': 'ships/raider_0',
-                    'ships/interceptor_0': 'ships/raider_0',
-                    'ships/patrol_0': 'ships/trader_0',
-                    'ships/freighter_0': 'ships/trader_0',
-                    'ships/shuttle_0': 'ships/trader_0'
-                };
-                const alt = alias[spriteId];
-                if (alt && atlas.frames[alt]) { frame = atlas.frames[alt]; aliasUsed = true; }
+            if (!drew) {
+                const atlas = assets.atlases && assets.atlases.placeholder;
+                let frame = atlas && atlas.frames && atlas.frames[spriteId];
+                let aliasUsed = false;
+                if (!frame && atlas && atlas.frames) {
+                    const alias = {
+                        'ships/pirate_0': 'ships/raider_0',
+                        'ships/interceptor_0': 'ships/raider_0',
+                        'ships/patrol_0': 'ships/trader_0',
+                        'ships/freighter_0': 'ships/trader_0',
+                        'ships/shuttle_0': 'ships/trader_0'
+                    };
+                    const alt = alias[spriteId];
+                    if (alt && atlas.frames[alt]) { frame = atlas.frames[alt]; aliasUsed = true; }
+                }
+                if (atlas && frame && atlas.image && (atlas.image.complete || atlas.image.naturalWidth || atlas.image.width)) {
+                    const sw = frame.w, sh = frame.h;
+                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
+                    const scaleMap2 = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
+                    const npcScale2 = scaleMap2[npc.type] || 1.4;
+                    const target = Math.max(12, npc.size * 2.0 * npcScale2) * qScale * this.sizeMultiplier;
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    this.ctx.save();
+                    try {
+                        this.ctx.rotate(this.spriteRotationOffset);
+                        this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
+                        this._dbgLog('npc-atlas-'+spriteId, '[RenderSystem] NPC atlas sprite', spriteId, 'aliasUsed', aliasUsed);
+                        drew = true;
+                    } catch(e) { if (window.DEBUG_SPRITES === 'verbose') console.log('[RenderSystem] NPC atlas drawImage error', spriteId, e, 'image=', atlas.image); }
+                    finally { this.ctx.restore(); }
+                }
             }
-            if (atlas && frame && atlas.image && (atlas.image instanceof HTMLImageElement)) {
-                const sw = frame.w, sh = frame.h;
-                const target = Math.max(12, npc.size * 2.0);
-                const scale = target / Math.max(sw, sh);
-                const dw = sw * scale, dh = sh * scale;
-                try {
-                    this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC atlas sprite', spriteId, 'aliasUsed', aliasUsed);
-                    return;
-                } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC atlas drawImage error', spriteId, e, 'image=', atlas.image); }
+            // Last chance: direct image load via path cache
+            if (!drew) {
+                const direct = this.getOrLoadSprite(spriteId);
+                if (direct && direct.complete && (direct.naturalWidth || direct.width)) {
+                    const sw = direct.naturalWidth || direct.width;
+                    const sh = direct.naturalHeight || direct.height;
+                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
+                    const scaleMap3 = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
+                    const npcScale3 = scaleMap3[npc.type] || 1.4;
+                    const target = Math.max(12, npc.size * 2.0 * npcScale3) * qScale * this.sizeMultiplier;
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    this.ctx.save();
+                    try { this.ctx.rotate(this.spriteRotationOffset); this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drew = true; } catch(_) {}
+                    finally { this.ctx.restore(); }
+                }
             }
-            // If sprites are requested but neither PNG nor atlas frame available, draw a placeholder and return
-            try {
-                this.ctx.fillStyle = 'rgba(255,0,255,0.5)';
-                this.ctx.fillRect(-npc.size, -npc.size, npc.size*2, npc.size*2);
-                if (window.DEBUG_SPRITES) console.log('[RenderSystem] NPC sprite placeholder', spriteId);
-                return;
-            } catch(_) {}
+            // If no sprite drawn, fall through to vector silhouette
+            if (drew) return;
         }
-        // Unified ship designs per type
+        // Unified ship designs per type (vector fallback)
         const typeToDesign = {
             freighter: 'hauler',
             pirate: 'raider',
@@ -1239,8 +1406,14 @@ export class RenderSystem {
         };
         const design = typeToDesign[npc.type] || 'delta';
         const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
+        // If sprites are active but did not draw, apply local scale for consistent size
+        const spritesActive = !!(this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites && this.stateManager.state.assets && this.stateManager.state.assets.ready);
+        const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
+        const npcScale = scaleMap[npc.type] || 1.4;
+        if (spritesActive) this.ctx.save(), this.ctx.scale(npcScale, npcScale);
         ShipDesigns.draw(this.ctx, design, npc.size, palette);
         FactionVisuals.drawDecals(this.ctx, npc.faction || 'civilian', npc.size);
+        if (spritesActive) this.ctx.restore();
     }
     
     renderFreighter(npc) {
@@ -1459,8 +1632,10 @@ export class RenderSystem {
         this.ctx.save();
         this.ctx.translate(ship.x, ship.y);
         this.ctx.rotate(ship.angle);
-        // Upscale for richer sprite-like presentation
-        this.ctx.scale(1.6, 1.6);
+        // Apply outer scale only for vector path; sprite path sizes by pixels
+        const playerOuterScale = 1.6 * this.sizeMultiplier;
+        const spritesOnPlayer = !!(this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites && this.stateManager.state.assets && this.stateManager.state.assets.ready);
+        if (!spritesOnPlayer) this.ctx.scale(playerOuterScale, playerOuterScale);
         
         // Engine thrust effect
         // Check if thrust keys are pressed (handle proxy-wrapped Set)
@@ -1521,23 +1696,30 @@ export class RenderSystem {
         if (rs && rs.useSprites && assets && assets.ready) {
             // Map ship class to sprite id
             const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_0', trader:'ships/trader_0', patrol:'ships/patrol_0', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
-            const spriteId = classMap[state.ship.class] || 'ships/trader_0';
-            if (window.DEBUG_SPRITES) {
-                const has = !!(assets.sprites && assets.sprites[spriteId]);
-                console.log('[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
-            }
+            const spriteId = state.ship.spriteId || classMap[state.ship.class] || 'ships/trader_0';
+            const has = !!(assets.sprites && assets.sprites[spriteId]);
+            this._dbgLog('player-try', '[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
             // Prefer standalone sprite
             const sprite = assets.sprites && assets.sprites[spriteId];
             if (sprite && sprite.image) {
-                const sw = sprite.w || sprite.image.width, sh = sprite.h || sprite.image.height;
-                const target = Math.max(12, ship.size * 2.0);
-                const scale = target / Math.max(sw, sh);
-                const dw = sw * scale, dh = sh * scale;
-                try {
-                    this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
-                    if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
-                    drewSprite = true;
-                } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player drawImage error', spriteId, e, 'sw/sh', sw, sh, 'dw/dh', dw, dh); }
+                const img = sprite.image;
+                if (img.complete && (img.naturalWidth || img.width)) {
+                    const sw = sprite.w || img.naturalWidth || img.width;
+                    const sh = sprite.h || img.naturalHeight || img.height;
+                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
+                    const playerOuterScaleEffective = 1.6; // match silhouette base
+                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective) * qScale * this.sizeMultiplier;
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    this.ctx.save();
+                    try {
+                        this.ctx.rotate(this.spriteRotationOffset);
+                        this.ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
+                        this._dbgLog('player-sprite', '[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
+                        drewSprite = true;
+                    } catch(e) { if (window.DEBUG_SPRITES === 'verbose') console.log('[RenderSystem] Player drawImage error', spriteId, e, 'sw/sh', sw, sh, 'dw/dh', dw, dh); }
+                    finally { this.ctx.restore(); }
+                }
             }
             // Fallback to placeholder atlas
             if (!drewSprite) {
@@ -1554,38 +1736,39 @@ export class RenderSystem {
                     const alt = alias[spriteId];
                     if (alt && atlas.frames[alt]) frame = atlas.frames[alt];
                 }
-                if (atlas && frame) {
+                if (atlas && frame && atlas.image && (atlas.image.complete || atlas.image.naturalWidth || atlas.image.width)) {
                     const sw = frame.w, sh = frame.h;
-                    const target = Math.max(12, ship.size * 2.0);
+                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
+                    const playerOuterScaleEffective2 = 1.6;
+                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective2) * qScale * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
+                    this.ctx.save();
                     try {
+                        this.ctx.rotate(this.spriteRotationOffset);
                         this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                        if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player atlas sprite', spriteId);
+                        this._dbgLog('player-atlas', '[RenderSystem] Player atlas sprite', spriteId);
                         drewSprite = true;
-                    } catch(e) { if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player atlas drawImage error', spriteId, e); }
+                    } catch(e) { if (window.DEBUG_SPRITES === 'verbose') console.log('[RenderSystem] Player atlas drawImage error', spriteId, e); }
+                    finally { this.ctx.restore(); }
                 }
             }
             // Last-chance fallback to direct path using cache
             if (!drewSprite) {
                 const direct = this.getOrLoadSprite(spriteId);
-                if (direct) {
+                if (direct && direct.complete && (direct.naturalWidth || direct.width)) {
                     const sw = direct.naturalWidth || direct.width, sh = direct.naturalHeight || direct.height;
-                    if (sw && sh) {
-                        const target = Math.max(12, ship.size * 2.0);
-                        const scale = target / Math.max(sw, sh);
-                        const dw = sw * scale, dh = sh * scale;
-                        try { this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
-                    }
+                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
+                    const playerOuterScaleEffective3 = 1.6;
+                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective3) * qScale * this.sizeMultiplier;
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    this.ctx.save();
+                    try { this.ctx.rotate(this.spriteRotationOffset); this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+                    finally { this.ctx.restore(); }
                 }
             }
-            // If sprites requested but none drawn, draw placeholder and skip vector fallback
-            if (!drewSprite) {
-                this.ctx.fillStyle = 'rgba(255,0,255,0.5)';
-                this.ctx.fillRect(-ship.size, -ship.size, ship.size*2, ship.size*2);
-                if (window.DEBUG_SPRITES) console.log('[RenderSystem] Player sprite placeholder', spriteId);
-                drewSprite = true;
-            }
+            // If no sprite drawn, fall back to vector below
         }
         if (!drewSprite) {
             const palette = FactionVisuals.getPalette(state.ship.faction || 'civilian');
@@ -1595,8 +1778,36 @@ export class RenderSystem {
                                  (state.ship.class === 'patrol') ? 'wing' :
                                  (state.ship.class === 'pirate') ? 'raider' :
                                  'delta';
-            ShipDesigns.draw(this.ctx, playerDesign, ship.size, palette);
+            // If sprites are active but failed to draw, apply local scale for consistency
+            const spritesActive = !!(this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites && this.stateManager.state.assets && this.stateManager.state.assets.ready);
+            const playerOuterScale = 1.6 * this.sizeMultiplier;
+            if (spritesActive) this.ctx.save(), this.ctx.scale(playerOuterScale, playerOuterScale);
+            // Destruct pre-explosion effect if pending
+            const seq = state.ship.deathSeq;
+            if (seq) {
+                const now = performance.now ? performance.now() : Date.now();
+                const t = Math.min(1, (now - seq.start) / (seq.duration || 600));
+                const pulse = 0.5 + 0.5 * Math.sin(now * 0.03);
+                // Hide sprite silhouette in the last part of the sequence
+                if (t < 0.6) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = 0.6 * (1 - t) + 0.4 * pulse;
+                    ShipDesigns.draw(this.ctx, playerDesign, ship.size, palette);
+                    this.ctx.restore();
+                }
+                // Overheat glow
+                const glowR = ship.size * (1.4 + t * 2.0);
+                const gg = this.ctx.createRadialGradient(0, 0, glowR * 0.1, 0, 0, glowR);
+                gg.addColorStop(0, `rgba(255,255,255,${0.55 * (1 - t)})`);
+                gg.addColorStop(0.35, `rgba(255,200,80,${0.4 * (1 - t)})`);
+                gg.addColorStop(1, 'transparent');
+                this.ctx.fillStyle = gg;
+                this.ctx.beginPath(); this.ctx.arc(0, 0, glowR, 0, Math.PI*2); this.ctx.fill();
+            } else {
+                ShipDesigns.draw(this.ctx, playerDesign, ship.size, palette);
+            }
             FactionVisuals.drawDecals(this.ctx, state.ship.faction || 'civilian', ship.size);
+            if (spritesActive) this.ctx.restore();
         }
         
         // Weapon indicators
@@ -1637,12 +1848,41 @@ export class RenderSystem {
             }
             const progress = exp.lifetime / exp.maxLifetime;
             const radius = exp.radius + (exp.maxRadius - exp.radius) * progress;
+            const isTiny = (exp.maxRadius || 0) <= 20; // asteroid/impact pops
+            // Initial core flash
+            if (progress < 0.12) {
+                const flashAlpha = (1 - (progress / 0.12)) * 0.9;
+                const fg = this.ctx.createRadialGradient(exp.x, exp.y, 0, exp.x, exp.y, Math.max(10, radius*0.6));
+                fg.addColorStop(0, `rgba(255,255,255,${flashAlpha})`);
+                fg.addColorStop(1, 'rgba(255,255,255,0)');
+                this.ctx.fillStyle = fg;
+                this.ctx.beginPath();
+                this.ctx.arc(exp.x, exp.y, Math.max(12, radius*0.6), 0, Math.PI*2);
+                this.ctx.fill();
+            }
+            // Optional explosion sprite overlay if effects atlas exists (skip for tiny impacts and marked impacts)
+            if (!isTiny && !exp.isImpact) {
+                try {
+                    const effects = this.stateManager.state.assets?.atlases?.effects;
+                    const frm = effects?.frames?.['effects/explosion_0'];
+                    if (effects?.image && frm) {
+                        const sw = frm.w, sh = frm.h;
+                        const scale = Math.max(1.0, (radius * 1.6) / Math.max(sw, sh));
+                        const dw = sw * scale, dh = sh * scale;
+                        this.ctx.save();
+                        this.ctx.globalAlpha = Math.max(0, 1 - progress);
+                        this.ctx.drawImage(effects.image, frm.x, frm.y, sw, sh, exp.x - dw/2, exp.y - dh/2, dw, dh);
+                        this.ctx.restore();
+                    }
+                } catch(_) {}
+            }
+
             // Multiple explosion rings (quality-aware)
-            const ringCount = this.quality === 'low' ? 1 : (this.quality === 'medium' ? 2 : 3);
+            const ringCount = isTiny ? 1 : (this.quality === 'low' ? 1 : (this.quality === 'medium' ? 2 : 3));
             for (let i = 0; i < ringCount; i++) {
-                const ringProgress = Math.max(0, progress - i * 0.1);
-                const ringRadius = radius * (1 - i * 0.2);
-                const alpha = (1 - ringProgress) * (1 - i * 0.3);
+                const ringProgress = Math.max(0, progress - i * 0.12);
+                const ringRadius = (isTiny ? radius * 0.7 : radius * (1 - i * 0.2));
+                const alpha = (isTiny ? 0.6 : 1) * (1 - ringProgress) * (1 - i * 0.3);
                 if (this.quality === 'low') {
                     this.ctx.fillStyle = `rgba(255, 140, 40, ${alpha * 0.6})`;
                     this.ctx.beginPath();
@@ -1664,10 +1904,21 @@ export class RenderSystem {
                 }
             }
             
+            // Shockwave outline for first half (skip for tiny impacts)
+            if (!isTiny && exp.shockwave && progress < 0.5) {
+                this.ctx.save();
+                const a = Math.max(0, 1 - progress * 2);
+                this.ctx.strokeStyle = `rgba(255,255,255,${a * 0.8})`;
+                this.ctx.lineWidth = Math.max(1.5, Math.min(4, exp.maxRadius * 0.03));
+                this.ctx.beginPath();
+                this.ctx.arc(exp.x, exp.y, radius * 0.9, 0, Math.PI * 2);
+                this.ctx.stroke();
+                this.ctx.restore();
+            }
             // Sparks
             if (progress < 0.5 && this.showParticles) {
                 this.ctx.fillStyle = `rgba(255, 255, 0, ${1 - progress * 2})`;
-                const sparkCount = this.quality === 'low' ? 3 : 8;
+                const sparkCount = isTiny ? 2 : (this.quality === 'low' ? 3 : 8);
                 for (let i = 0; i < sparkCount; i++) {
                     const angle = (Math.PI * 2 / 8) * i;
                     const dist = radius * 1.5 * progress;
@@ -1675,6 +1926,32 @@ export class RenderSystem {
                     const sparkY = exp.y + Math.sin(angle) * dist;
                     this.ctx.fillRect(sparkX - 1, sparkY - 1, 2, 2);
                 }
+            }
+        }
+
+        // Draw flipbook explosion overlays (on top)
+        const anims = state.explosionAnims || [];
+        if (anims.length) {
+            const now = performance.now ? performance.now() : Date.now();
+            for (const a of anims) {
+                if (a.isImpact) continue; // don't draw flipbook for impact pops
+                if (!a || !a.frames || !a.frames.length) continue;
+                // Quality-aware frame stepping
+                const step = (this.quality === 'low') ? 2 : (this.quality === 'medium' ? 1 : 1);
+                const fpsEff = Math.max(6, Math.floor((a.fps || 24) / step));
+                const elapsed = (now - a.start) / 1000;
+                const frame = Math.min(a.frames.length - 1, Math.floor(elapsed * fpsEff));
+                const alpha = Math.max(0, 1 - (frame / a.frames.length));
+                const img = a.frames[frame];
+                if (!img) continue;
+                const sw = img.naturalWidth || img.width || 16;
+                const sh = img.naturalHeight || img.height || 16;
+                const dw = sw * a.scale, dh = sh * a.scale;
+                this.ctx.save();
+                this.ctx.globalAlpha = alpha;
+                this.ctx.translate(a.x, a.y);
+                this.ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
+                this.ctx.restore();
             }
         }
     }

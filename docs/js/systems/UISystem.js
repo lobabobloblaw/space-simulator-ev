@@ -345,14 +345,14 @@ export class UISystem {
         switch(this.tutorialStage) {
             case 'start':
                 if (!ship.weapons || ship.weapons.length === 0) {
-                    message = "WARNING: UNARMED";
+                    message = "WEAPONS OFFLINE";
                 } else {
                     this.tutorialStage = 'armed';
                 }
                 break;
                 
             case 'armed':
-                message = "WEAPONS ONLINE // F: FIRE / Q: SWITCH / ENGAGE HOSTILES";
+                message = "WEAPONS ONLINE";
                 setTimeout(() => {
                     this.tutorialStage = 'combat';
                     this.updateTutorialHint(ship);

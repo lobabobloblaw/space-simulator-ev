@@ -234,10 +234,19 @@ export default class NPCSystem {
             return true;
         }
         
-        // Remove if dead
+        // Remove if dead, with a brief destruct sequence
         if (npc.health <= 0) {
-            this.handleNPCDeath(npc, ship, state);
-            return true;
+            const now = performance.now ? performance.now() : Date.now();
+            if (!npc.deathSeq) {
+                npc.deathSeq = { start: now, duration: 450 };
+                // Freeze motion
+                npc.vx = 0; npc.vy = 0;
+            }
+            if (now - npc.deathSeq.start >= npc.deathSeq.duration) {
+                this.handleNPCDeath(npc, ship, state);
+                return true;
+            }
+            return false;
         }
         
         // Remove if too far from player

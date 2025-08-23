@@ -1018,14 +1018,14 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     transform: none;
     background: transparent;
     border: none;
-    color: var(--status-danger);
+    color: #ffffff; /* Always white for ONLINE/OFFLINE */
     padding: 0;
     font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 1px;
     z-index: 1000;  /* above HUD */
     display: none;
-    text-shadow: 0 0 6px rgba(255, 0, 64, 0.25);
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.18);
 }
 
 #tutorialHint.visible { display: block; }

@@ -249,8 +249,8 @@ async function initializeGameState() {
     const STAR_DENSITY = 2.0; // 1.0 = baseline; increase for denser fields
     state.renderSettings = state.renderSettings || {};
     state.renderSettings.starDensity = STAR_DENSITY;
-    // Default to sprites ON now that the pipeline exists (can be toggled via debug)
-    state.renderSettings.useSprites = state.renderSettings.useSprites ?? true;
+    // Default sprites OFF; can be toggled via debug overlay
+    state.renderSettings.useSprites = state.renderSettings.useSprites ?? false;
     state.stars = { far: [], mid: [], near: [] };
     
     // Far stars
@@ -346,22 +346,30 @@ function setupEventHandlers() {
         }
     });
     
-    // Ship death handling
+    // Ship death handling (add brief destruct sequence before explosion)
     eventBus.on(GameEvents.SHIP_DEATH, () => {
         const state = stateManager.state;
-        state.ship.isDestroyed = true;
-        
-        eventBus.emit(GameEvents.EXPLOSION, {
-            x: state.ship.x,
-            y: state.ship.y,
-            size: 'large'
-        });
-        
-        eventBus.emit(GameEvents.UI_MESSAGE, {
-            message: 'SHIP DESTROYED - Press R to respawn',
-            type: 'error',
-            duration: 5000
-        });
+        const now = performance.now ? performance.now() : Date.now();
+        // Begin destruct sequence; delay final explosion a bit for drama
+        state.ship.deathSeq = { start: now, duration: 600 };
+        // Stop motion
+        state.ship.vx = 0; state.ship.vy = 0;
+        // Trigger explosion after delay and then mark destroyed
+        setTimeout(() => {
+            eventBus.emit(GameEvents.EXPLOSION, {
+                x: state.ship.x,
+                y: state.ship.y,
+                size: 'large'
+            });
+            state.ship.isDestroyed = true;
+            // Clear sequence marker
+            delete state.ship.deathSeq;
+            eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: 'SHIP DESTROYED - Press R to respawn',
+                type: 'error',
+                duration: 5000
+            });
+        }, 600);
     });
     
     // Landing handling

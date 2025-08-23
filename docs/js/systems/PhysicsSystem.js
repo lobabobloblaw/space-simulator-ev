@@ -447,11 +447,12 @@ export class PhysicsSystem {
                 const impactX = asteroid.x + dx * 0.5;
                 const impactY = asteroid.y + dy * 0.5;
                 
-                // Main explosion
+                // Main explosion (mark as ship-asteroid impact)
                 this.eventBus.emit(GameEvents.EXPLOSION, {
                     x: impactX,
                     y: impactY,
-                    size: damage < 20 ? 'small' : 'medium'
+                    size: damage < 20 ? 'small' : 'medium',
+                    impactKind: 'ship-asteroid'
                 });
                 
                 // Sparks
