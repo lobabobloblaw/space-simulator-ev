@@ -175,6 +175,9 @@ export class AudioSystem {
             case 'explosion':
                 this.playExplosion(data.small || false);
                 break;
+            case 'crackle':
+                this.playCrackle(data.intensity || 0.15);
+                break;
             case 'thrust':
                 this.playThrust();
                 break;
@@ -312,6 +315,29 @@ export class AudioSystem {
         gain.gain.setValueAtTime(small ? 0.2 : 0.4 * this.masterVolume, this.context.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.3);
         
+        noise.start();
+    }
+
+    /**
+     * Play brief crackle/static for destruct stage
+     */
+    playCrackle(intensity = 0.15) {
+        if (!this.enabled || !this.context) return;
+        const noise = this.context.createBufferSource();
+        const len = this.context.sampleRate * 0.08; // ~80ms
+        const buffer = this.context.createBuffer(1, len, this.context.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < len; i++) {
+            // sporadic pops
+            const t = i / len;
+            const pop = (Math.random() < 0.06) ? (Math.random()*2-1) : 0;
+            data[i] = pop * (1 - t);
+        }
+        noise.buffer = buffer;
+        const gain = this.context.createGain();
+        gain.gain.setValueAtTime(Math.max(0, Math.min(0.4, intensity)) * this.masterVolume, this.context.currentTime);
+        noise.connect(gain);
+        gain.connect(this.context.destination);
         noise.start();
     }
     

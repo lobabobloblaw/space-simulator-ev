@@ -1,6 +1,10 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { ProceduralPlanetRenderer } from './proceduralPlanetRenderer.js';
+import ExplosionRenderer from './ExplosionRenderer.js';
+import ThrusterFXRenderer from './ThrusterFXRenderer.js';
+import HUDRenderer from './HUDRenderer.js';
+import { withWorld } from './RenderHelpers.js';
 import ShipDesigns from './ShipDesigns.js';
 import FactionVisuals from './FactionVisuals.js';
 
@@ -70,6 +74,16 @@ export class RenderSystem {
         // Sprite orientation: offset added to entity angle when sprites enabled
         // Adjust so art that faces "up" aligns nose-right in world
         this.spriteRotationOffset = Math.PI / 2; // +90° clockwise for sprites
+        // Optional per-sprite or per-type small adjustments layered on top
+        this.spriteOrientationOverrides = {
+            // Place fine-tuned per-art nudges here (radians)
+            // e.g., 'ships/freighter_0': 0.04
+        };
+
+        // Extracted explosion renderer
+        this.explosionRenderer = new ExplosionRenderer();
+        this.thrusterFX = new ThrusterFXRenderer();
+        this.hud = new HUDRenderer(this.ctx, this.camera, this.screenCenter);
 
         console.log('[RenderSystem] Created');
     }
@@ -206,6 +220,20 @@ export class RenderSystem {
             st.renderSettings = st.renderSettings || {};
             st.renderSettings.useSprites = en;
         });
+        // Effects sprite toggle (thrusters/extras)
+        this.eventBus.on('render.useEffectsSprites', (data) => {
+            const en = !!(data && (data.enabled ?? data.useEffectsSprites));
+            const st = this.stateManager.state;
+            st.renderSettings = st.renderSettings || {};
+            st.renderSettings.useEffectsSprites = en;
+        });
+        // Sprite culling toggle
+        this.eventBus.on('render.spriteCulling', (data) => {
+            const en = !!(data && (data.enabled ?? data.spriteCulling));
+            const st = this.stateManager.state;
+            st.renderSettings = st.renderSettings || {};
+            st.renderSettings.spriteCulling = en;
+        });
         
         // Visual toggles
         this.eventBus.on('render.toggleParticles', () => {
@@ -277,9 +305,7 @@ export class RenderSystem {
         this.clearCanvas();
         
         // Save context state
-        this.ctx.save();
-        
-        // Apply screen shake if active
+        // Apply world-space pass with camera and shake using helper
         let shakeX = 0, shakeY = 0;
         if (state.ship.screenShake && state.ship.screenShake > 0) {
             shakeX = (Math.random() - 0.5) * state.ship.screenShake;
@@ -287,33 +313,26 @@ export class RenderSystem {
             state.ship.screenShake *= state.ship.screenShakeDecay || 0.8;
             if (state.ship.screenShake < 0.5) state.ship.screenShake = 0;
         }
-        
-        // Apply camera transform with shake using translate (safer with canvas state stack)
-        const tx = this.screenCenter.x - this.camera.x + shakeX;
-        const ty = this.screenCenter.y - this.camera.y + shakeY;
-        this.ctx.translate(tx, ty);
-        
-        // Render layers in order (back to front)
-        this.renderNebula();
-        this.renderStars();
-        this.renderPlanets(state);
-        this.renderAsteroids(state);
-        this.renderPickups(state);
-        this.renderDebris(state);
-        this.renderNPCs(state);
-        this.renderProjectiles(state);
-        this.renderMuzzleFlashes(state);
-        this.renderHitSparks(state);
-        this.renderShip(state);
-        this.renderShieldHits(state);
-        this.renderExplosions(state);
-        this.renderWarpEffects(state);
 
-        // Debug overlays in world space (before restore)
-        this.renderDebug(state);
-
-        // Restore context
-        this.ctx.restore();
+        withWorld(this.ctx, this.camera, this.screenCenter, () => {
+            try { this.renderNebula(); } catch(_) {}
+            try { this.renderStars(); } catch(_) {}
+            try { this.renderPlanets(state); } catch(_) {}
+            try { this.renderAsteroids(state); } catch(_) {}
+            try { this.renderPickups(state); } catch(_) {}
+            try { this.renderDebris(state); } catch(_) {}
+            try { this.renderNPCs(state); } catch(_) {}
+            try { this.renderProjectiles(state); } catch(_) {}
+            try { this.renderMuzzleFlashes(state); } catch(_) {}
+            try { this.renderHitSparks(state); } catch(_) {}
+            try { this.renderShip(state); } catch(_) {}
+            try { this.renderShieldHits(state); } catch(_) {}
+            try { this.renderExplosions(state); } catch(_) {}
+            try { this.renderWarpEffects(state); } catch(_) {}
+            try { this.renderDebug(state); } catch(_) {}
+        }, shakeX, shakeY);
+        // Debug: post-world pass lint
+        this.debugRenderLint('post-world');
         
         // Draw damage flash overlay
         if (state.ship.damageFlash && state.ship.damageFlash > 0) {
@@ -326,10 +345,63 @@ export class RenderSystem {
         // Render UI elements (not affected by camera)
         this.renderMinimap(state);
         this.renderTargetCam(state);
+
+        // Screen-space HUD overlays
+        try { this.hud.updateContext(this.ctx, this.camera, this.screenCenter); this.hud.drawPlayerHealth(state); } catch(_) {}
+
+        // Debug: end-of-world render lint
+        this.debugRenderLint('end-frame');
         
         // Render touch controls if needed
         if (window.touchControls) {
             window.touchControls.render();
+        }
+    }
+
+    /**
+     * Debug render lint - logs non-default canvas state at stage boundaries
+     */
+    debugRenderLint(stage = '') {
+        try {
+            const dbg = (this.stateManager && this.stateManager.state && this.stateManager.state.debug) || {};
+            if (!dbg.enabled || !dbg.renderLint) return;
+            const issues = [];
+            const t = (this.ctx.getTransform) ? this.ctx.getTransform() : null;
+            if (t && (t.a !== 1 || t.b !== 0 || t.c !== 0 || t.d !== 1 || t.e !== 0 || t.f !== 0)) {
+                issues.push(`non-identity transform a:${t.a},b:${t.b},c:${t.c},d:${t.d},e:${t.e},f:${t.f}`);
+            }
+            if (typeof this.ctx.globalAlpha === 'number' && this.ctx.globalAlpha !== 1) {
+                issues.push(`globalAlpha=${this.ctx.globalAlpha}`);
+            }
+            if (typeof this.ctx.shadowBlur === 'number' && this.ctx.shadowBlur !== 0) {
+                issues.push(`shadowBlur=${this.ctx.shadowBlur}`);
+            }
+            const comp = this.ctx.globalCompositeOperation || 'source-over';
+            if (comp !== 'source-over') {
+                issues.push(`composite=${comp}`);
+            }
+            if (typeof this.ctx.lineWidth === 'number' && this.ctx.lineWidth !== 1) {
+                issues.push(`lineWidth=${this.ctx.lineWidth}`);
+            }
+            if (issues.length) {
+                const doReset = !!dbg.renderLintReset && !!this.ctx.setTransform;
+                if (doReset) {
+                    try {
+                        this.ctx.setTransform(1,0,0,1,0,0);
+                        this.ctx.globalAlpha = 1;
+                        this.ctx.shadowBlur = 0;
+                        this.ctx.lineWidth = 1;
+                        this.ctx.globalCompositeOperation = 'source-over';
+                    } catch(_) {}
+                }
+                if (dbg.renderLintTrace) {
+                    console.warn(`[RenderLint:${stage}]`, (doReset? '[AUTO-RESET] ' : '') + issues.join(' | '), new Error('RenderLint trace')); 
+                } else {
+                    console.warn(`[RenderLint:${stage}]`, (doReset? '[AUTO-RESET] ' : '') + issues.join(' | '));
+                }
+            }
+        } catch (_) {
+            // Never throw from lint
         }
     }
 
@@ -1015,58 +1087,62 @@ export class RenderSystem {
             const pad = (npc.size || 10) * visScale * 1.8;
             if (enableCulling && (npc.x + pad < viewLeft || npc.x - pad > viewRight || npc.y + pad < viewTop || npc.y - pad > viewBottom)) continue;
             this.ctx.save();
-            this.ctx.translate(npc.x, npc.y);
-            this.ctx.rotate(npc.angle);
-            // Upscale NPCs based on type for clearer silhouettes
-            const npcScale = scaleMap[npc.type] || 1.4;
-            // Apply outer scale only for vector path; sprite path sizes by pixels
-            if (!canUseSprites) this.ctx.scale(npcScale * this.sizeMultiplier, npcScale * this.sizeMultiplier);
-            
+            try {
+                this.ctx.translate(npc.x, npc.y);
+                this.ctx.rotate(npc.angle);
+                // Upscale NPCs based on type for clearer silhouettes
+                const npcScale = scaleMap[npc.type] || 1.4;
+                // Apply outer scale only for vector path; sprite path sizes by pixels
+                if (!canUseSprites) this.ctx.scale(npcScale * this.sizeMultiplier, npcScale * this.sizeMultiplier);
+
             // Engine thrust effect
-            if (npc.thrusting && this.showEffects) {
+            if (this.showEffects && (npc.thrusting || true)) {
+                const isActive = !!npc.thrusting;
                 const flicker = Math.random();
-                const thrustGradient = this.ctx.createLinearGradient(
-                    -npc.size - 10, 0,
-                    -npc.size, 0
-                );
-                thrustGradient.addColorStop(0, 'transparent');
-                thrustGradient.addColorStop(0.5, `rgba(255, 100, 0, ${0.5 * flicker})`);
-                thrustGradient.addColorStop(1, `rgba(255, 200, 0, ${0.8 * flicker})`);
-                
-                this.ctx.fillStyle = thrustGradient;
+                // Compute an effective visual scale independent of sprite/vector context scaling
+                const typeScale = (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
+                const len = Math.max(12, npc.size * (isActive ? 1.8 : 1.2)) * typeScale; // longer when thrusting
+                const halfW = Math.max(1.5, (isActive ? 3 : 2)) * typeScale; // width
+                const g = this.ctx.createLinearGradient(-len, 0, 0, 0);
+                g.addColorStop(0, 'transparent');
+                if (!isActive) {
+                    const spd = Math.hypot(npc.vx || 0, npc.vy || 0);
+                    const idle = Math.max(0.08, Math.min(0.35, (spd * 0.6))); // ensure a faint baseline
+                    g.addColorStop(0.6, `rgba(255, 120, 40, ${0.18 * idle})`);
+                    g.addColorStop(1, `rgba(255, 200, 80, ${0.35 * idle})`);
+                } else {
+                    g.addColorStop(0.55, `rgba(255, 120, 40, ${0.45 * flicker + 0.35})`);
+                    g.addColorStop(1, `rgba(255, 220, 100, ${0.8 * flicker + 0.2})`);
+                }
+                this.ctx.fillStyle = g;
                 this.ctx.beginPath();
-                this.ctx.moveTo(-npc.size - 10 - Math.random() * 5, 0);
-                this.ctx.lineTo(-npc.size, -3);
-                this.ctx.lineTo(-npc.size, 3);
+                this.ctx.moveTo(-len, 0);
+                this.ctx.lineTo(0, -halfW);
+                this.ctx.lineTo(0, halfW);
                 this.ctx.closePath();
                 this.ctx.fill();
-                // Optional sprite-based flame overlay if effects atlas is available (opt-in)
-                if (state.renderSettings && state.renderSettings.useEffectsSprites) {
+                // Optional sprite-based flame overlay if effects atlas is available (NPC overlay remains opt-in)
+                if (state.renderSettings && state.renderSettings.useEffectsSprites && state.renderSettings.useEffectsSpritesNPC) {
                     try {
                         const effects = state.assets?.atlases?.effects;
-                        const frames = effects?.frames;
-                        if (effects?.image && frames && frames['effects/thruster_0']) {
-                            const idx = Math.floor(Date.now() / 90) % 3;
-                            const frm = frames[`effects/thruster_${idx}`] || frames['effects/thruster_0'];
-                            const sw = frm.w, sh = frm.h;
-                            const target = Math.max(10, npc.size * 1.2) * this.sizeMultiplier;
-                            const scale = target / Math.max(sw, sh);
-                            const dw = sw * scale, dh = sh * scale;
-                            this.ctx.save();
-                            // place behind ship along -x
-                            this.ctx.translate(-npc.size - dw*0.4, 0);
-                            this.ctx.drawImage(effects.image, frm.x, frm.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                            this.ctx.restore();
+                        if (effects?.image) {
+                            const baseTarget = Math.max(10, npc.size * 1.2) * this.sizeMultiplier;
+                            const typeScale = scaleMap[npc.type] || 1.4;
+                            const outerComp = canUseSprites ? 1 : (typeScale * this.sizeMultiplier);
+                            this.thrusterFX.draw(this.ctx, effects, this.quality, {
+                                offsetX: -npc.size,
+                                offsetY: 0,
+                                baseTarget,
+                                outerScaleComp: outerComp
+                            });
                         }
                     } catch(_) {}
                 }
             }
-            
 
-            
-            // Ship body (with destruct pre-explosion effect)
-            const seq = npc.deathSeq;
-            if (seq) {
+                // Ship body (with destruct pre-explosion effect)
+                const seq = npc.deathSeq;
+                if (seq) {
                 const now = performance.now ? performance.now() : Date.now();
                 const t = Math.min(1, (now - seq.start) / (seq.duration || 450));
                 // Pulsing white core and flicker before destruction
@@ -1086,11 +1162,13 @@ export class RenderSystem {
                 gg.addColorStop(1, 'transparent');
                 this.ctx.fillStyle = gg;
                 this.ctx.beginPath(); this.ctx.arc(0, 0, glowR, 0, Math.PI*2); this.ctx.fill();
-            } else {
+                } else {
                 this.renderNPCShip(npc);
+                }
+            } finally {
+                // Always restore per-NPC to avoid transform leaks
+                this.ctx.restore();
             }
-            
-            this.ctx.restore();
 
             // Faction/hostility brackets (subtle corner brackets around hostiles)
             // Keep draw in screen space (no rotation), sized from npc size and scale
@@ -1334,7 +1412,8 @@ export class RenderSystem {
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
                     try {
-                        this.ctx.rotate(this.spriteRotationOffset);
+                        const per = this.spriteOrientationOverrides[spriteId] || 0;
+                        this.ctx.rotate(this.spriteRotationOffset + per);
                         this.ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
                         this._dbgLog('npc-sprite-'+spriteId, '[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
                         drew = true;
@@ -1368,7 +1447,8 @@ export class RenderSystem {
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
                     try {
-                        this.ctx.rotate(this.spriteRotationOffset);
+                        const per = this.spriteOrientationOverrides[spriteId] || 0;
+                        this.ctx.rotate(this.spriteRotationOffset + per);
                         this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
                         this._dbgLog('npc-atlas-'+spriteId, '[RenderSystem] NPC atlas sprite', spriteId, 'aliasUsed', aliasUsed);
                         drew = true;
@@ -1389,7 +1469,7 @@ export class RenderSystem {
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
-                    try { this.ctx.rotate(this.spriteRotationOffset); this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drew = true; } catch(_) {}
+                    try { const per = (this.spriteOrientationOverrides[spriteId] || 0); this.ctx.rotate(this.spriteRotationOffset + per); this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drew = true; } catch(_) {}
                     finally { this.ctx.restore(); }
                 }
             }
@@ -1658,10 +1738,13 @@ export class RenderSystem {
                     -ship.size - 15, 0,
                     -ship.size, 0
                 );
+                const fxOn = !!(this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useEffectsSprites);
                 thrustGradient.addColorStop(0, 'transparent');
-                thrustGradient.addColorStop(0.4, `rgba(100, 150, 255, ${0.3 * flicker})`);
-                thrustGradient.addColorStop(0.7, `rgba(150, 200, 255, ${0.6 * flicker})`);
-                thrustGradient.addColorStop(1, `rgba(255, 255, 255, ${0.9 * flicker})`);
+                // Keep vector thrust visible even when FX is on; minor reduction only
+                const mult = fxOn ? 0.5 : 0.6;
+                thrustGradient.addColorStop(0.4, `rgba(100, 150, 255, ${mult * 0.5 * flicker})`);
+                thrustGradient.addColorStop(0.7, `rgba(150, 200, 255, ${mult * 1.0 * flicker})`);
+                thrustGradient.addColorStop(1, `rgba(255, 255, 255, ${mult * 1.5 * flicker})`);
                 
                 this.ctx.fillStyle = thrustGradient;
                 this.ctx.beginPath();
@@ -1713,7 +1796,8 @@ export class RenderSystem {
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
                     try {
-                        this.ctx.rotate(this.spriteRotationOffset);
+                        const per = this.spriteOrientationOverrides[spriteId] || 0;
+                        this.ctx.rotate(this.spriteRotationOffset + per);
                         this.ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
                         this._dbgLog('player-sprite', '[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
                         drewSprite = true;
@@ -1745,7 +1829,8 @@ export class RenderSystem {
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
                     try {
-                        this.ctx.rotate(this.spriteRotationOffset);
+                        const per = this.spriteOrientationOverrides[spriteId] || 0;
+                        this.ctx.rotate(this.spriteRotationOffset + per);
                         this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
                         this._dbgLog('player-atlas', '[RenderSystem] Player atlas sprite', spriteId);
                         drewSprite = true;
@@ -1764,7 +1849,7 @@ export class RenderSystem {
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
-                    try { this.ctx.rotate(this.spriteRotationOffset); this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+                    try { const per = this.spriteOrientationOverrides[spriteId] || 0; this.ctx.rotate(this.spriteRotationOffset + per); this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
                     finally { this.ctx.restore(); }
                 }
             }
@@ -1810,6 +1895,41 @@ export class RenderSystem {
             if (spritesActive) this.ctx.restore();
         }
         
+        // Optional sprite-based flame overlay if effects atlas is available (opt-in) — draw after body
+        if (isThrusting) {
+            const _rs = this.stateManager.state.renderSettings;
+            if (_rs && _rs.useEffectsSprites) {
+                try {
+                    const effects = this.stateManager.state.assets?.atlases?.effects;
+                    // Bigger, more visible FX than vector gradient
+                    // Shorter plume per feedback (~half previous length)
+                    const baseTarget = Math.max(20, ship.size * 2.2 * this.sizeMultiplier + 8);
+                    const outerComp = spritesOnPlayer ? 1 : (1.6 * this.sizeMultiplier);
+                    this.thrusterFX.draw(this.ctx, effects, this.quality, {
+                        offsetX: -ship.size,
+                        offsetY: 0,
+                        baseTarget,
+                        outerScaleComp: outerComp,
+                        alignFactor: 0.25
+                    });
+                } catch(_) {}
+                // Add a thin cyan beam for unmistakable FX ON difference (independent of atlas)
+                this.ctx.save();
+                try {
+                    const L = Math.max(16, ship.size * 1.5);
+                    const grad = this.ctx.createLinearGradient(-ship.size - L, 0, -ship.size, 0);
+                    grad.addColorStop(0, 'rgba(120,200,255,0.0)');
+                    grad.addColorStop(1, 'rgba(120,200,255,0.85)');
+                    this.ctx.strokeStyle = grad;
+                    this.ctx.lineWidth = 2.2;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(-ship.size - L, 0);
+                    this.ctx.lineTo(-ship.size, 0);
+                    this.ctx.stroke();
+                } finally { this.ctx.restore(); }
+            }
+        }
+
         // Weapon indicators
         if (ship.weapons && ship.weapons.length > 0) {
             this.ctx.fillStyle = '#ff5555';
@@ -1818,142 +1938,13 @@ export class RenderSystem {
         
         this.ctx.restore();
         
-        // Health bar
-        if (ship.health < ship.maxHealth) {
-            const barWidth = 40;
-            const barHeight = 4;
-            this.ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-            this.ctx.fillRect(ship.x - barWidth/2, ship.y - ship.size - 15, barWidth, barHeight);
-            this.ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-            this.ctx.fillRect(ship.x - barWidth/2, ship.y - ship.size - 15, 
-                            barWidth * (ship.health / ship.maxHealth), barHeight);
-        }
     }
     
     /**
      * Render explosions
      */
     renderExplosions(state) {
-        const explosions = state.explosions || [];
-        const viewLeft = this.camera.x - this.screenCenter.x - 150;
-        const viewTop = this.camera.y - this.screenCenter.y - 150;
-        const viewRight = this.camera.x + this.screenCenter.x + 150;
-        const viewBottom = this.camera.y + this.screenCenter.y + 150;
-
-        for (let exp of explosions) {
-            // Frustum cull explosions outside viewport with margin
-            if (exp.x + exp.maxRadius < viewLeft || exp.x - exp.maxRadius > viewRight ||
-                exp.y + exp.maxRadius < viewTop || exp.y - exp.maxRadius > viewBottom) {
-                continue;
-            }
-            const progress = exp.lifetime / exp.maxLifetime;
-            const radius = exp.radius + (exp.maxRadius - exp.radius) * progress;
-            const isTiny = (exp.maxRadius || 0) <= 20; // asteroid/impact pops
-            // Initial core flash
-            if (progress < 0.12) {
-                const flashAlpha = (1 - (progress / 0.12)) * 0.9;
-                const fg = this.ctx.createRadialGradient(exp.x, exp.y, 0, exp.x, exp.y, Math.max(10, radius*0.6));
-                fg.addColorStop(0, `rgba(255,255,255,${flashAlpha})`);
-                fg.addColorStop(1, 'rgba(255,255,255,0)');
-                this.ctx.fillStyle = fg;
-                this.ctx.beginPath();
-                this.ctx.arc(exp.x, exp.y, Math.max(12, radius*0.6), 0, Math.PI*2);
-                this.ctx.fill();
-            }
-            // Optional explosion sprite overlay if effects atlas exists (skip for tiny impacts and marked impacts)
-            if (!isTiny && !exp.isImpact) {
-                try {
-                    const effects = this.stateManager.state.assets?.atlases?.effects;
-                    const frm = effects?.frames?.['effects/explosion_0'];
-                    if (effects?.image && frm) {
-                        const sw = frm.w, sh = frm.h;
-                        const scale = Math.max(1.0, (radius * 1.6) / Math.max(sw, sh));
-                        const dw = sw * scale, dh = sh * scale;
-                        this.ctx.save();
-                        this.ctx.globalAlpha = Math.max(0, 1 - progress);
-                        this.ctx.drawImage(effects.image, frm.x, frm.y, sw, sh, exp.x - dw/2, exp.y - dh/2, dw, dh);
-                        this.ctx.restore();
-                    }
-                } catch(_) {}
-            }
-
-            // Multiple explosion rings (quality-aware)
-            const ringCount = isTiny ? 1 : (this.quality === 'low' ? 1 : (this.quality === 'medium' ? 2 : 3));
-            for (let i = 0; i < ringCount; i++) {
-                const ringProgress = Math.max(0, progress - i * 0.12);
-                const ringRadius = (isTiny ? radius * 0.7 : radius * (1 - i * 0.2));
-                const alpha = (isTiny ? 0.6 : 1) * (1 - ringProgress) * (1 - i * 0.3);
-                if (this.quality === 'low') {
-                    this.ctx.fillStyle = `rgba(255, 140, 40, ${alpha * 0.6})`;
-                    this.ctx.beginPath();
-                    this.ctx.arc(exp.x, exp.y, ringRadius, 0, Math.PI * 2);
-                    this.ctx.fill();
-                } else {
-                    const gradient = this.ctx.createRadialGradient(
-                        exp.x, exp.y, ringRadius * 0.5,
-                        exp.x, exp.y, ringRadius
-                    );
-                    gradient.addColorStop(0, `rgba(255, 255, 200, ${alpha})`);
-                    gradient.addColorStop(0.3, `rgba(255, 150, 0, ${alpha * 0.8})`);
-                    gradient.addColorStop(0.7, `rgba(255, 50, 0, ${alpha * 0.5})`);
-                    gradient.addColorStop(1, 'transparent');
-                    this.ctx.fillStyle = gradient;
-                    this.ctx.beginPath();
-                    this.ctx.arc(exp.x, exp.y, ringRadius, 0, Math.PI * 2);
-                    this.ctx.fill();
-                }
-            }
-            
-            // Shockwave outline for first half (skip for tiny impacts)
-            if (!isTiny && exp.shockwave && progress < 0.5) {
-                this.ctx.save();
-                const a = Math.max(0, 1 - progress * 2);
-                this.ctx.strokeStyle = `rgba(255,255,255,${a * 0.8})`;
-                this.ctx.lineWidth = Math.max(1.5, Math.min(4, exp.maxRadius * 0.03));
-                this.ctx.beginPath();
-                this.ctx.arc(exp.x, exp.y, radius * 0.9, 0, Math.PI * 2);
-                this.ctx.stroke();
-                this.ctx.restore();
-            }
-            // Sparks
-            if (progress < 0.5 && this.showParticles) {
-                this.ctx.fillStyle = `rgba(255, 255, 0, ${1 - progress * 2})`;
-                const sparkCount = isTiny ? 2 : (this.quality === 'low' ? 3 : 8);
-                for (let i = 0; i < sparkCount; i++) {
-                    const angle = (Math.PI * 2 / 8) * i;
-                    const dist = radius * 1.5 * progress;
-                    const sparkX = exp.x + Math.cos(angle) * dist;
-                    const sparkY = exp.y + Math.sin(angle) * dist;
-                    this.ctx.fillRect(sparkX - 1, sparkY - 1, 2, 2);
-                }
-            }
-        }
-
-        // Draw flipbook explosion overlays (on top)
-        const anims = state.explosionAnims || [];
-        if (anims.length) {
-            const now = performance.now ? performance.now() : Date.now();
-            for (const a of anims) {
-                if (a.isImpact) continue; // don't draw flipbook for impact pops
-                if (!a || !a.frames || !a.frames.length) continue;
-                // Quality-aware frame stepping
-                const step = (this.quality === 'low') ? 2 : (this.quality === 'medium' ? 1 : 1);
-                const fpsEff = Math.max(6, Math.floor((a.fps || 24) / step));
-                const elapsed = (now - a.start) / 1000;
-                const frame = Math.min(a.frames.length - 1, Math.floor(elapsed * fpsEff));
-                const alpha = Math.max(0, 1 - (frame / a.frames.length));
-                const img = a.frames[frame];
-                if (!img) continue;
-                const sw = img.naturalWidth || img.width || 16;
-                const sh = img.naturalHeight || img.height || 16;
-                const dw = sw * a.scale, dh = sh * a.scale;
-                this.ctx.save();
-                this.ctx.globalAlpha = alpha;
-                this.ctx.translate(a.x, a.y);
-                this.ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
-                this.ctx.restore();
-            }
-        }
+        this.explosionRenderer.render(this.ctx, state, this.camera, this.screenCenter, this.quality, this.showParticles);
     }
 
     /**

@@ -32,7 +32,9 @@ export default class DebugSystem {
             drawVectors: false,
             drawNPCInfo: false,
             showParticles: true,
-            fps: { current: 0, average: 0, update: 0, render: 0 }
+            fps: { current: 0, average: 0, update: 0, render: 0 },
+            renderLint: false,
+            renderLintTrace: false
         };
 
         // Subscribe to toggle and keys
@@ -172,6 +174,8 @@ export default class DebugSystem {
         const wepStr = weapon ? `${weapon.type} (cd:${ship.weaponCooldown||0})` : 'none';
 
         const useSprites = !!(s.renderSettings && s.renderSettings.useSprites);
+        const spriteCulling = !!(s.renderSettings && s.renderSettings.spriteCulling);
+        const useEffectsSprites = !!(s.renderSettings && s.renderSettings.useEffectsSprites);
         const spriteCount = (s.assets && s.assets.sprites) ? Object.keys(s.assets.sprites).length : 0;
         this.panel.innerHTML = `
             <div style="color:#0ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Debug</div>
@@ -183,6 +187,8 @@ export default class DebugSystem {
             <div>Spread: x${(dbg.spreadMult??1).toFixed(1)} ( [ / ] )</div>
             <div>Quality: ${dbg.renderQuality||'high'} (F3 to cycle)</div>
             <div>Sprites: ${useSprites ? 'ON' : 'OFF'} • Loaded: ${spriteCount}</div>
+            <div>Overlay: Culling ${spriteCulling?'ON':'OFF'} • FX Thrusters ${useEffectsSprites?'ON':'OFF'}</div>
+            <div>Render Lint: ${dbg.renderLint?'ON':'OFF'} • Trace ${dbg.renderLintTrace?'ON':'OFF'} • Reset ${dbg.renderLintReset?'ON':'OFF'}</div>
             <div style="margin-top:6px; color:#aaa;">1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo</div>
             <div style="color:#8ac;">[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj</div>
             <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -192,6 +198,10 @@ export default class DebugSystem {
                 <button data-dbg="mining" style="font-size:10px; padding:2px 6px;">Grant Mining</button>
                 <button data-dbg="switch" style="font-size:10px; padding:2px 6px;">Next Weapon</button>
                 <button data-dbg="sprites" style="font-size:10px; padding:2px 6px;">Toggle Sprites</button>
+                <button data-dbg="culling" style="font-size:10px; padding:2px 6px;">Toggle Culling</button>
+                <button data-dbg="fx" style="font-size:10px; padding:2px 6px;">Toggle FX</button>
+                <button data-dbg="lint" style="font-size:10px; padding:2px 6px;">Lint</button>
+                <button data-dbg="linttrace" style="font-size:10px; padding:2px 6px;">Trace</button>
                 <span style="color:#faa; margin-left:auto;">G:God ${dbg.godMode?'ON':'OFF'}</span>
             </div>
         `;
@@ -203,6 +213,23 @@ export default class DebugSystem {
             const btnM = this.panel.querySelector('button[data-dbg="mining"]');
             const btnS = this.panel.querySelector('button[data-dbg="switch"]');
             const btnSpr = this.panel.querySelector('button[data-dbg="sprites"]');
+            const btnCull = this.panel.querySelector('button[data-dbg="culling"]');
+            const btnFx = this.panel.querySelector('button[data-dbg="fx"]');
+            const btnLint = this.panel.querySelector('button[data-dbg="lint"]');
+            const btnTrace = this.panel.querySelector('button[data-dbg="linttrace"]');
+            let btnReset = this.panel.querySelector('button[data-dbg="lintreset"]');
+            if (!btnReset) {
+                // Inject Reset button if missing (resilient to minor overlay rebuilds)
+                const row = this.panel.querySelector('div[style*="display:flex"]');
+                if (row) {
+                    const b = document.createElement('button');
+                    b.textContent = 'Reset';
+                    b.setAttribute('data-dbg', 'lintreset');
+                    Object.assign(b.style, { fontSize: '10px', padding: '2px 6px' });
+                    row.insertBefore(b, row.querySelector('span') /* before right-side span */);
+                    btnReset = b;
+                }
+            }
             const arm = (btn, fn) => {
                 if (!btn) return;
                 btn.onclick = async () => {
@@ -229,6 +256,44 @@ export default class DebugSystem {
                 st.renderSettings.useSprites = next;
                 this.eventBus.emit('render.useSprites', { enabled: next });
                 this.eventBus.emit('ui.message', { message: `Sprites ${next ? "ON" : "OFF"}`, type: "info", duration: 1000 });
+                this.renderOverlay();
+            });
+            arm(btnCull, async () => {
+                const st = this.stateManager.state;
+                st.renderSettings = st.renderSettings || {};
+                const next = !st.renderSettings.spriteCulling;
+                st.renderSettings.spriteCulling = next;
+                try { localStorage.setItem('gt.render.spriteCulling', String(next)); } catch(_) {}
+                this.eventBus.emit('render.spriteCulling', { enabled: next });
+                this.eventBus.emit('ui.message', { message: `Sprite culling ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.renderOverlay();
+            });
+            arm(btnFx, async () => {
+                const st = this.stateManager.state;
+                st.renderSettings = st.renderSettings || {};
+                const next = !st.renderSettings.useEffectsSprites;
+                st.renderSettings.useEffectsSprites = next;
+                try { localStorage.setItem('gt.render.useEffectsSprites', String(next)); } catch(_) {}
+                this.eventBus.emit('render.useEffectsSprites', { enabled: next });
+                this.eventBus.emit('ui.message', { message: `FX thrusters ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.renderOverlay();
+            });
+            arm(btnLint, async () => {
+                const st = this.stateManager.state;
+                st.debug.renderLint = !st.debug.renderLint;
+                this.eventBus.emit('ui.message', { message: `Render Lint ${st.debug.renderLint ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.renderOverlay();
+            });
+            arm(btnTrace, async () => {
+                const st = this.stateManager.state;
+                st.debug.renderLintTrace = !st.debug.renderLintTrace;
+                this.eventBus.emit('ui.message', { message: `Lint Trace ${st.debug.renderLintTrace ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.renderOverlay();
+            });
+            arm(btnReset, async () => {
+                const st = this.stateManager.state;
+                st.debug.renderLintReset = !st.debug.renderLintReset;
+                this.eventBus.emit('ui.message', { message: `Lint Auto-Reset ${st.debug.renderLintReset ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
                 this.renderOverlay();
             });
             

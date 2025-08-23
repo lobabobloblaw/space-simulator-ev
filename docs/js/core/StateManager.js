@@ -1,6 +1,29 @@
 import { getEventBus, GameEvents } from './EventBus.js';
 
 /**
+ * @typedef {Object} RenderSettings
+ * @property {boolean} [useSprites] Enable ship/NPC sprites
+ * @property {boolean} [spriteCulling] Enable gentle culling for NPCs
+ * @property {boolean} [useEffectsSprites] Enable effects sprite overlays (thrusters)
+ * @property {boolean} [useEffectsSpritesNPC] Enable NPC effects sprite overlays (opt-in)
+ * @property {number}  [starDensity] Starfield density multiplier
+ */
+
+/**
+ * @typedef {Object} DebugState
+ * @property {boolean} enabled Debug overlay enabled
+ * @property {boolean} drawHitboxes Draw hitboxes
+ * @property {boolean} drawVectors Draw vectors
+ * @property {boolean} drawNPCInfo Draw NPC info
+ * @property {boolean} showParticles Show particles
+ * @property {{current:number, average:number, update:number, render:number}} fps FPS stats
+ * @property {string} [renderQuality] 'low'|'medium'|'high'
+ * @property {boolean} [renderLint] Render lint logging enabled
+ * @property {boolean} [renderLintTrace] Include stack traces in lint logs
+ * @property {boolean} [renderLintReset] Auto-reset canvas state on lint findings
+ */
+
+/**
  * StateManager - Centralized game state management
  * Single source of truth for all game state
  */

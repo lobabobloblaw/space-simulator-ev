@@ -251,6 +251,23 @@ async function initializeGameState() {
     state.renderSettings.starDensity = STAR_DENSITY;
     // Default sprites ON; can be toggled via debug overlay
     state.renderSettings.useSprites = state.renderSettings.useSprites ?? true;
+    // Optional overlay toggles (persist if available)
+    try {
+        const persistedCull = localStorage.getItem('gt.render.spriteCulling');
+        if (persistedCull !== null) state.renderSettings.spriteCulling = (persistedCull === 'true');
+        else state.renderSettings.spriteCulling = state.renderSettings.spriteCulling || false;
+        const persistedFX = localStorage.getItem('gt.render.useEffectsSprites');
+        if (persistedFX !== null) state.renderSettings.useEffectsSprites = (persistedFX === 'true');
+        else state.renderSettings.useEffectsSprites = state.renderSettings.useEffectsSprites || false;
+        // NPC FX overlays remain opt-in (default OFF)
+        const persistedFXNPC = localStorage.getItem('gt.render.useEffectsSpritesNPC');
+        if (persistedFXNPC !== null) state.renderSettings.useEffectsSpritesNPC = (persistedFXNPC === 'true');
+        else state.renderSettings.useEffectsSpritesNPC = state.renderSettings.useEffectsSpritesNPC || false;
+    } catch(_) {
+        state.renderSettings.spriteCulling = state.renderSettings.spriteCulling || false;
+        state.renderSettings.useEffectsSprites = state.renderSettings.useEffectsSprites || false;
+        state.renderSettings.useEffectsSpritesNPC = state.renderSettings.useEffectsSpritesNPC || false;
+    }
     state.stars = { far: [], mid: [], near: [] };
     
     // Far stars
@@ -352,6 +369,8 @@ function setupEventHandlers() {
         const now = performance.now ? performance.now() : Date.now();
         // Begin destruct sequence; delay final explosion a bit for drama
         state.ship.deathSeq = { start: now, duration: 600 };
+        // Audio: subtle crackle during pre-explosion
+        try { eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'crackle', intensity: 0.12 }); } catch(_) {}
         // Stop motion
         state.ship.vx = 0; state.ship.vy = 0;
         // Trigger explosion after delay and then mark destroyed

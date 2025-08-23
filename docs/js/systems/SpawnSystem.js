@@ -167,6 +167,50 @@ export class SpawnSystem {
             state.pickups.push(pickup);
         }
         
+        // Dusty gray debris and rock shards (visual variant distinct from fiery ship debris)
+        try {
+            if (!state.debris) state.debris = [];
+            if (!state.pools) state.pools = {};
+            if (!state.pools.debris) state.pools.debris = [];
+            const shardCount = 6 + Math.floor(Math.random() * 6); // 6–11 shards
+            for (let i = 0; i < shardCount; i++) {
+                const d = state.pools.debris.pop() || {};
+                d.x = asteroid.x; d.y = asteroid.y;
+                const ang = Math.random() * Math.PI * 2;
+                const spd = 0.6 + Math.random() * 1.2;
+                d.vx = Math.cos(ang) * spd + asteroid.vx * 0.3;
+                d.vy = Math.sin(ang) * spd + asteroid.vy * 0.3;
+                d.angle = Math.random() * Math.PI * 2;
+                d.va = (Math.random()-0.5) * 0.15;
+                d.size = 2 + Math.random()*3;
+                d.color = ['#999','#aaa','#888','#777'][Math.floor(Math.random()*4)];
+                d.lifetime = 0;
+                d.maxLifetime = 50 + Math.floor(Math.random()*30);
+                d.shape = 'shard';
+                state.debris.push(d);
+            }
+            const chunkCount = 3 + Math.floor(Math.random() * 4); // 3–6 small rock chunks
+            for (let i = 0; i < chunkCount; i++) {
+                const d = state.pools.debris.pop() || {};
+                d.x = asteroid.x; d.y = asteroid.y;
+                const ang = Math.random() * Math.PI * 2;
+                const spd = 0.4 + Math.random() * 1.0;
+                d.vx = Math.cos(ang) * spd + asteroid.vx * 0.25;
+                d.vy = Math.sin(ang) * spd + asteroid.vy * 0.25;
+                d.angle = Math.random() * Math.PI * 2;
+                d.va = (Math.random()-0.5) * 0.12;
+                d.size = 3 + Math.random() * 4;
+                d.color = ['#888','#777','#666'][Math.floor(Math.random()*3)];
+                d.lifetime = 0;
+                d.maxLifetime = 80 + Math.floor(Math.random()*40);
+                d.shape = 'poly';
+                const sides = 5 + Math.floor(Math.random()*3);
+                d.points = [];
+                for (let j=0;j<sides;j++){ d.points.push(0.6 + Math.random()*0.6); }
+                state.debris.push(d);
+            }
+        } catch(_) {}
+        
         // Replace with smaller asteroids if big enough
         if (asteroid.radius > 5) {
             for (let j = 0; j < 2; j++) {
@@ -297,6 +341,14 @@ export class SpawnSystem {
             if (oldest) state.pools.explosions.push(oldest);
         }
         state.explosions.push(explosion);
+
+        // Audio: trigger explosion sound sized by impact/size
+        try {
+            this.eventBus.emit(GameEvents.AUDIO_PLAY, {
+                sound: 'explosion',
+                small: !!isImpact || maxRadius < 30
+            });
+        } catch(_) {}
         
         // Layered secondary blast for richer look
         if (!isImpact && maxRadius >= 40) {
@@ -311,8 +363,11 @@ export class SpawnSystem {
             state.explosions.push(e2);
         }
 
-        // Emit fiery hit sparks (debris/embers)
-        const sparkCount = data.size === 'large' ? 20 : (data.size === 'small' ? 8 : 14);
+        // Emit fiery hit sparks (debris/embers) — quality-aware reduction
+        const q = (state.debug && state.debug.renderQuality) || 'high';
+        const baseSpark = (data.size === 'large' ? 20 : (data.size === 'small' ? 8 : 14));
+        const sparkMult = (q === 'low') ? 0.5 : (q === 'medium' ? 0.8 : 1);
+        const sparkCount = Math.max(1, Math.floor(baseSpark * sparkMult));
         for (let i = 0; i < sparkCount; i++) {
             const s = state.pools.hitSparks.pop() || {};
             s.x = data.x; s.y = data.y;
@@ -344,7 +399,9 @@ export class SpawnSystem {
         // Launch flipbook explosion anim if available (skip for impact pops)
         try {
             const fb = state.assets?.effects?.explosionFlipbook;
-            if (!isImpact && fb && Array.isArray(fb.frames) && fb.frames.length) {
+            const q = (state.debug && state.debug.renderQuality) || 'high';
+            // Reliability: only skip flipbook on low quality; always show on medium/high
+            if (!isImpact && fb && Array.isArray(fb.frames) && fb.frames.length && q !== 'low') {
                 if (!state.explosionAnims) state.explosionAnims = [];
                 const base = fb.frames[0];
                 const baseMax = Math.max(base.naturalWidth||base.width||16, base.naturalHeight||base.height||16);
@@ -370,7 +427,10 @@ export class SpawnSystem {
             if (!state.debris) state.debris = [];
             if (!state.pools) state.pools = {};
             if (!state.pools.debris) state.pools.debris = [];
-            const chunkCount = data.size === 'large' ? 10 : (data.size === 'small' ? 4 : 7);
+            const baseChunks = (data.size === 'large' ? 10 : (data.size === 'small' ? 4 : 7));
+            const q = (state.debug && state.debug.renderQuality) || 'high';
+            const chunkMult = (q === 'low') ? 0.6 : (q === 'medium' ? 0.85 : 1);
+            const chunkCount = Math.max(1, Math.floor(baseChunks * chunkMult));
             for (let i = 0; i < chunkCount; i++) {
                 const d = state.pools.debris.pop() || {};
                 d.x = data.x; d.y = data.y;
