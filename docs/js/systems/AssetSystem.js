@@ -17,6 +17,12 @@ export default class AssetSystem {
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
             state.assets.ready = true;
+            // Auto-enable sprites on first load; user can toggle via debug
+            state.renderSettings = state.renderSettings || {};
+            if (typeof state.renderSettings.useSprites === 'undefined') {
+                state.renderSettings.useSprites = true;
+            }
+            try { this.eventBus.emit('render.useSprites', { enabled: state.renderSettings.useSprites }); } catch(_) {}
             this.ready = true;
             try { this.eventBus.emit('assets.ready', { atlases: Object.keys(state.assets.atlases) }); } catch(_) {}
             console.log('[AssetSystem] Placeholder atlas ready');
