@@ -53,6 +53,11 @@ Toggles & Debug
 - `state.renderSettings.useEffectsSprites` (default OFF) — opt-in thrust flame atlas overlay.
 - Logging only when `window.DEBUG_SPRITES === 'verbose'`.
 
+Startup Defaults
+- Sprites are ON by default at game start:
+  - `docs/js/main_eventbus_pure.js` sets `state.renderSettings.useSprites ??= true`.
+  - `docs/js/systems/AssetSystem.js` initializes `useSprites = true` when unset and emits `render.useSprites`.
+
 How to integrate a custom explosion flipbook
 1) Place frames under `docs/assets/explosions/` (e.g., `explosion_000.png` … `explosion_097.png`).
 2) Create/adjust `docs/js/assets/explosion.json` with `{ "fps": 24, "frames": [ "./assets/explosions/explosion_000.png", ... ] }`.
@@ -76,4 +81,3 @@ Handy knobs (in code)
 - `RenderSystem.sizeMultiplier` — 1.25 (global ship size).
 - `RenderSystem.spriteRotationOffset` — `Math.PI/2` (+90°).
 - Flipbook speed/scale — see `SpawnSystem.handleExplosion` (fps multiplier and scale factor).
-
