@@ -1205,6 +1205,13 @@ export class RenderSystem {
                     return;
                 } catch(_) {}
             }
+            // If sprites are requested but neither PNG nor atlas frame available, draw a placeholder and return
+            try {
+                this.ctx.fillStyle = 'rgba(255,0,255,0.5)';
+                this.ctx.fillRect(-npc.size, -npc.size, npc.size*2, npc.size*2);
+                if (window.DEBUG_SPRITES) console.debug('[RenderSystem] NPC sprite placeholder', spriteId);
+                return;
+            } catch(_) {}
         }
         // Unified ship designs per type
         const typeToDesign = {
@@ -1538,6 +1545,13 @@ export class RenderSystem {
                         drewSprite = true;
                     } catch(_) {}
                 }
+            }
+            // If sprites requested but none drawn, draw placeholder and skip vector fallback
+            if (!drewSprite) {
+                this.ctx.fillStyle = 'rgba(255,0,255,0.5)';
+                this.ctx.fillRect(-ship.size, -ship.size, ship.size*2, ship.size*2);
+                if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player sprite placeholder', spriteId);
+                drewSprite = true;
             }
         }
         if (!drewSprite) {

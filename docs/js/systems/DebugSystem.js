@@ -202,7 +202,6 @@ export default class DebugSystem {
             const btnM = this.panel.querySelector('button[data-dbg="mining"]');
             const btnS = this.panel.querySelector('button[data-dbg="switch"]');
             const btnSpr = this.panel.querySelector('button[data-dbg="sprites"]');
-            const btnSpr = this.panel.querySelector('button[data-dbg="sprites"]');
             const arm = (btn, fn) => {
                 if (!btn) return;
                 btn.onclick = async () => {
@@ -232,15 +231,7 @@ export default class DebugSystem {
                 this.eventBus.emit('ui.message', { message: `Sprites ${next ? "ON" : "OFF"}`, type: "info", duration: 1000 });
                 this.renderOverlay();
             });
-            arm(btnSpr, async () => {
-                const st = this.stateManager.state;
-                st.renderSettings = st.renderSettings || {};
-                const next = !st.renderSettings.useSprites;
-                st.renderSettings.useSprites = next;
-                this.eventBus.emit('render.useSprites', { enabled: next });
-                this.eventBus.emit('ui.message', { message: `Sprites ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 1000 });
-                this.renderOverlay();
-            });
+            
         } catch (_) {}
     }
 
