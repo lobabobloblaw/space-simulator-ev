@@ -1,4 +1,8 @@
 [
-  { "id": "ships/raider_0",   "src": "./assets/sprites/ships/raider_0.svg" },
-  { "id": "ships/trader_0",   "src": "./assets/sprites/ships/trader_0.svg" }
+  { "id": "ships/pirate_0",      "src": "./assets/sprites/ships/pirate_0.png" },
+  { "id": "ships/patrol_0",      "src": "./assets/sprites/ships/patrol_0.png" },
+  { "id": "ships/interceptor_0", "src": "./assets/sprites/ships/interceptor_0.png" },
+  { "id": "ships/freighter_0",   "src": "./assets/sprites/ships/freighter_0.png" },
+  { "id": "ships/trader_0",      "src": "./assets/sprites/ships/trader_0.png" },
+  { "id": "ships/shuttle_0",     "src": "./assets/sprites/ships/shuttle_0.png" }
 ]

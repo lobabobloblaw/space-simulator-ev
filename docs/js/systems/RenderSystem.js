@@ -1163,7 +1163,7 @@ export class RenderSystem {
         // Try sprite render if enabled and assets are ready
         if ((this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites) && (this.stateManager.state.assets && this.stateManager.state.assets.ready)) {
             const assets = this.stateManager.state.assets;
-            const idMap = { pirate: 'ships/raider_0', trader: 'ships/trader_0', patrol:'ships/patrol', freighter:'ships/freighter', interceptor:'ships/interceptor' };
+            const idMap = { pirate: 'ships/pirate_0', trader: 'ships/trader_0', patrol:'ships/patrol_0', freighter:'ships/freighter_0', interceptor:'ships/interceptor_0' };
             const spriteId = idMap[npc.type] || 'ships/raider_0';
             // Prefer standalone sprite image if available
             const sprite = assets.sprites && assets.sprites[spriteId];
@@ -1476,7 +1476,7 @@ export class RenderSystem {
         const assets = this.stateManager.state.assets;
         if (rs && rs.useSprites && assets && assets.ready) {
             // Map ship class to sprite id
-            const classMap = { interceptor:'ships/interceptor', freighter:'ships/freighter', trader:'ships/trader_0', patrol:'ships/patrol', pirate:'ships/raider_0', shuttle:'ships/shuttle' };
+            const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_0', trader:'ships/trader_0', patrol:'ships/patrol_0', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
             const spriteId = classMap[state.ship.class] || 'ships/trader_0';
             // Prefer standalone sprite
             const sprite = assets.sprites && assets.sprites[spriteId];
