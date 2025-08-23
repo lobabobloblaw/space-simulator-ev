@@ -14,6 +14,8 @@ export default class AssetSystem {
             const state = this.stateManager.state;
             state.assets = state.assets || { atlases: {} };
             state.assets.atlases.placeholder = atlas;
+            // Try to load standalone sprite images (optional manifest)
+            await this.loadSpritesManifest();
             state.assets.ready = true;
             this.ready = true;
             try { this.eventBus.emit('assets.ready', { atlases: Object.keys(state.assets.atlases) }); } catch(_) {}
@@ -45,6 +47,29 @@ export default class AssetSystem {
                 }
             });
         }
+    }
+
+    async loadSpritesManifest() {
+        try {
+            const url = new URL('../assets/sprites.json', import.meta.url).href;
+            const res = await fetch(url, { cache: 'no-cache' });
+            if (!res.ok) return; // manifest optional
+            const list = await res.json();
+            if (!Array.isArray(list)) return;
+            const state = this.stateManager.state;
+            state.assets = state.assets || {};
+            const sprites = state.assets.sprites || (state.assets.sprites = {});
+            const loads = list.map(async (entry) => {
+                if (!entry || !entry.id || !entry.src) return;
+                try {
+                    const img = await this.loadImage(entry.src);
+                    sprites[entry.id] = { image: img, w: img.width, h: img.height };
+                } catch (_) { /* ignore missing */ }
+            });
+            await Promise.allSettled(loads);
+            const count = Object.keys(sprites).length;
+            if (count) console.log(`[AssetSystem] Loaded ${count} standalone sprites`);
+        } catch (_) { /* optional */ }
     }
 
     async generatePlaceholderAtlas(meta) {
@@ -96,4 +121,3 @@ export default class AssetSystem {
         });
     }
 }
-

@@ -1162,21 +1162,27 @@ export class RenderSystem {
     renderNPCShip(npc) {
         // Try sprite render if enabled and assets are ready
         if ((this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites) && (this.stateManager.state.assets && this.stateManager.state.assets.ready)) {
-            const atlas = this.stateManager.state.assets.atlases && this.stateManager.state.assets.atlases.placeholder;
-            if (atlas && atlas.image && atlas.frames) {
-                const map = { pirate: 'ships/raider_0', trader: 'ships/trader_0' };
-                const frameId = map[npc.type] || 'ships/raider_0';
-                const frame = atlas.frames[frameId];
-                if (frame) {
-                    const sw = frame.w, sh = frame.h;
-                    const target = Math.max(12, npc.size * 2.4);
-                    const scale = target / Math.max(sw, sh);
-                    const dw = sw * scale, dh = sh * scale;
-                    try {
-                        this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                        return;
-                    } catch (_) { /* fall through to vector */ }
-                }
+            const assets = this.stateManager.state.assets;
+            const idMap = { pirate: 'ships/raider_0', trader: 'ships/trader_0', patrol:'ships/patrol', freighter:'ships/freighter', interceptor:'ships/interceptor' };
+            const spriteId = idMap[npc.type] || 'ships/raider_0';
+            // Prefer standalone sprite image if available
+            const sprite = assets.sprites && assets.sprites[spriteId];
+            if (sprite && sprite.image) {
+                const sw = sprite.w || sprite.image.width, sh = sprite.h || sprite.image.height;
+                const target = Math.max(12, npc.size * 2.0); // diameter ~= 2*size
+                const scale = target / Math.max(sw, sh);
+                const dw = sw * scale, dh = sh * scale;
+                try { this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh); return; } catch(_) {}
+            }
+            // Fallback to placeholder atlas frame
+            const atlas = assets.atlases && assets.atlases.placeholder;
+            const frame = atlas && atlas.frames && atlas.frames[spriteId];
+            if (atlas && frame) {
+                const sw = frame.w, sh = frame.h;
+                const target = Math.max(12, npc.size * 2.0);
+                const scale = target / Math.max(sw, sh);
+                const dw = sw * scale, dh = sh * scale;
+                try { this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh); return; } catch(_) {}
             }
         }
         // Unified ship designs per type
@@ -1469,17 +1475,29 @@ export class RenderSystem {
         const rs = this.stateManager.state.renderSettings;
         const assets = this.stateManager.state.assets;
         if (rs && rs.useSprites && assets && assets.ready) {
-            const atlas = assets.atlases && assets.atlases.placeholder;
-            const frame = atlas && atlas.frames && atlas.frames['ships/trader_0'];
-            if (atlas && frame) {
-                const sw = frame.w, sh = frame.h;
-                const target = Math.max(12, ship.size * 2.6);
+            // Map ship class to sprite id
+            const classMap = { interceptor:'ships/interceptor', freighter:'ships/freighter', trader:'ships/trader_0', patrol:'ships/patrol', pirate:'ships/raider_0', shuttle:'ships/shuttle' };
+            const spriteId = classMap[state.ship.class] || 'ships/trader_0';
+            // Prefer standalone sprite
+            const sprite = assets.sprites && assets.sprites[spriteId];
+            if (sprite && sprite.image) {
+                const sw = sprite.w || sprite.image.width, sh = sprite.h || sprite.image.height;
+                const target = Math.max(12, ship.size * 2.0);
                 const scale = target / Math.max(sw, sh);
                 const dw = sw * scale, dh = sh * scale;
-                try {
-                    this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
-                    drewSprite = true;
-                } catch(_) {}
+                try { this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+            }
+            // Fallback to placeholder atlas
+            if (!drewSprite) {
+                const atlas = assets.atlases && assets.atlases.placeholder;
+                const frame = atlas && atlas.frames && atlas.frames[spriteId];
+                if (atlas && frame) {
+                    const sw = frame.w, sh = frame.h;
+                    const target = Math.max(12, ship.size * 2.0);
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    try { this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+                }
             }
         }
         if (!drewSprite) {

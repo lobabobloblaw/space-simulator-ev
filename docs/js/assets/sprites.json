@@ -1,0 +1,9 @@
+[
+  { "id": "ships/raider_0",   "src": "./assets/sprites/ships/raider_0.png" },
+  { "id": "ships/trader_0",   "src": "./assets/sprites/ships/trader_0.png" },
+  { "id": "ships/interceptor","src": "./assets/sprites/ships/interceptor.png" },
+  { "id": "ships/freighter",  "src": "./assets/sprites/ships/freighter.png" },
+  { "id": "ships/patrol",     "src": "./assets/sprites/ships/patrol.png" },
+  { "id": "ships/shuttle",    "src": "./assets/sprites/ships/shuttle.png" }
+]
+
