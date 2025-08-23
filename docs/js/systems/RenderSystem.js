@@ -1172,7 +1172,13 @@ export class RenderSystem {
                 const target = Math.max(12, npc.size * 2.0); // diameter ~= 2*size
                 const scale = target / Math.max(sw, sh);
                 const dw = sw * scale, dh = sh * scale;
-                try { this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh); return; } catch(_) {}
+                try {
+                    this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
+                    // Debug border to verify sprite draw
+                    // this.ctx.strokeStyle = '#0f0'; this.ctx.lineWidth = 0.5; this.ctx.strokeRect(-dw/2, -dh/2, dw, dh);
+                    if (window.DEBUG_SPRITES) console.debug('[RenderSystem] NPC sprite', spriteId, 'dw/dh', dw|0, dh|0);
+                    return;
+                } catch(_) {}
             }
             // Fallback to placeholder atlas frame (with alias to existing demo frames)
             const atlas = assets.atlases && assets.atlases.placeholder;
@@ -1193,7 +1199,11 @@ export class RenderSystem {
                 const target = Math.max(12, npc.size * 2.0);
                 const scale = target / Math.max(sw, sh);
                 const dw = sw * scale, dh = sh * scale;
-                try { this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh); return; } catch(_) {}
+                try {
+                    this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
+                    if (window.DEBUG_SPRITES) console.debug('[RenderSystem] NPC atlas sprite', spriteId, 'alias used?', !!alias && !!alias[spriteId]);
+                    return;
+                } catch(_) {}
             }
         }
         // Unified ship designs per type
@@ -1496,7 +1506,11 @@ export class RenderSystem {
                 const target = Math.max(12, ship.size * 2.0);
                 const scale = target / Math.max(sw, sh);
                 const dw = sw * scale, dh = sh * scale;
-                try { this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+                try {
+                    this.ctx.drawImage(sprite.image, -dw/2, -dh/2, dw, dh);
+                    if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player sprite', spriteId, 'dw/dh', dw|0, dh|0);
+                    drewSprite = true;
+                } catch(_) {}
             }
             // Fallback to placeholder atlas
             if (!drewSprite) {
@@ -1518,7 +1532,11 @@ export class RenderSystem {
                     const target = Math.max(12, ship.size * 2.0);
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
-                    try { this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+                    try {
+                        this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
+                        if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player atlas sprite', spriteId);
+                        drewSprite = true;
+                    } catch(_) {}
                 }
             }
         }
