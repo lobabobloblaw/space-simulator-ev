@@ -218,6 +218,19 @@ export class RenderSystem {
         });
         this.eventBus.on(GameEvents.TARGET_CLEAR, () => { this.targetCamBlip = null; });
     }
+
+    getOrLoadSprite(spriteId) {
+        try {
+            const path = './assets/sprites/' + spriteId + '.png';
+            let img = this.spriteCache[path];
+            if (img) return img.complete ? img : null;
+            img = new Image();
+            img.onload = () => {};
+            img.src = path;
+            this.spriteCache[path] = img;
+            return null;
+        } catch (_) { return null; }
+    }
     
     // Stars are now generated in main_eventbus_pure.js and stored in state
     // This provides consistency across all systems
@@ -1165,6 +1178,10 @@ export class RenderSystem {
             const assets = this.stateManager.state.assets;
             const idMap = { pirate: 'ships/pirate_0', trader: 'ships/trader_0', patrol:'ships/patrol_0', freighter:'ships/freighter_0', interceptor:'ships/interceptor_0' };
             const spriteId = idMap[npc.type] || 'ships/pirate_0';
+            if (window.DEBUG_SPRITES) {
+                const has = !!(assets.sprites && assets.sprites[spriteId]);
+                console.debug('[RenderSystem] NPC try', npc.type, '->', spriteId, 'hasPNG', has);
+            }
             // Prefer standalone sprite image if available
             const sprite = assets.sprites && assets.sprites[spriteId];
             if (sprite && sprite.image) {
@@ -1506,6 +1523,10 @@ export class RenderSystem {
             // Map ship class to sprite id
             const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_0', trader:'ships/trader_0', patrol:'ships/patrol_0', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
             const spriteId = classMap[state.ship.class] || 'ships/trader_0';
+            if (window.DEBUG_SPRITES) {
+                const has = !!(assets.sprites && assets.sprites[spriteId]);
+                console.debug('[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
+            }
             // Prefer standalone sprite
             const sprite = assets.sprites && assets.sprites[spriteId];
             if (sprite && sprite.image) {
@@ -1544,6 +1565,19 @@ export class RenderSystem {
                         if (window.DEBUG_SPRITES) console.debug('[RenderSystem] Player atlas sprite', spriteId);
                         drewSprite = true;
                     } catch(_) {}
+                }
+            }
+            // Last-chance fallback to direct path using cache
+            if (!drewSprite) {
+                const direct = this.getOrLoadSprite(spriteId);
+                if (direct) {
+                    const sw = direct.naturalWidth || direct.width, sh = direct.naturalHeight || direct.height;
+                    if (sw && sh) {
+                        const target = Math.max(12, ship.size * 2.0);
+                        const scale = target / Math.max(sw, sh);
+                        const dw = sw * scale, dh = sh * scale;
+                        try { this.ctx.drawImage(direct, -dw/2, -dh/2, dw, dh); drewSprite = true; } catch(_) {}
+                    }
                 }
             }
             // If sprites requested but none drawn, draw placeholder and skip vector fallback
