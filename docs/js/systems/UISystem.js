@@ -105,6 +105,10 @@ export class UISystem {
         this.eventBus.on(GameEvents.AUDIO_STATE_CHANGED, this.handleAudioStateChanged);
         this.eventBus.on(GameEvents.AUDIO_MUSIC_STATE, this.handleMusicState);
         
+        // Ship lifecycle
+        this.eventBus.on(GameEvents.SHIP_DEATH, () => this.handleShipDestroyed());
+        this.eventBus.on(GameEvents.SHIP_RESPAWN, () => this.handleShipRespawn());
+        
         // Tutorial
         this.eventBus.on(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
 
@@ -205,6 +209,29 @@ export class UISystem {
     handleAudioStateChanged(data) {
         const enabled = data && data.enabled !== false;
         this.updateMuteLabel(enabled);
+    }
+
+    handleShipDestroyed() {
+        try {
+            document.body.classList.add('ship-destroyed');
+            // Pause music/radio
+            this.eventBus.emit(GameEvents.AUDIO_MUSIC_PAUSE);
+            // Mark radio UI as offline
+            const rb = document.getElementById('shipRadio');
+            const title = document.getElementById('radioTitle');
+            if (rb) { rb.classList.remove('scanning', 'tuned'); rb.classList.add('offline'); }
+            if (title) title.textContent = 'SIGNAL LOST';
+        } catch(_) {}
+    }
+    
+    handleShipRespawn() {
+        try {
+            document.body.classList.remove('ship-destroyed');
+            const rb = document.getElementById('shipRadio');
+            const title = document.getElementById('radioTitle');
+            if (rb) rb.classList.remove('offline');
+            if (title) title.textContent = 'SCANNING… 118.7 MHz CH-12';
+        } catch(_) {}
     }
 
     updateMuteLabel(enabled) {
@@ -318,7 +345,7 @@ export class UISystem {
         switch(this.tutorialStage) {
             case 'start':
                 if (!ship.weapons || ship.weapons.length === 0) {
-                    message = "WARNING: UNARMED // LOCATE PLANET AND TRADE FOR WEAPONS";
+                    message = "WARNING: UNARMED";
                 } else {
                     this.tutorialStage = 'armed';
                 }

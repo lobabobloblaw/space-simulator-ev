@@ -45,6 +45,18 @@ body {
     height: 100vh;
 }
 
+/* Ship destroyed: dim and desaturate HUD widgets, disable radio interaction */
+body.ship-destroyed #gameHUD {
+    filter: grayscale(0.9) brightness(0.6);
+}
+body.ship-destroyed #shipRadio,
+body.ship-destroyed #minimap,
+body.ship-destroyed #centerViewport {
+    opacity: 0.35;
+}
+body.ship-destroyed #shipRadio button { pointer-events: none; opacity: 0.6; }
+body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
+
 #gameCanvas {
     display: block;
     background: #000;
@@ -998,41 +1010,28 @@ body {
     cursor: not-allowed;
 }
 
-/* Tutorial Hints - Cyberpunk Alert Style */
+/* Tutorial Hint - tiny status line above HUD, aligned with stats */
 #tutorialHint {
     position: fixed;
-    top: var(--spacing-lg);
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-dark);
-    border: 1px solid var(--accent-border);
-    border-left: 3px solid var(--accent-primary);
-    color: var(--text-primary);
-    padding: var(--spacing-sm) var(--spacing-md);
-    font-size: 11px;
+    left: var(--spacing-md);
+    bottom: calc(110px + var(--spacing-md) + 6px);
+    transform: none;
+    background: transparent;
+    border: none;
+    color: var(--status-danger);
+    padding: 0;
+    font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 1px;
-    z-index: 10000;  /* Above notifications */
+    z-index: 1000;  /* above HUD */
     display: none;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    max-width: 600px;
+    text-shadow: 0 0 6px rgba(255, 0, 64, 0.25);
 }
 
-#tutorialHint.visible {
-    display: block;
-    animation: slideDown 0.3s ease-out;
-}
+#tutorialHint.visible { display: block; }
 
-@keyframes slideDown {
-    from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(-20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-    }
-}
+/* Hide hint when ship is destroyed (UI already shows a banner) */
+body.ship-destroyed #tutorialHint { display: none !important; }
 
 /* Cargo Status Bar */
 .cargo-status {

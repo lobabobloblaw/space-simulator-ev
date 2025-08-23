@@ -23,6 +23,8 @@ export default class TargetingSystem {
         this.eventBus.on(GameEvents.TARGET_CLEAR, this.handleClear);
         this.eventBus.on(GameEvents.NPC_DEATH, this.handleNPCDeath);
         this.eventBus.on(GameEvents.NPC_DESTROYED, this.handleNPCDestroyed);
+        // Clear targeting when the player ship is destroyed
+        this.eventBus.on(GameEvents.SHIP_DEATH, () => this.clear());
         return true;
     }
 

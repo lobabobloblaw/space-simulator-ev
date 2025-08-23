@@ -15,6 +15,7 @@ export class AudioSystem {
         this.enabled = false;
         this.masterVolume = 0.3;           // SFX master
         this.musicMaster = 0.9;            // Music master (separate from SFX)
+        this.musicStartOffsetSec = 2.4;    // Start radio tracks a bit in
         this.sounds = {};
         
         // Music/Radio state
@@ -30,6 +31,7 @@ export class AudioSystem {
             audio: null,
             tracker: { player: null, playing: false },
             forceSynth: false,
+            tuning: null,
         };
         
         // Bind event handlers
@@ -128,7 +130,8 @@ export class AudioSystem {
         this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit.bind(this));
 
         // Music/Radio controls
-        this.eventBus.on(GameEvents.AUDIO_MUSIC_TOGGLE, () => {
+        this.eventBus.on(GameEvents.AUDIO_MUSIC_TOGGLE, async () => {
+            try { if (this.context && this.context.state === 'suspended') await this.context.resume(); } catch(_) {}
             if (this.music.enabled) this.pauseMusic(); else this.playMusic();
         });
         this.eventBus.on(GameEvents.AUDIO_MUSIC_PLAY, () => this.playMusic());
@@ -142,13 +145,20 @@ export class AudioSystem {
      * Handle toggle sound event
      */
     handleToggleSound() {
+        // Toggle global audio (SFX + music)
+        const wasPlaying = this.music && this.music.enabled;
         this.enabled = !this.enabled;
         this.syncState();
-        
-        // Emit state change (SFX only)
+        if (!this.enabled) {
+            // Mute: pause music and stop any synth nodes
+            try { this.pauseMusic(); } catch(_) {}
+        } else {
+            // Unmute: resume music if it was previously on
+            if (wasPlaying) { try { this.playMusic(); } catch(_) {} }
+        }
+        // Notify UI
         this.eventBus.emit(GameEvents.AUDIO_STATE_CHANGED, { enabled: this.enabled });
-        // Do not pause music when SFX are disabled
-        
+        this.emitMusicState();
         console.log('[AudioSystem] Sound', this.enabled ? 'enabled' : 'disabled');
     }
     
@@ -475,27 +485,63 @@ export class AudioSystem {
             const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < length; i++) {
-                // white noise with slight tilt
-                data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+                // Constant-amplitude white noise for consistent level until hard cut
+                data[i] = (Math.random() * 2 - 1);
             }
             const src = ctx.createBufferSource();
             src.buffer = buffer;
+            // Filters and shaper: HP -> BP -> waveshaper for a harsher, consistent static
+            const hp = ctx.createBiquadFilter();
+            hp.type = 'highpass';
+            hp.frequency.value = 800;
             const bp = ctx.createBiquadFilter();
             bp.type = 'bandpass';
             bp.frequency.value = 1400;
-            bp.Q.value = 0.7;
+            bp.Q.value = 0.9;
+            const ws = ctx.createWaveShaper();
+            const curve = new Float32Array(256);
+            for (let i = 0; i < 256; i++) {
+                const x = (i / 128) - 1; // -1..1
+                curve[i] = Math.tanh(2.5 * x);
+            }
+            ws.curve = curve; ws.oversample = '2x';
             const gn = ctx.createGain();
+            const gate = ctx.createGain();
             gn.gain.setValueAtTime(0.0, ctx.currentTime);
-            gn.gain.linearRampToValueAtTime(0.18 * this.music.volume * this.musicMaster, ctx.currentTime + 0.02);
-            gn.gain.linearRampToValueAtTime(0.0, ctx.currentTime + durationMs / 1000);
-            src.connect(bp); bp.connect(gn); gn.connect(ctx.destination);
+            // Fast attack to steady level; no decay envelope so tail stays strong until cut
+            // Softer by ~65%
+            gn.gain.linearRampToValueAtTime(0.08 * this.music.volume * this.musicMaster, ctx.currentTime + 0.01);
+            gate.gain.setValueAtTime(1.0, ctx.currentTime);
+            src.connect(hp); hp.connect(bp); bp.connect(ws); ws.connect(gn); gn.connect(gate); gate.connect(ctx.destination);
             src.start();
-            src.stop(ctx.currentTime + durationMs / 1000);
+            // Store nodes so we can hard-cut later
+            this.music.tuning = { src, hp, bp, ws, gn, gate };
+            // Safety stop if nobody cuts it explicitly
+            try { src.stop(ctx.currentTime + durationMs / 1000); } catch(_) {}
         } catch (_) {}
+    }
+
+    stopRadioTuningCue() {
+        try {
+            const t = this.music.tuning;
+            if (!t) return;
+            const ctx = this.context;
+            try { t.gn.gain.cancelScheduledValues(ctx.currentTime); } catch(_) {}
+            try { t.gn.gain.setValueAtTime(0.0, ctx.currentTime); } catch(_) {}
+            try { t.gate.gain.cancelScheduledValues(ctx.currentTime); } catch(_) {}
+            try { t.gate.gain.setValueAtTime(0.0, ctx.currentTime); } catch(_) {}
+            try { t.src.stop(); } catch(_) {}
+            // Disconnect gate first to avoid any filter ringing reaching destination
+            try { t.gate.disconnect(); } catch(_) {}
+            try { t.gn.disconnect(); t.ws.disconnect(); t.bp.disconnect(); t.hp.disconnect(); t.src.disconnect(); } catch(_) {}
+        } catch(_) {}
+        this.music.tuning = null;
     }
 
     playStream(itemParam = null) {
         try {
+            // Ensure tuning static is cut immediately
+            this.stopRadioTuningCue();
             const list = this.music.playlist;
             const item = itemParam || ((list && list.length) ? list[(this.music.trackIndex % list.length + list.length) % list.length] : null);
             if (!item) { this.playMusic(); return; }
@@ -505,7 +551,12 @@ export class AudioSystem {
             audio.loop = true;
             audio.volume = this.music.volume * this.musicMaster;
             audio.addEventListener('canplay', () => {
-                try { audio.play(); } catch(_) {}
+                try {
+                    // Jump into the track so tuning cuts straight to audio
+                    const off = Math.max(0, this.musicStartOffsetSec || 0);
+                    if (!isNaN(off)) { try { audio.currentTime = off; } catch(_) {} }
+                    audio.play();
+                } catch(_) {}
             });
             this.music.audio = audio;
             this.emitMusicState();
@@ -518,7 +569,7 @@ export class AudioSystem {
     async ensureChiptune() {
         if (window.ChiptuneJsPlayer) return true;
 
-        const tryLoadScript = (src, wasmBase = null) => new Promise((resolve) => {
+        const tryLoadScript = (src, wasmBase = null, type = null) => new Promise((resolve) => {
             try {
                 if (wasmBase) {
                     // Hint to Emscripten where to fetch the wasm from
@@ -526,6 +577,7 @@ export class AudioSystem {
                 }
                 const s = document.createElement('script');
                 s.src = src;
+                if (type) s.type = type;
                 s.async = true;
                 s.onload = () => resolve(!!window.ChiptuneJsPlayer);
                 s.onerror = () => resolve(false);
@@ -544,14 +596,15 @@ export class AudioSystem {
             return false;
         };
 
-        // Try a series of sources: local vendor, then multiple CDNs (chiptune2 then chiptune3)
-        // 1) Local ESM chiptune3 via dynamic import from docs vendor folder
-        if (await tryImportModule('/js/vendor/chiptune-3/chiptune3.min.js')) return true;
-        if (await tryImportModule('/js/vendor/chiptune-3/chiptune3.js')) return true;
-        // 2) Local vendor UMD chiptune2/chiptune3 via script tag
-        if (await tryLoadScript('./js/vendor/chiptune2.js', './js/vendor')) return true;
-        if (await tryLoadScript('./js/vendor/chiptune3.js', './js/vendor')) return true;
-        // 3) CDN fallbacks
+        // Try a series of sources: local chiptune-3 (relative paths), then CDNs
+        // 1) Local chiptune-3 via dynamic import relative to this module (AudioSystem.js)
+        try {
+            const esmUrl = new URL('../vendor/chiptune-3/chiptune3.min.js', import.meta.url).href;
+            if (await tryImportModule(esmUrl)) return true;
+        } catch (_) {}
+        // 2) Local chiptune-3 via script tag as ES module (relative to index.html)
+        if (await tryLoadScript('./js/vendor/chiptune-3/chiptune3.min.js', './js/vendor/chiptune-3', 'module')) return true;
+        // 3) CDN fallbacks (best-effort)
         if (await tryLoadScript('https://cdn.jsdelivr.net/npm/chiptune2@2.4.1/dist/chiptune2.js', 'https://cdn.jsdelivr.net/npm/chiptune2@2.4.1/dist')) return true;
         if (await tryLoadScript('https://unpkg.com/chiptune2@2.4.1/dist/chiptune2.js', 'https://unpkg.com/chiptune2@2.4.1/dist')) return true;
         if (await tryImportModule('https://cdn.jsdelivr.net/gh/DrSnuggles/chiptune/dist/chiptune.min.js')) return true;
@@ -561,16 +614,21 @@ export class AudioSystem {
 
     async playTracker(item) {
         try {
+            // Ensure tuning static is cut immediately
+            this.stopRadioTuningCue();
             const ok = await this.ensureChiptune();
             if (!ok || !window.ChiptuneJsPlayer) {
                 console.warn('[AudioSystem] Tracker lib unavailable; falling back to synth');
                 this.music.forceSynth = true;
                 return this.playMusic();
             }
-            const t = this.music.tracker || (this.music.tracker = { player: null, playing: false });
+            const t = this.music.tracker || (this.music.tracker = { player: null, playing: false, initialized: false });
             if (!t.player) {
                 t.player = new window.ChiptuneJsPlayer({ repeatCount: 0 });
-                try { t.player.onEnded(() => { if (this.music.enabled) this.playTracker(item); }); } catch(_) {}
+                try {
+                    t.player.onInitialized(() => { t.initialized = true; });
+                    t.player.onEnded(() => { if (this.music.enabled) this.playTracker(item); });
+                } catch(_) {}
             }
             try { t.player.stop(); } catch(_) {}
             // Set volume using either setVol (chiptune3) or setVolume (chiptune2)
@@ -581,9 +639,22 @@ export class AudioSystem {
             } catch(_) {}
             // Load and play from URL (chiptune3 supports load(url) which fetches and plays)
             if (typeof t.player.load === 'function') {
-                t.player.load(item.url);
-                t.playing = true;
-                this.emitMusicState();
+                const doLoad = () => {
+                    // Arrange a seek after metadata so we start a couple seconds in
+                    const seekOff = Math.max(0, this.musicStartOffsetSec || 0);
+                    try {
+                        if (typeof t.player.onMetadata === 'function') {
+                            t.player.onMetadata(() => { try { t.player.setPos(seekOff); } catch(_) {} });
+                        }
+                    } catch(_) {}
+                    try { t.player.load(item.url); } catch(_) {}
+                    t.playing = true;
+                    this.emitMusicState();
+                };
+                if (t.initialized) doLoad();
+                else {
+                    try { t.player.onInitialized(() => doLoad()); } catch(_) { doLoad(); }
+                }
             } else {
                 console.warn('[AudioSystem] Tracker player lacks load(); falling back to synth');
                 this.music.forceSynth = true;
@@ -598,6 +669,7 @@ export class AudioSystem {
 
     playMusic() {
         if (!this.context) return;
+        try { if (this.context.state === 'suspended') this.context.resume(); } catch(_) {}
         if (this.music.interval || this.music.audio || (this.music.tracker && this.music.tracker.playing)) return;
         this.music.enabled = true;
 
@@ -641,7 +713,8 @@ export class AudioSystem {
         const current = tracks[this.music.trackIndex % tracks.length];
         this.music.trackNames = tracks.map(t => t.name);
 
-        let step = 0;
+        // Start a few seconds in so tuning cuts straight into audio
+        let step = Math.max(0, Math.floor((this.musicStartOffsetSec || 0) / 0.52));
         // Lightweight interval sequencer with slight jitter
         this.music.interval = setInterval(() => {
             if (!this.music.enabled) return; // paused
@@ -667,6 +740,8 @@ export class AudioSystem {
             clearInterval(this.music.interval);
             this.music.interval = null;
         }
+        // Also ensure any tuning static is stopped
+        this.stopRadioTuningCue();
         if (this.music.audio) {
             try { this.music.audio.pause(); } catch(_) {}
             this.music.audio = null;
@@ -689,7 +764,7 @@ export class AudioSystem {
         if (this.music.enabled) {
             this.pauseMusic();
             this.playRadioTuningCue(660);
-            setTimeout(() => this.playMusic(), 660);
+            setTimeout(() => { this.stopRadioTuningCue(); this.playMusic(); }, 640);
         }
     }
 
@@ -699,7 +774,7 @@ export class AudioSystem {
         if (this.music.enabled) {
             this.pauseMusic();
             this.playRadioTuningCue(660);
-            setTimeout(() => this.playMusic(), 660);
+            setTimeout(() => { this.stopRadioTuningCue(); this.playMusic(); }, 640);
         }
     }
     

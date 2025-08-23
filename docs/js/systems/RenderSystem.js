@@ -289,6 +289,7 @@ export class RenderSystem {
         this.targetCtx.clearRect(0, 0, w, h);
 
         let targetId = (state.targeting && state.targeting.selectedId) || null;
+        const shipDead = !!(state.ship && state.ship.isDestroyed);
         // Transition: enforce brief gap + fade-in for new selection
         let silhouetteAlpha = 1.0;
         let silhouetteScale = 1.0;
@@ -315,6 +316,7 @@ export class RenderSystem {
             }
         }
         // Fetch npc for wedge/silhouette if we have a target id
+        if (shipDead) targetId = null;
         const npc = targetId ? (state.npcShips || []).find(n => n && n.id === targetId) : null;
 
         // Static overlay behind + over content for a realistic feed
@@ -412,6 +414,19 @@ export class RenderSystem {
                 ctx.closePath();
                 ctx.fill();
             }
+            ctx.restore();
+        }
+
+        // If the player is destroyed, overlay an OFFLINE tag in the viewport
+        if (shipDead) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = '#9cc';
+            ctx.font = '10px VT323, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('OFFLINE', w / 2, h / 2);
             ctx.restore();
         }
 
