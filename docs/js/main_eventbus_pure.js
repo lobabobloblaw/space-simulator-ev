@@ -249,6 +249,7 @@ async function initializeGameState() {
     const STAR_DENSITY = 2.0; // 1.0 = baseline; increase for denser fields
     state.renderSettings = state.renderSettings || {};
     state.renderSettings.starDensity = STAR_DENSITY;
+    state.renderSettings.useSprites = state.renderSettings.useSprites ?? false;
     state.stars = { far: [], mid: [], near: [] };
     
     // Far stars

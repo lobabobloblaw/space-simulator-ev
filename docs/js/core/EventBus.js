@@ -217,6 +217,9 @@ export const GameEvents = {
     // Debug events
     DEBUG_TOGGLE: 'debug.toggle',
     
+    // Render options
+    RENDER_USE_SPRITES: 'render.useSprites',
+    
     // Reputation events
     REPUTATION_CHANGED: 'reputation.changed',
     

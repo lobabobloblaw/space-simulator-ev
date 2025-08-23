@@ -184,6 +184,14 @@ export class RenderSystem {
         this.eventBus.on('render.quality', (data) => {
             this.quality = data.quality;
         });
+        // Sprite toggle
+        this.eventBus.on('render.useSprites', (data) => {
+            const en = !!(data && (data.enabled ?? data.useSprites));
+            this.useSprites = en;
+            const st = this.stateManager.state;
+            st.renderSettings = st.renderSettings || {};
+            st.renderSettings.useSprites = en;
+        });
         
         // Visual toggles
         this.eventBus.on('render.toggleParticles', () => {
@@ -1152,6 +1160,25 @@ export class RenderSystem {
      * Render specific NPC ship type
      */
     renderNPCShip(npc) {
+        // Try sprite render if enabled and assets are ready
+        if ((this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites) && (this.stateManager.state.assets && this.stateManager.state.assets.ready)) {
+            const atlas = this.stateManager.state.assets.atlases && this.stateManager.state.assets.atlases.placeholder;
+            if (atlas && atlas.image && atlas.frames) {
+                const map = { pirate: 'ships/raider_0', trader: 'ships/trader_0' };
+                const frameId = map[npc.type] || 'ships/raider_0';
+                const frame = atlas.frames[frameId];
+                if (frame) {
+                    const sw = frame.w, sh = frame.h;
+                    const target = Math.max(12, npc.size * 2.4);
+                    const scale = target / Math.max(sw, sh);
+                    const dw = sw * scale, dh = sh * scale;
+                    try {
+                        this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
+                        return;
+                    } catch (_) { /* fall through to vector */ }
+                }
+            }
+        }
         // Unified ship designs per type
         const typeToDesign = {
             freighter: 'hauler',
@@ -1437,16 +1464,35 @@ export class RenderSystem {
             this.ctx.fill();
         }
         
-        // Ship body via design system with faction palette
-        const palette = FactionVisuals.getPalette(state.ship.faction || 'civilian');
-        const playerDesign = (state.ship.class === 'interceptor') ? 'dart' :
-                             (state.ship.class === 'freighter') ? 'hauler' :
-                             (state.ship.class === 'trader') ? 'oval' :
-                             (state.ship.class === 'patrol') ? 'wing' :
-                             (state.ship.class === 'pirate') ? 'raider' :
-                             'delta';
-        ShipDesigns.draw(this.ctx, playerDesign, ship.size, palette);
-        FactionVisuals.drawDecals(this.ctx, state.ship.faction || 'civilian', ship.size);
+        // Ship body (sprite-first, fallback to vector design system)
+        let drewSprite = false;
+        const rs = this.stateManager.state.renderSettings;
+        const assets = this.stateManager.state.assets;
+        if (rs && rs.useSprites && assets && assets.ready) {
+            const atlas = assets.atlases && assets.atlases.placeholder;
+            const frame = atlas && atlas.frames && atlas.frames['ships/trader_0'];
+            if (atlas && frame) {
+                const sw = frame.w, sh = frame.h;
+                const target = Math.max(12, ship.size * 2.6);
+                const scale = target / Math.max(sw, sh);
+                const dw = sw * scale, dh = sh * scale;
+                try {
+                    this.ctx.drawImage(atlas.image, frame.x, frame.y, sw, sh, -dw/2, -dh/2, dw, dh);
+                    drewSprite = true;
+                } catch(_) {}
+            }
+        }
+        if (!drewSprite) {
+            const palette = FactionVisuals.getPalette(state.ship.faction || 'civilian');
+            const playerDesign = (state.ship.class === 'interceptor') ? 'dart' :
+                                 (state.ship.class === 'freighter') ? 'hauler' :
+                                 (state.ship.class === 'trader') ? 'oval' :
+                                 (state.ship.class === 'patrol') ? 'wing' :
+                                 (state.ship.class === 'pirate') ? 'raider' :
+                                 'delta';
+            ShipDesigns.draw(this.ctx, playerDesign, ship.size, palette);
+            FactionVisuals.drawDecals(this.ctx, state.ship.faction || 'civilian', ship.size);
+        }
         
         // Weapon indicators
         if (ship.weapons && ship.weapons.length > 0) {
