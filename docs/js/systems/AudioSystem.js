@@ -596,19 +596,16 @@ export class AudioSystem {
             return false;
         };
 
-        // Try a series of sources: local chiptune-3 (relative paths), then CDNs
-        // 1) Local chiptune-3 via dynamic import relative to this module (AudioSystem.js)
+        // Try local chiptune-3 first with cache-busting to avoid CDN/proxy staleness
+        const bust = '?v=20250823a';
         try {
-            const esmUrl = new URL('../vendor/chiptune-3/chiptune3.min.js', import.meta.url).href;
+            const esmUrl = new URL('../vendor/chiptune-3/chiptune3.min.js', import.meta.url).href + bust;
             if (await tryImportModule(esmUrl)) return true;
         } catch (_) {}
-        // 2) Local chiptune-3 via script tag as ES module (relative to index.html)
-        if (await tryLoadScript('./js/vendor/chiptune-3/chiptune3.min.js', './js/vendor/chiptune-3', 'module')) return true;
-        // 3) CDN fallbacks (best-effort)
-        if (await tryLoadScript('https://cdn.jsdelivr.net/npm/chiptune2@2.4.1/dist/chiptune2.js', 'https://cdn.jsdelivr.net/npm/chiptune2@2.4.1/dist')) return true;
-        if (await tryLoadScript('https://unpkg.com/chiptune2@2.4.1/dist/chiptune2.js', 'https://unpkg.com/chiptune2@2.4.1/dist')) return true;
-        if (await tryImportModule('https://cdn.jsdelivr.net/gh/DrSnuggles/chiptune/dist/chiptune.min.js')) return true;
-        if (await tryImportModule('https://unpkg.com/chiptune@latest/dist/chiptune.min.js')) return true;
+        // Script tag module (relative to index.html)
+        if (await tryLoadScript('./js/vendor/chiptune-3/chiptune3.min.js' + bust, './js/vendor/chiptune-3', 'module')) return true;
+        // Avoid noisy CDN fallbacks on GitHub Pages; rely on local vendor only
+        // If you explicitly want CDN, re-enable below.
         return false;
     }
 
