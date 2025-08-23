@@ -249,8 +249,8 @@ async function initializeGameState() {
     const STAR_DENSITY = 2.0; // 1.0 = baseline; increase for denser fields
     state.renderSettings = state.renderSettings || {};
     state.renderSettings.starDensity = STAR_DENSITY;
-    // Default sprites OFF; can be toggled via debug overlay
-    state.renderSettings.useSprites = state.renderSettings.useSprites ?? false;
+    // Default sprites ON; can be toggled via debug overlay
+    state.renderSettings.useSprites = state.renderSettings.useSprites ?? true;
     state.stars = { far: [], mid: [], near: [] };
     
     // Far stars

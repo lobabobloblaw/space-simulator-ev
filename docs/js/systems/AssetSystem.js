@@ -22,10 +22,10 @@ export default class AssetSystem {
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
             state.assets.ready = true;
-            // Default to sprites OFF; user can toggle via debug overlay
+            // Default to sprites ON; user can toggle via debug overlay
             state.renderSettings = state.renderSettings || {};
             if (typeof state.renderSettings.useSprites === 'undefined') {
-                state.renderSettings.useSprites = false;
+                state.renderSettings.useSprites = true;
             }
             try { this.eventBus.emit('render.useSprites', { enabled: state.renderSettings.useSprites }); } catch(_) {}
             this.ready = true;
