@@ -21,6 +21,7 @@ import ShopSystem from './systems/ShopSystem.js';  // Shop system for outfitter
 import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personalities
 import DebugSystem from './systems/DebugSystem.js';
 import TargetingSystem from './systems/TargetingSystem.js';
+import AssetSystem from './systems/AssetSystem.js';
 import { GameConstants } from './utils/Constants.js';
 
 // We'll import game data dynamically in the initialization function
@@ -532,6 +533,14 @@ function respawnPlayer() {
 async function initializeSystems() {
     console.log('[EventBus] Initializing systems...');
     
+    try {
+        systems.assets = new AssetSystem();
+        await systems.assets.init();
+        console.log('✅ AssetSystem initialized');
+    } catch (e) {
+        console.error('❌ AssetSystem failed:', e);
+    }
+
     try {
         systems.input = new InputSystem();
         await systems.input.init();
