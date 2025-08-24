@@ -11,6 +11,7 @@ import { GameLoop } from './core/GameLoop.js';
 import InputSystem from './systems/InputSystem.js';
 import PhysicsSystem from './systems/PhysicsSystem.js';
 import RenderSystem from './systems/RenderSystem.js';
+import WebGLRenderSystem from './systems/WebGLRenderSystem.js';
 import AudioSystem from './systems/AudioSystem.js';
 import UISystem from './systems/UISystem.js';
 import WeaponSystem from './systems/WeaponSystem.js';
@@ -588,9 +589,10 @@ async function initializeSystems() {
     
     try {
         const canvas = document.getElementById('gameCanvas');
-        systems.render = new RenderSystem(canvas);
+        const useWebGL = (typeof window !== 'undefined') && !!window.RENDER_WEBGL;
+        systems.render = useWebGL ? new WebGLRenderSystem(canvas) : new RenderSystem(canvas);
         await systems.render.init();
-        console.log('✅ RenderSystem initialized');
+        console.log(useWebGL ? '✅ WebGLRenderSystem initialized' : '✅ RenderSystem initialized');
     } catch (e) {
         console.error('❌ RenderSystem failed:', e);
     }
