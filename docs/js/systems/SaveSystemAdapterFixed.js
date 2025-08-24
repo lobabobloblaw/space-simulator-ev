@@ -15,6 +15,7 @@ export class SaveSystemAdapterFixed {
         this.SAVE_MAX_NPCS = 40; // cap payload to avoid long JSON tasks
         this._saveScheduled = false;
         this._savePending = false;
+        this._saveDeferCount = 0;
         
         // Bind event handlers
         this.handleSave = this.handleSave.bind(this);
@@ -82,6 +83,15 @@ export class SaveSystemAdapterFixed {
         this._saveScheduled = true;
         const run = () => {
             try {
+                // Avoid saving on heavy frames to prevent visible hitches
+                try {
+                    const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+                    if (heavy && this._saveDeferCount < 6) { // defer up to ~2–3s total
+                        this._saveDeferCount++;
+                        setTimeout(run, 400);
+                        return;
+                    }
+                } catch(_) {}
                 const payload = this._buildSaveData();
                 // JSON + setItem can be a long task; do it here (idle/fallback timeout)
                 const json = JSON.stringify(payload);
@@ -103,6 +113,7 @@ export class SaveSystemAdapterFixed {
                 this.showMessage('SAVE FAILED', 'error');
             } finally {
                 this._saveScheduled = false;
+                this._saveDeferCount = 0;
                 if (this._savePending) { this._savePending = false; this.handleSave(); }
             }
         };
