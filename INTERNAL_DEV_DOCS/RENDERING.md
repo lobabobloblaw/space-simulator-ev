@@ -64,6 +64,12 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 - Minimal diagnostics: `window.DEBUG_SPRITES = 'errors'` logs only TargetCam failures; `'verbose'` adds informational reasons.
 - Render Lint toggles live under `state.debug.*` (where present). Keep OFF in production.
 
+### Renderer Selection (Spike Only)
+
+- Default renderer: Canvas2D `RenderSystem`.
+- Optional WebGL spike (OFF by default): enable via `?webgl=1` in the URL, or `localStorage.setItem('RENDER_WEBGL','1')` before load. Disable via removing the query and `localStorage.removeItem('RENDER_WEBGL')`.
+- Scope: current WebGL spike draws simple GPU primitives for player/NPC/projectiles; HUD/TargetCam/minimap remain on existing paths.
+
 ### Optional Guards (QA only)
 
 - Other-spike guard (off by default): set `window.RENDER_OTHER_GUARD = true` to temporarily stride/skip soft UI (minimap + HUD) for 1–2 frames when the render profiler attributes a spike to the `other` bucket.

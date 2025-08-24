@@ -9,6 +9,7 @@
 
 ## Verification Steps
 - Serve locally: `python3 -m http.server 8000` → open `http://localhost:8000/docs/`.
+- Ensure Canvas2D renderer (if you previously tested WebGL spike): remove `?webgl=1` and run `localStorage.removeItem('RENDER_WEBGL')` in the console, then reload.
 - Clear toggles in console:
   - `delete window.TC_FORCE; delete window.TC_FORCE_ENABLED; delete window.TC_DEBUG; delete window.TC_SHOW_PATH; delete window.TC_SILENT;`
   - `delete window.RENDER_AUTO_QUALITY; delete window.RENDER_PROF_OVERLAY; delete window.RENDER_PROF_LOG; delete window.RENDER_PROF_AUTO_ENABLED;`
