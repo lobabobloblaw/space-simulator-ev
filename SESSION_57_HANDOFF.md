@@ -38,6 +38,7 @@
 - Long‑run QA: If silhouette updates feel laggy under rapid turns, consider small nudge to `TC_ANGLE_EPS (~0.12)` or `TC_MIN_MS (~90)` within documented ranges and re‑verify.
 - Monitor `other` spikes; the guard should remain OFF by default and used only for diagnosis.
 - If any PNG loads are unusually slow on specific machines, keep warm‑up at 450–500ms; avoid allowing atlas/baseline early.
+- Backlog ticket created: `INTERNAL_DEV_DOCS/TICKET_WEBGL_SPIKE.md` (WebGL Phase‑1 spike behind `RENDER_WEBGL` flag; OFF by default).
 
 ## Next Session Plan
 1. Run TargetCam fixture and main loop; test `TC_WARM_MS` at 300 and 500.
