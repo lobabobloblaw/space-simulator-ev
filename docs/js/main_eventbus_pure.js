@@ -722,6 +722,10 @@ async function initGame() {
     setupEventHandlers();
     
     // Create game loop
+    // Lightweight update profiler (auto-logs on spikes; off by default, auto armed)
+    const __updProf = { lastLogTs: 0, cooldownUntil: 0 };
+    // Throttle UI_UPDATE to reduce DOM churn; emit at ~8–10Hz
+    const __ui = { lastTs: 0, minInterval: 120 };
     const loop = new GameLoop({
         onUpdate: (deltaTime) => {
             const state = stateManager.state;
@@ -732,15 +736,52 @@ async function initGame() {
             
             // Update systems
             if (!state.paused) {
-                for (const system of Object.values(systems)) {
-                    if (system.update) {
-                        system.update(state, deltaTime);
+                const doProf = !!(typeof window !== 'undefined' && (window.UPDATE_PROF_LOG || window.UPDATE_PROF_OVERLAY));
+                const now0 = performance.now ? performance.now() : Date.now();
+                let totalMs = 0; const breakdown = {}; let worstK = null, worstV = -1;
+                for (const [key, system] of Object.entries(systems)) {
+                    if (!system || typeof system.update !== 'function') continue;
+                    const t0 = doProf ? (performance.now ? performance.now() : Date.now()) : 0;
+                    system.update(state, deltaTime);
+                    if (doProf) {
+                        const dt = (performance.now ? performance.now() : Date.now()) - t0;
+                        breakdown[key] = Number(dt.toFixed(2));
+                        totalMs += dt;
+                        if (dt > worstV) { worstV = dt; worstK = key; }
                     }
                 }
+                // Auto arm & log on spikes even without toggles
+                try {
+                    const th = Number((typeof window !== 'undefined' && window.UPDATE_PROF_T) || 18);
+                    const now = performance.now ? performance.now() : Date.now();
+                    if (totalMs > th && now >= (__updProf.cooldownUntil||0)) {
+                        if (now - (__updProf.lastLogTs||0) > 500) {
+                            __updProf.lastLogTs = now;
+                            const payload = { updateMs: Number(totalMs.toFixed(2)), worst: { [worstK||'-']: Number((worstV>0?worstV:0).toFixed(2)) }, breakdown };
+                            // Keep a copy for later inspection
+                            if (typeof window !== 'undefined') window.LAST_UPDATE_PROFILE = payload;
+                            try { console.warn('[UpdateProfile]', JSON.parse(JSON.stringify(payload))); } catch(_) { console.warn('[UpdateProfile]', payload); }
+                            try {
+                                const s = `upd:${payload.updateMs} worst:${worstK||'-'}:${(worstV>0?worstV.toFixed(1):'0')}`;
+                                console.warn('[UpdateProfileStr]', s);
+                            } catch(_) {}
+                        }
+                        __updProf.cooldownUntil = now + 3000; // 3s cooldown
+                    }
+                } catch(_) {}
             }
             
-            // Update HUD
-            eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+            // Update HUD (throttled)
+            try {
+                const now = performance.now ? performance.now() : Date.now();
+                if (now - (__ui.lastTs||0) >= (__ui.minInterval||120)) {
+                    __ui.lastTs = now;
+                    eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+                }
+            } catch(_) {
+                // Fallback if perf API unavailable
+                eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+            }
         },
         onRender: (interpolation, deltaTime) => {
             if (systems.render && systems.render.render) {
@@ -819,11 +860,11 @@ async function initGame() {
         });
     }
     
-    // Autosave every 30 seconds
+    // Autosave every 30 seconds (idle-coalesced in adapter)
     setInterval(() => {
         const state = stateManager.state;
         if (!state.paused && state.ship.health > 0 && !state.ship.isDestroyed) {
-            eventBus.emit(GameEvents.GAME_SAVE);
+            eventBus.emit(GameEvents.GAME_SAVE, { reason: 'auto' });
         }
     }, 30000);
     

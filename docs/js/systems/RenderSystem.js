@@ -4,8 +4,12 @@ import { ProceduralPlanetRenderer } from './proceduralPlanetRenderer.js';
 import ExplosionRenderer from './ExplosionRenderer.js';
 import ThrusterFXRenderer from './ThrusterFXRenderer.js';
 import HUDRenderer from './HUDRenderer.js';
-import { withWorld } from './RenderHelpers.js';
+import { withWorld, withScreen, toWhiteMaskCanvas } from './RenderHelpers.js';
+import { resolveViewportSprite } from './SpriteResolver.js';
+import { getFrameCanvasFromState } from './AssetSystem.js';
+import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES } from './SpriteMappings.js';
 import ShipDesigns from './ShipDesigns.js';
+import TargetCamRenderer from './TargetCamRenderer.js';
 import FactionVisuals from './FactionVisuals.js';
 
 /**
@@ -28,6 +32,8 @@ export class RenderSystem {
         
         // Performance optimization flags
         this.quality = 'high'; // 'low', 'medium', 'high'
+        this._manualQuality = this.quality;
+        this._autoQuality = { enabled: false, lastTs: 0, overBudgetStreak: 0, underBudgetStreak: 0, target: 'high' };
         this.showParticles = true;
         this.showEffects = true;
         
@@ -39,6 +45,7 @@ export class RenderSystem {
         // Target cam viewport (center viewport next to controls)
         this.targetCanvas = document.getElementById('centerViewportCanvas');
         this.targetCtx = this.targetCanvas ? this.targetCanvas.getContext('2d') : null;
+        this.targetCam = new TargetCamRenderer(this.eventBus, this.stateManager, this.targetCanvas);
         // Static overlay buffer for target cam
         this.staticNoise = {
             canvas: (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 64; return c; })(),
@@ -59,34 +66,109 @@ export class RenderSystem {
         
         // Local cache for direct sprite path fallback
         this.spriteCache = {};
+        this._spriteCacheCap = 64;
+
+        // Suppress brief first-frame vector fallback flashes while sprites warm up
+        try { this._suppressVectorUntil = (performance.now ? performance.now() : Date.now()) + 250; } catch(_) { this._suppressVectorUntil = 0; }
 
         // Debug throttle state
         this._dbg = { last: new Map() };
+        this._prof = { armed: 0, cooldownUntil: 0, lastLogTs: 0 }; // auto one-shot profiler frames when a spike is detected
 
         // Bind methods
         this.handleCanvasResize = this.handleCanvasResize.bind(this);
         this.handleShieldHit = this.handleShieldHit.bind(this);
         this._dbgLog = this._dbgLog.bind(this);
+        this._updateAutoQuality = this._updateAutoQuality.bind(this);
         
         // Global size multiplier for ships (sprites and vectors)
         this.sizeMultiplier = 1.25; // gentle nudge (~+25% total)
 
-        // Sprite orientation: offset added to entity angle when sprites enabled
-        // Adjust so art that faces "up" aligns nose-right in world
-        this.spriteRotationOffset = Math.PI / 2; // +90° clockwise for sprites
-        // Optional per-sprite or per-type small adjustments layered on top
-        this.spriteOrientationOverrides = {
-            // Place fine-tuned per-art nudges here (radians)
-            // e.g., 'ships/freighter_0': 0.04
-        };
+        // Sprite orientation configuration (centralized)
+        this.spriteRotationOffset = spriteRotationOffset;
+        this.spriteOrientationOverrides = ORIENT_OVERRIDES;
 
         // Extracted explosion renderer
         this.explosionRenderer = new ExplosionRenderer();
         this.thrusterFX = new ThrusterFXRenderer();
         this.hud = new HUDRenderer(this.ctx, this.camera, this.screenCenter);
 
+        // Local minimal atlas for target-cam fallback silhouettes
+        this._viewportAtlas = null;
+        // Track pending async planet generations to avoid repeat scheduling
+        this._pendingPlanets = new Set();
+        // Preload target-cam sprite images (direct paths) to ensure availability
+        this._targetCamSprites = {};
+        try {
+            const ids = ['ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0'];
+            ids.forEach(id => { this._targetCamSprites[id] = this._ensureDirectSpriteImage(id); });
+        } catch(_) {}
+
+        // Cached per-frame canvases extracted from placeholder atlas for target-cam use
+        this._tcFrameCache = {};
+
+        // Optional: tiny guard to skip/stride soft UI (minimap/HUD) for 1–2 frames
+        // when render profiler attributes a spike to 'other'. Disabled by default;
+        // enable via: window.RENDER_OTHER_GUARD = true
+        this._otherGuard = { frames: 0 };
+
         console.log('[RenderSystem] Created');
     }
+
+    // Draw src tinted to white (#e8f6ff). Prefers offscreen mask; falls back to in-place source-in.
+    _drawWhiteMasked(ctx, src, dw, dh, sx = null, sy = null, sw = null, sh = null) {
+        try {
+            const mask = toWhiteMaskCanvas(src, dw, dh, (sx??0), (sy??0), sw, sh);
+            ctx.drawImage(mask, -dw/2, -dh/2, dw, dh);
+            return true;
+        } catch (_) {
+            try {
+                ctx.save();
+                if (sw && sh && sx !== null && sy !== null) {
+                    ctx.drawImage(src, sx|0, sy|0, sw, sh, -dw/2, -dh/2, dw, dh);
+                } else {
+                    ctx.drawImage(src, -dw/2, -dh/2, dw, dh);
+                }
+                const prev = ctx.globalCompositeOperation;
+                ctx.globalCompositeOperation = 'source-in';
+                ctx.fillStyle = '#e8f6ff';
+                ctx.fillRect(-dw/2, -dh/2, dw, dh);
+                ctx.globalCompositeOperation = prev;
+                ctx.restore();
+                return true;
+            } catch (__) {
+                return false;
+            }
+        }
+    }
+
+  getViewportFallbackAtlas() {
+      if (this._viewportAtlas) return this._viewportAtlas;
+      const tw = 32, th = 32;
+      // Build per-frame canvases with transparent background
+      const raiderCanvas = document.createElement('canvas'); raiderCanvas.width = tw; raiderCanvas.height = th;
+      const rc = raiderCanvas.getContext('2d');
+      rc.save(); rc.translate(tw*0.5, th*0.5);
+      rc.fillStyle = '#e8f6ff';
+      rc.beginPath();
+      rc.moveTo(tw*0.36, 0);
+      rc.lineTo(-tw*0.28, -th*0.24);
+      rc.lineTo(-tw*0.20, 0);
+      rc.lineTo(-tw*0.28, th*0.24);
+      rc.closePath(); rc.fill(); rc.restore();
+
+      const traderCanvas = document.createElement('canvas'); traderCanvas.width = tw; traderCanvas.height = th;
+      const tc = traderCanvas.getContext('2d');
+      tc.save(); tc.translate(tw*0.5, th*0.5);
+      tc.fillStyle = '#e8f6ff';
+      tc.beginPath(); tc.ellipse(0,0, tw*0.38, th*0.22, 0, 0, Math.PI*2); tc.fill(); tc.restore();
+      const frames = {
+          'ships/raider_0': { img: raiderCanvas, w: tw, h: th },
+          'ships/trader_0': { img: traderCanvas, w: tw, h: th }
+      };
+      this._viewportAtlas = { frames };
+      return this._viewportAtlas;
+  }
     
     /**
      * Initialize the render system
@@ -111,10 +193,47 @@ export class RenderSystem {
                 console.log('[RenderSystem] Initializing procedural planets:', state.planets.length);
                 this.planetRenderer.initializePlanets(state.planets);
             }
+            try { this.buildTargetCamCache(); } catch(_) {}
         }, 100);
+
+        try { this.targetCam.init(); } catch(_) {}
         
         console.log('[RenderSystem] Initialized');
     }
+
+    buildTargetCamCache() {
+        try {
+            const assets = this.stateManager?.state?.assets;
+            if (!assets || !assets.atlases || !assets.atlases.placeholder) return;
+            const atlas = assets.atlases.placeholder;
+            const src = atlas.canvas || atlas.image;
+            if (!src) return;
+            const frames = atlas.frames || {};
+            const wanted = new Set([
+                'ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/raider_0'
+            ]);
+            for (const [key, fr] of Object.entries(frames)) {
+                if (!wanted.has(key)) continue;
+                if (this._tcFrameCache[key]) continue;
+                const c = document.createElement('canvas');
+                c.width = fr.w; c.height = fr.h;
+                const cctx = c.getContext('2d');
+                if (src instanceof HTMLCanvasElement) {
+                  cctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
+                } else if (src && src.naturalWidth > 0) {
+                  cctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
+                } else {
+                  continue;
+                }
+                this._tcFrameCache[key] = c;
+            }
+            if (Object.keys(this._tcFrameCache).length) {
+                console.log('[RenderSystem] TargetCam cache built for', Object.keys(this._tcFrameCache));
+            }
+        } catch(_) {}
+    }
+
+    // Target-cam diagnostics removed
 
     /**
      * Ensure stars, asteroids, and planets exist in state (fallback safeguard)
@@ -210,7 +329,8 @@ export class RenderSystem {
         
         // Quality settings
         this.eventBus.on('render.quality', (data) => {
-            this.quality = data.quality;
+            this._manualQuality = data.quality;
+            if (!this._autoQuality.enabled) this.quality = this._manualQuality;
         });
         // Sprite toggle
         this.eventBus.on('render.useSprites', (data) => {
@@ -243,35 +363,50 @@ export class RenderSystem {
         // Shield hit visual ping
         this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit);
 
-        // Target set/clear: trigger a brief blip and start transition
-        this.eventBus.on(GameEvents.TARGET_SET, () => {
-            const now = performance.now();
-            this.targetCamBlip = { start: now, duration: 320 };
-            const state = this.stateManager.state;
-            const toId = (state.targeting && state.targeting.selectedId) || null;
-            const fromId = this._lastSilhouetteId || null;
-            this.targetCamTransition = {
-                fromId,
-                toId,
-                start: now,
-                duration: 320,
-                hold: 140
-            };
+        // TargetCam handles TARGET_SET/TARGET_CLEAR internally
+        // Build target-cam cache once assets are ready
+        this.eventBus.on('assets.ready', () => {
+            try { this.buildTargetCamCache(); } catch(_) {}
         });
-        this.eventBus.on(GameEvents.TARGET_CLEAR, () => { this.targetCamBlip = null; });
     }
 
     getOrLoadSprite(spriteId) {
         try {
-            const path = './assets/sprites/' + spriteId + '.png';
-            let img = this.spriteCache[path];
-            if (img) return img.complete ? img : null;
+            // Resolve against this module URL to avoid path issues
+            const url = new URL('../../assets/sprites/' + spriteId + '.png', import.meta.url).href;
+            let img = this.spriteCache[url];
+            if (img) return img; // return image even if still loading
             img = new Image();
-            img.onload = () => {};
-            img.src = path;
-            this.spriteCache[path] = img;
+            img.decoding = 'async';
+            img.crossOrigin = 'anonymous';
+            img.referrerPolicy = 'no-referrer';
+            img.src = url;
+            this.spriteCache[url] = img;
+            // Soft cap cache to avoid unbounded growth in rare cases
+            try {
+                const keys = Object.keys(this.spriteCache);
+                const cap = this._spriteCacheCap || 64;
+                if (keys.length > cap) {
+                    delete this.spriteCache[keys[0]];
+                }
+            } catch(_) {}
             return null;
         } catch (_) { return null; }
+    }
+
+    _spriteUrlFor(spriteId) {
+        try { return new URL('../../assets/sprites/' + spriteId + '.png', import.meta.url).href; } catch(_) { return null; }
+    }
+    _ensureDirectSpriteImage(spriteId) {
+        try {
+            let img = this._targetCamSprites[spriteId];
+            if (img && (img.naturalWidth > 0 || !img.complete)) return img;
+            const url = this._spriteUrlFor(spriteId);
+            if (!url) return null;
+            img = new Image(); img.decoding = 'async'; img.crossOrigin = 'anonymous'; img.referrerPolicy = 'no-referrer'; img.src = url;
+            this._targetCamSprites[spriteId] = img;
+            return img;
+        } catch(_) { return null; }
     }
 
     _dbgLog(key, ...args) {
@@ -282,14 +417,69 @@ export class RenderSystem {
         console.log(...args);
         this._dbg.last.set(key, now);
     }
-    
+
     // Stars are now generated in main_eventbus_pure.js and stored in state
     // This provides consistency across all systems
-    
+
+    _updateAutoQuality(frameMs) {
+        // Simple hysteresis: degrade fast on spikes; recover slowly after sustained headroom
+        const a = this._autoQuality;
+        // Thresholds tuned for ~60Hz target
+        if (frameMs > 26) { // > ~38 FPS
+            a.overBudgetStreak += 2;
+            a.underBudgetStreak = 0;
+        } else if (frameMs > 19) { // > ~52 FPS
+            a.overBudgetStreak += 1;
+            a.underBudgetStreak = 0;
+        } else {
+            a.overBudgetStreak = Math.max(0, a.overBudgetStreak - 1);
+            a.underBudgetStreak += 1;
+        }
+        // Degrade quickly if repeated misses
+        if (a.overBudgetStreak >= 4) {
+            a.overBudgetStreak = 0;
+            a.target = (this.quality === 'high') ? 'medium' : 'low';
+        }
+        // Recover slowly after sustained good frames
+        if (a.underBudgetStreak >= 90) { // ~1.5s at 60fps
+            a.underBudgetStreak = 0;
+            a.target = (this.quality === 'low') ? 'medium' : 'high';
+        }
+        // Apply target only if it differs from current manual to avoid oscillation
+        if (this.quality !== a.target) {
+            this.quality = a.target;
+        }
+    }
+
     /**
      * Main render method - called each frame
      */
     render(state, deltaTime) {
+        // Optional: auto quality scaling based on frame time (off by default; enable via window.RENDER_AUTO_QUALITY = true)
+        try {
+            const wantAuto = !!(typeof window !== 'undefined' && window.RENDER_AUTO_QUALITY);
+            this._autoQuality.enabled = wantAuto;
+            const now = performance.now ? performance.now() : Date.now();
+            if (!this._autoQuality.lastTs) this._autoQuality.lastTs = now;
+            const frameMs = Math.max(0, now - this._autoQuality.lastTs);
+            this._autoQuality.lastTs = now;
+            if (this._autoQuality.enabled) {
+                this._updateAutoQuality(frameMs);
+            } else {
+                // Respect manual setting when auto is disabled
+                this.quality = this._manualQuality;
+            }
+            // Expose for profiler overlay/log
+            if (typeof window !== 'undefined') window.__lastFrameMs = frameMs;
+            // Auto-arm one-shot profile capture on spike without user toggles (disable via window.RENDER_PROF_AUTO_DISABLED = true)
+            // Auto-arming is OFF by default; enable with window.RENDER_PROF_AUTO_ENABLED = true
+            const autoEnabled = !!(typeof window !== 'undefined' && window.RENDER_PROF_AUTO_ENABLED);
+            const spikeTh = Number((typeof window !== 'undefined' && window.RENDER_PROF_T) || 20);
+            if (autoEnabled && frameMs > Math.max(24, spikeTh + 2) && this._prof.armed === 0 && now >= (this._prof.cooldownUntil||0)) {
+                this._prof.armed = 2; // capture this and next frame breakdowns
+                this._prof.cooldownUntil = now + 3000; // 3s cooldown before arming again
+            }
+        } catch(_) {}
         // Hard reset context state to avoid any leaked transforms from prior frame
         // Ensure sane defaults at frame start
         try { this.ctx.setTransform(1, 0, 0, 1, 0, 0); } catch(_) {}
@@ -314,44 +504,163 @@ export class RenderSystem {
             if (state.ship.screenShake < 0.5) state.ship.screenShake = 0;
         }
 
+        // Lightweight profiling (opt-in)
+        const doProf = !!(typeof window !== 'undefined' && (window.RENDER_PROF_LOG || window.RENDER_PROF_OVERLAY)) || this._prof.armed > 0;
+        const prof = doProf ? { b:{} } : null;
+        const pnow = () => performance.now ? performance.now() : Date.now();
+        const pmark = (k, dt) => { if (prof) prof.b[k] = (prof.b[k]||0) + dt; };
+
+        const tf_world_start = doProf ? pnow() : 0;
         withWorld(this.ctx, this.camera, this.screenCenter, () => {
-            try { this.renderNebula(); } catch(_) {}
-            try { this.renderStars(); } catch(_) {}
-            try { this.renderPlanets(state); } catch(_) {}
-            try { this.renderAsteroids(state); } catch(_) {}
-            try { this.renderPickups(state); } catch(_) {}
-            try { this.renderDebris(state); } catch(_) {}
-            try { this.renderNPCs(state); } catch(_) {}
-            try { this.renderProjectiles(state); } catch(_) {}
-            try { this.renderMuzzleFlashes(state); } catch(_) {}
-            try { this.renderHitSparks(state); } catch(_) {}
-            try { this.renderShip(state); } catch(_) {}
-            try { this.renderShieldHits(state); } catch(_) {}
-            try { this.renderExplosions(state); } catch(_) {}
-            try { this.renderWarpEffects(state); } catch(_) {}
-            try { this.renderDebug(state); } catch(_) {}
+            let t0;
+            try { t0 = doProf && pnow(); this.renderNebula(); if (doProf) pmark('nebula', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderStars(); if (doProf) pmark('stars', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderPlanets(state); if (doProf) pmark('planets', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderAsteroids(state); if (doProf) pmark('asteroids', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderPickups(state); if (doProf) pmark('pickups', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderDebris(state); if (doProf) pmark('debris', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderNPCs(state); if (doProf) pmark('npcs', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderProjectiles(state); if (doProf) pmark('projectiles', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderMuzzleFlashes(state); if (doProf) pmark('muzzle', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderHitSparks(state); if (doProf) pmark('sparks', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderShip(state); if (doProf) pmark('ship', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderShieldHits(state); if (doProf) pmark('shield', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderExplosions(state); if (doProf) pmark('explosions', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderWarpEffects(state); if (doProf) pmark('warp', pnow()-t0); } catch(_) {}
+            try { t0 = doProf && pnow(); this.renderDebug(state); if (doProf) pmark('debug', pnow()-t0); } catch(_) {}
         }, shakeX, shakeY);
+        const tf_world = doProf ? (pnow() - tf_world_start) : 0;
         // Debug: post-world pass lint
         this.debugRenderLint('post-world');
         
-        // Draw damage flash overlay
+        // Draw damage flash overlay (screen space)
         if (state.ship.damageFlash && state.ship.damageFlash > 0) {
-            this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * 0.3})`;
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            withScreen(this.ctx, () => {
+                this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * 0.3})`;
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            });
             state.ship.damageFlash -= 0.05;
             if (state.ship.damageFlash < 0) state.ship.damageFlash = 0;
         }
         
         // Render UI elements (not affected by camera)
-        this.renderMinimap(state);
-        this.renderTargetCam(state);
+        let t0;
+        if (doProf) t0 = pnow();
+        // Optional soft-UI stride/skip guard (minimap + HUD) if prior frame's
+        // spike was attributed to 'other'. Controlled via window.RENDER_OTHER_GUARD.
+        const guardOn = !!(typeof window !== 'undefined' && window.RENDER_OTHER_GUARD);
+        const guardActive = guardOn && this._otherGuard && this._otherGuard.frames > 0;
+        let __appliedOtherGuard = false;
+        if (!guardActive) {
+            this.renderMinimap(state);
+            if (doProf) pmark('minimap', pnow()-t0);
+        } else {
+            __appliedOtherGuard = true; // skip minimap this frame
+        }
+        // TODO(Session 55): TargetCam strict buffer-blit
+        // - TargetCamRenderer should maintain a persistent offscreen silhouette buffer
+        //   and only blit here each frame. Rebuild/generate the buffer off-render on
+        //   target/angle/time thresholds. This call should remain a cheap blit.
+        if (this.targetCam) { if (doProf) t0 = pnow(); this.targetCam.render(state); if (doProf) pmark('targetcam', pnow()-t0); }
 
         // Screen-space HUD overlays
-        try { this.hud.updateContext(this.ctx, this.camera, this.screenCenter); this.hud.drawPlayerHealth(state); } catch(_) {}
+        try {
+            if (!guardActive) {
+                this.hud.updateContext(this.ctx, this.camera, this.screenCenter);
+                this.hud.drawPlayerHealth(state);
+                // Optional QA build tag (top-right); gated by window.HUD_SHOW_BUILD_TAG
+                this.hud.drawBuildTag();
+            } else {
+                __appliedOtherGuard = true; // skip HUD this frame
+            }
+        } catch(_) {}
+
+        // Consume one guard frame if we skipped any soft UI draws
+        if (__appliedOtherGuard && this._otherGuard && this._otherGuard.frames > 0) {
+            this._otherGuard.frames -= 1;
+        }
 
         // Debug: end-of-world render lint
         this.debugRenderLint('end-frame');
         
+        // Profiling overlay/log (opt-in)
+        if (doProf) {
+            // Frame summary
+            const totalMs = (typeof performance !== 'undefined' && performance.now) ? 0 : 0; // kept for symmetry
+            // Determine worst bucket
+            // Attribute unaccounted time to an 'other' bucket to surface hidden work/GC
+            try {
+                const frameMs = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+                const sum = Object.values(prof.b).reduce((a,b)=>a+(b||0), 0);
+                const other = Math.max(0, frameMs - sum);
+                if (other > 0.2) prof.b.other = other; // ignore tiny numerical drift
+            } catch(_) {}
+            let worstK = null, worstV = -1;
+            for (const [k,v] of Object.entries(prof.b)) { if (v > worstV) { worstV = v; worstK = k; } }
+            // Log on spikes (default threshold ~20ms)
+            const th = Number(window.RENDER_PROF_T || 20);
+            const frameMs = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+            // Derive counts to help attribution
+            const counts = {
+                npcs: (state.npcShips||[]).length,
+                proj: (state.projectiles||[]).length,
+                sparks: (state.hitSparks||[]).length,
+                flashes: (state.muzzleFlashes||[]).length,
+                hits: (state.shieldHits||[]).length,
+                expl: (state.explosions||[]).length
+            };
+            const payload = { frameMs, worldMs: Number(tf_world.toFixed(2)), worst: { [worstK]: Number(worstV.toFixed(2)) }, counts, breakdown: Object.fromEntries(Object.entries(prof.b).map(([k,v])=>[k,Number(v.toFixed(2))])) };
+            if ((window.RENDER_PROF_LOG && frameMs > th) || this._prof.armed > 0) {
+                // Throttle verbose logs to avoid console spam
+                const now = performance.now ? performance.now() : Date.now();
+                if (now - (this._prof.lastLogTs||0) > 500) {
+                    this._prof.lastLogTs = now;
+                    try { console.warn('[RenderProfile]', JSON.parse(JSON.stringify(payload))); } catch(_) { console.warn('[RenderProfile]', payload); }
+                    try {
+                        const s = `ms:${(frameMs|0)} world:${payload.worldMs} worst:${worstK||'-'}:${(worstV>0?worstV.toFixed(1):'0')} n:${counts.npcs} p:${counts.proj} s:${counts.sparks} f:${counts.flashes} h:${counts.hits} e:${counts.expl}`;
+                        console.warn('[RenderProfileStr]', s);
+                    } catch(_) {}
+                }
+            }
+            if (window.RENDER_PROF_OVERLAY) {
+                try {
+                    const ctx = this.ctx;
+                    const text = `ms:${frameMs|0} world:${tf_world.toFixed(1)} worst:${worstK||'-'} ${worstV>0?worstV.toFixed(1):'0'} npcs:${counts.npcs} p:${counts.proj}`;
+                    withScreen(ctx, () => {
+                        ctx.save();
+                        ctx.globalAlpha = 0.9;
+                        ctx.fillStyle = '#111a';
+                        ctx.fillRect(6, 6, ctx.measureText ? (ctx.measureText(text).width + 10) : 140, 14);
+                        ctx.fillStyle = '#9cf';
+                        ctx.font = '10px VT323, monospace';
+                        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+                        ctx.fillText(text, 10, 8);
+                        ctx.restore();
+                    });
+                } catch(_) {}
+            }
+            if (this._prof.armed > 0) this._prof.armed -= 1;
+
+            // Optional: other-spike guard — stride/skip minimap+HUD for N frames
+            // when 'other' exceeds threshold. Off by default; enable via
+            // window.RENDER_OTHER_GUARD = true. Configure threshold via
+            // window.RENDER_OTHER_GUARD_MS (default 12), and frames via
+            // window.RENDER_OTHER_GUARD_N (default 1).
+            if (guardOn) {
+                try {
+                    const othTh = Number((typeof window !== 'undefined' && window.RENDER_OTHER_GUARD_MS) || 12);
+                    const guardN = Math.max(1, Number((typeof window !== 'undefined' && window.RENDER_OTHER_GUARD_N) || 1));
+                    const frameMs2 = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+                    const sum = Object.values(prof.b).reduce((a,b)=>a+(b||0), 0);
+                    const other = Math.max(0, frameMs2 - sum);
+                    if (other > othTh) {
+                        // Only increase remaining frames; do not stack beyond guardN
+                        this._otherGuard.frames = Math.max(this._otherGuard.frames||0, guardN);
+                    }
+                } catch(_) {}
+            }
+        }
+
         // Render touch controls if needed
         if (window.touchControls) {
             window.touchControls.render();
@@ -384,6 +693,19 @@ export class RenderSystem {
                 issues.push(`lineWidth=${this.ctx.lineWidth}`);
             }
             if (issues.length) {
+                try {
+                    // Count and capture last offender info for overlay
+                    const st = this.stateManager.state;
+                    st.debug.renderLintCount = (st.debug.renderLintCount || 0) + 1;
+                    st.debug.renderLintLastStage = stage;
+                    const err = new Error('RenderLint offender');
+                    st.debug.renderLintLast = {
+                        stage,
+                        issues: issues.slice(0, 4),
+                        at: (performance.now ? performance.now() : Date.now()),
+                        stack: (err.stack || '').split('\n').slice(0, 6).join('\n')
+                    };
+                } catch(_) {}
                 const doReset = !!dbg.renderLintReset && !!this.ctx.setTransform;
                 if (doReset) {
                     try {
@@ -461,6 +783,11 @@ export class RenderSystem {
         if (!this.targetCtx || !this.targetCanvas) return;
         const w = this.targetCanvas.width || 100;
         const h = this.targetCanvas.height || 100;
+        // Hard reset target-cam context to avoid lingering transforms/composites
+        try { this.targetCtx.setTransform(1, 0, 0, 1, 0, 0); } catch (_) {}
+        this.targetCtx.globalAlpha = 1;
+        this.targetCtx.globalCompositeOperation = 'source-over';
+        this.targetCtx.imageSmoothingEnabled = false;
         this.targetCtx.clearRect(0, 0, w, h);
 
         let targetId = (state.targeting && state.targeting.selectedId) || null;
@@ -494,15 +821,24 @@ export class RenderSystem {
         if (shipDead) targetId = null;
         const npc = targetId ? (state.npcShips || []).find(n => n && n.id === targetId) : null;
 
-        // Static overlay behind + over content for a realistic feed
-        this.drawStaticNoise(w, h, 0.10);
-        this.drawScanlines(w, h, 0.08);
+        // Static/scanline overlays are disabled by default (prod hygiene).
+        // Enable temporarily by setting window.TC_FX = true in console.
+        const now0 = performance.now ? performance.now() : Date.now();
+        const inTransition = !!this.targetCamTransition;
+        const inBlip = !!this.targetCamBlip && (now0 - this.targetCamBlip.start) <= (this.targetCamBlip.duration || 320);
+        const fxActive = inTransition || inBlip;
+        const fxEnabled = !!window.TC_FX;
+        if (fxEnabled && fxActive) {
+            this.drawStaticNoise(w, h, 0.08);
+            this.drawScanlines(w, h, 0.06);
+        }
 
         // Center the drawing
         const ctx = this.targetCtx;
         ctx.save();
-        const cx = w / 2, cy = h / 2;
-        ctx.translate(cx, cy);
+        try {
+            const cx = w / 2, cy = h / 2;
+            ctx.translate(cx, cy);
 
         // Direction indicator around perimeter
         let ang = 0;
@@ -564,30 +900,186 @@ export class RenderSystem {
             }
         }
 
-        // Draw live silhouette rotated with NPC angle (if allowed by transition)
-        if (npc && drawSilhouette) {
+        // Draw live silhouette (prefer sprite shape) rotated with NPC angle
+        // Disabled: TargetCamRenderer now owns TargetCam viewport; avoid duplicate/legacy path
+        if (false && npc && drawSilhouette) {
             ctx.save();
             let base = Math.max(16, Math.min(28, (npc.size || 10) * 1.6));
             base *= silhouetteScale;
-            const palette = { hullA: '#e8f6ff', hullB: '#e8f6ff', stroke: '#e8f6ff', cockpit: 'rgba(255,255,255,0.55)' };
+            let drewSprite = false;
+            let reason = 'init';
+            let lastErr = null;
+            // Track source dims for probe
+            let usedSw = 0, usedSh = 0, usedDw = 0, usedDh = 0;
+            // Compute sprite ids once for both try-block and fallback
+            const spriteId = npc.spriteId || typeToSpriteId[npc.type] || 'ships/pirate_0';
+            const aliasId = aliasSpriteForType[npc.type] || spriteId;
             try {
-                const design = (npc.type === 'pirate') ? 'raider' :
-                               (npc.type === 'patrol') ? 'wing' :
-                               (npc.type === 'freighter') ? 'hauler' :
-                               (npc.type === 'trader') ? 'oval' :
-                               (npc.type === 'interceptor') ? 'dart' : 'delta';
-                ctx.rotate(npc.angle || 0);
-                ctx.globalAlpha = silhouetteAlpha;
-                ShipDesigns.draw(ctx, design, base, palette);
-            } catch (e) {
-                ctx.fillStyle = '#e8f6ff';
-                ctx.globalAlpha = silhouetteAlpha;
-                ctx.beginPath();
-                ctx.moveTo(base, 0);
-                ctx.lineTo(-base * 0.6, -base * 0.5);
-                ctx.lineTo(-base * 0.6, base * 0.5);
-                ctx.closePath();
-                ctx.fill();
+                const assets = this.stateManager.state.assets || {};
+                // Ensure atlas frame cache is ready (defensive)
+                if ((!this._tcFrameCache || Object.keys(this._tcFrameCache).length === 0) && assets.atlases && assets.atlases.placeholder) {
+                  try { this.buildTargetCamCache(); } catch(_) {}
+                }
+                const target = base * 2; // approximate to match prior vector size
+                // Step 1: standalone sprite (registry)
+                const sprite = assets.sprites && assets.sprites[spriteId];
+                if (!drewSprite && sprite && sprite.image && (sprite.image.naturalWidth > 0 && sprite.image.naturalHeight > 0)) {
+                  const sw = sprite.w || sprite.image.naturalWidth || sprite.image.width;
+                  const sh = sprite.h || sprite.image.naturalHeight || sprite.image.height;
+                  const scale = target / Math.max(sw, sh);
+                  const dw = sw * scale, dh = sh * scale;
+                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
+                  ctx.save();
+                  try {
+                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
+                    const ok = this._drawWhiteMasked(ctx, sprite.image, dw, dh);
+                    if (ok) { drewSprite = true; reason = 'standalone-drawn'; }
+                  } finally { ctx.restore(); }
+                }
+                // Step 2: preloaded direct image (ensure/populate)
+                if (!this._targetCamSprites[spriteId]) {
+                  const ensured = (typeof this._ensureDirectSpriteImage === 'function') ? this._ensureDirectSpriteImage(spriteId) : null;
+                  if (ensured) this._targetCamSprites[spriteId] = ensured;
+                }
+                const pre = this._targetCamSprites[spriteId];
+                if (!drewSprite && pre && pre.naturalWidth > 0 && pre.naturalHeight > 0) {
+                  const sw = pre.naturalWidth, sh = pre.naturalHeight;
+                  const scale = target / Math.max(sw, sh);
+                  const dw = sw * scale, dh = sh * scale;
+                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
+                  ctx.save();
+                  try {
+                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
+                    const ok = this._drawWhiteMasked(ctx, pre, dw, dh);
+                    if (ok) { drewSprite = true; reason = 'direct-preloaded'; }
+                  } finally { ctx.restore(); }
+                }
+                // Step 3: on-demand direct image
+                const direct = this.getOrLoadSprite(spriteId);
+                if (!drewSprite && direct && direct.naturalWidth > 0 && direct.naturalHeight > 0) {
+                  const sw = direct.naturalWidth || direct.width;
+                  const sh = direct.naturalHeight || direct.height;
+                  const scale = target / Math.max(sw, sh);
+                  const dw = sw * scale, dh = sh * scale;
+                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
+                  ctx.save();
+                  try {
+                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
+                    const ok = this._drawWhiteMasked(ctx, direct, dw, dh);
+                    if (ok) { drewSprite = true; reason = 'direct-drawn'; }
+                  } finally { ctx.restore(); }
+                }
+                // Step 4: cached per-frame atlas canvas (via AssetSystem helper)
+                const cf = getFrameCanvasFromState(this.stateManager.state, aliasId) || getFrameCanvasFromState(this.stateManager.state, spriteId);
+                if (!drewSprite && cf && cf.width > 0 && cf.height > 0) {
+                  const sw = cf.width, sh = cf.height;
+                  const scale = target / Math.max(sw, sh);
+                  const dw = sw * scale, dh = sh * scale;
+                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
+                  ctx.save();
+                  try {
+                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
+                    const ok = this._drawWhiteMasked(ctx, cf, dw, dh);
+                    if (ok) { drewSprite = true; reason = 'atlas-drawn'; }
+                  } finally { ctx.restore(); }
+                }
+                // Step 4b: no longer needed; getFrameCanvasFromState covers atlas frames
+                // 5) No other sources succeeded; baseline/vec handled below with guard.
+            } catch(e) {
+                if (!drewSprite) { reason = 'error'; lastErr = e; }
+            }
+
+            // Minimal diagnostics: show compact info only when requested
+            if (window.DEBUG_SPRITES === 'errors' || window.DEBUG_SPRITES === 'verbose') {
+                const isErr = (reason === 'error');
+                if (isErr || window.DEBUG_SPRITES === 'verbose') {
+                    const payload = { type: npc.type, spriteId, reason, sw: usedSw|0, sh: usedSh|0, dw: usedDw|0, dh: usedDh|0 };
+                    if (isErr && lastErr && lastErr.message) payload.err = lastErr.message;
+                    (isErr ? console.warn : console.log)('[TargetCam]', payload);
+                }
+            }
+
+            // Final guard: if any valid source exists (standalone/preloaded/direct/atlas),
+            // skip baseline/vector. Prefer white mask from whichever is available.
+            let skipFallbacks = false;
+            try {
+                const assets = this.stateManager?.state?.assets || {};
+                const atlas = assets.atlases && assets.atlases.placeholder;
+                const atlasSrcReady = !!(atlas && ((atlas.canvas) || (atlas.image && atlas.image.naturalWidth > 0)));
+                const hasAtlasFrameReady = !!(atlasSrcReady && atlas.frames && (atlas.frames[aliasId] || atlas.frames[spriteId]));
+                const standaloneImg = assets.sprites && assets.sprites[spriteId] && assets.sprites[spriteId].image;
+                const hasStandaloneReady = !!(standaloneImg && (standaloneImg.naturalWidth > 0 && standaloneImg.naturalHeight > 0));
+                const pre = this._targetCamSprites && this._targetCamSprites[spriteId];
+                const hasPreloadedReady = !!(pre && pre.naturalWidth > 0 && pre.naturalHeight > 0);
+                const cf = this._tcFrameCache && (this._tcFrameCache[aliasId] || this._tcFrameCache[spriteId]);
+                const hasCachedFrameReady = !!(cf && cf.width > 0 && cf.height > 0);
+                // Check direct cache for readiness (without counting mere URL presence)
+                let hasDirectReady = false;
+                try {
+                    const direct = this.getOrLoadSprite(spriteId);
+                    hasDirectReady = !!(direct && direct.naturalWidth > 0 && direct.naturalHeight > 0);
+                } catch(_) {}
+                skipFallbacks = !!(hasAtlasFrameReady || hasStandaloneReady || hasPreloadedReady || hasCachedFrameReady || hasDirectReady);
+            } catch(_) { /* noop */ }
+
+            // Baseline: viewport-local transparent silhouette (outside try/catch)
+            // Always render baseline if nothing drew to avoid empty viewport.
+            if (!drewSprite) {
+                try {
+                    const vpa = this.getViewportFallbackAtlas();
+                    const vpf = vpa.frames[aliasId] || vpa.frames['ships/trader_0'];
+                    if (vpf && vpf.img) {
+                        const target = base * 2;
+                        const scale = target / Math.max(vpf.w, vpf.h);
+                        const dw = vpf.w * scale, dh = vpf.h * scale;
+                        ctx.save();
+                        ctx.globalAlpha = Math.max(0.9, silhouetteAlpha);
+                        ctx.imageSmoothingEnabled = false;
+                        ctx.rotate((npc.angle || 0) + this.spriteRotationOffset);
+                        usedSw = vpf.w; usedSh = vpf.h; usedDw = dw; usedDh = dh;
+                        ctx.drawImage(vpf.img, -dw/2, -dh/2, dw, dh);
+                        drewSprite = true;
+                        reason = 'vpa-drawn';
+                        ctx.restore();
+                    }
+                } catch(_) {}
+            }
+
+            // Diagnostics removed
+
+            if (!drewSprite) {
+                // Safe fallback: vector silhouette (prevents blank viewport)
+                const palette = { hullA: '#e8f6ff', hullB: '#e8f6ff', stroke: '#e8f6ff', cockpit: 'rgba(255,255,255,0.55)' };
+                try {
+                    const design = (npc.type === 'pirate') ? 'raider' :
+                                   (npc.type === 'patrol') ? 'wing' :
+                                   (npc.type === 'freighter') ? 'hauler' :
+                                   (npc.type === 'trader') ? 'oval' :
+                                   (npc.type === 'interceptor') ? 'dart' : 'delta';
+                    ctx.rotate(npc.angle || 0);
+                    ctx.globalAlpha = Math.max(0.4, silhouetteAlpha); // slight visibility even if fade=0
+                    ShipDesigns.draw(ctx, design, base, palette);
+                } catch (e) {
+                    ctx.fillStyle = '#e8f6ff';
+                    ctx.globalAlpha = Math.max(0.4, silhouetteAlpha);
+                    ctx.beginPath();
+                    ctx.moveTo(base, 0);
+                    ctx.lineTo(-base * 0.6, -base * 0.5);
+                    ctx.lineTo(-base * 0.6, base * 0.5);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                // probe removed
+            } else {
+                // probe removed
             }
             ctx.restore();
         }
@@ -595,22 +1087,28 @@ export class RenderSystem {
         // If the player is destroyed, overlay an OFFLINE tag in the viewport
         if (shipDead) {
             ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.globalAlpha = 0.65;
-            ctx.fillStyle = '#9cc';
-            ctx.font = '10px VT323, monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('OFFLINE', w / 2, h / 2);
-            ctx.restore();
+            try {
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.globalAlpha = 0.65;
+                ctx.fillStyle = '#9cc';
+                ctx.font = '10px VT323, monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('OFFLINE', w / 2, h / 2);
+            } finally { ctx.restore(); }
         }
 
-        // Overlay a light static pass above content
-        this.drawStaticNoise(w, h, 0.06, true);
-        // Occasional rolling band
-        this.drawRollingBand(w, h, 0.08);
+        // Overlay FX only during transition/blip and only when explicitly enabled.
+        if (fxEnabled && fxActive) {
+            this.drawStaticNoise(w, h, 0.05, true);
+            this.drawRollingBand(w, h, 0.06);
+        }
 
-        ctx.restore();
+        // Diagnostics removed
+        } finally {
+            // Always restore to avoid context leakage on exceptions
+            ctx.restore();
+        }
     }
 
     /**
@@ -714,11 +1212,14 @@ export class RenderSystem {
     renderShieldHits(state) {
         const hits = state.shieldHits || [];
         if (hits.length === 0) return;
+        const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+        const stride = (heavy || (this.quality === 'low' && hits.length > 30)) ? 2 : 1;
         const viewLeft = this.camera.x - this.screenCenter.x - 100;
         const viewTop = this.camera.y - this.screenCenter.y - 100;
         const viewRight = this.camera.x + this.screenCenter.x + 100;
         const viewBottom = this.camera.y + this.screenCenter.y + 100;
-        for (const fx of hits) {
+        for (let i = 0; i < hits.length; i += stride) {
+            const fx = hits[i];
             if (fx.x < viewLeft || fx.x > viewRight || fx.y < viewTop || fx.y > viewBottom) continue;
             const t = fx.lifetime / fx.maxLifetime;
             const alpha = Math.max(0, 1 - t);
@@ -937,9 +1438,16 @@ export class RenderSystem {
         
         for (let planet of planets) {
             // Use procedural planet renderer
-            // Check if planet has been initialized, if not, initialize it now
+            // If not initialized, defer heavy generation off the render thread to avoid spikes
             if (!this.planetRenderer.planetCache.has(planet.name)) {
-                this.planetRenderer.generateProceduralPlanet(planet);
+                if (!this._pendingPlanets.has(planet.name)) {
+                    this._pendingPlanets.add(planet.name);
+                    setTimeout(() => {
+                        try { this.planetRenderer.generateProceduralPlanet(planet); }
+                        finally { this._pendingPlanets.delete(planet.name); }
+                    }, 0);
+                }
+                continue; // skip drawing until ready
             }
             this.planetRenderer.renderPlanet(this.ctx, planet, Date.now());
             
@@ -1096,7 +1604,7 @@ export class RenderSystem {
                 if (!canUseSprites) this.ctx.scale(npcScale * this.sizeMultiplier, npcScale * this.sizeMultiplier);
 
             // Engine thrust effect
-            if (this.showEffects && (npc.thrusting || true)) {
+            if (this.showEffects && npc.thrusting) {
                 const isActive = !!npc.thrusting;
                 const flicker = Math.random();
                 // Compute an effective visual scale independent of sprite/vector context scaling
@@ -1170,218 +1678,30 @@ export class RenderSystem {
                 this.ctx.restore();
             }
 
-            // Faction/hostility brackets (subtle corner brackets around hostiles)
-            // Keep draw in screen space (no rotation), sized from npc size and scale
+            // Faction/hostility brackets (screen-space corner brackets around hostiles)
             const selectedId = (this.stateManager.state.targeting && this.stateManager.state.targeting.selectedId) || null;
             const isTargeted = selectedId && npc.id === selectedId;
-            this.renderFactionBracket(npc, (scaleMap[npc.type] || 1.4) * this.sizeMultiplier, isTargeted);
+            if (isTargeted) {
+                const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
+                this.hud.drawFactionBracket(npc, (scaleMap[npc.type] || 1.4) * this.sizeMultiplier, true, palette.accent || '#ff4444');
+            }
             
             // State indicator icon
             if (npc.state) {
-                this.renderNPCStateIndicator(npc);
+                this.hud.drawNPCStateIndicator(npc);
             }
             
             // Communication bubble
             if (npc.message && npc.messageTime) {
-                this.renderNPCMessage(npc);
+                this.hud.drawNPCMessage(npc);
             }
             
             // Health bar
-            if (npc.health < npc.maxHealth) {
-                const barWidth = 30;
-                const barHeight = 3;
-                const barY = npc.message ? npc.y - npc.size - 45 : npc.y - npc.size - 10;
-                this.ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-                this.ctx.fillRect(npc.x - barWidth/2, barY, barWidth, barHeight);
-                this.ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-                this.ctx.fillRect(npc.x - barWidth/2, barY, 
-                                barWidth * (npc.health / npc.maxHealth), barHeight);
-            }
+            if (npc.health < npc.maxHealth) { this.hud.drawNPCHealth(npc); }
         }
     }
 
-    /**
-     * Subtle HUD-style corner brackets around ships based on faction/hostility
-     */
-    renderFactionBracket(npc, npcScale = 1.0, isTargeted = false) {
-        // Only show for hostiles (pirates) for now
-        const isHostile = (npc.faction === 'pirate');
-        if (!isHostile) return;
-
-        const size = (npc.size || 10) * npcScale;
-        const half = size * 1.1;
-        const arm = Math.max(5, Math.min(9, size * 0.5));
-
-        const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
-        this.ctx.save();
-        this.ctx.strokeStyle = palette.accent || '#ff4444';
-        this.ctx.globalAlpha = isTargeted ? (0.8 + 0.2 * Math.abs(Math.sin(Date.now()*0.006))) : 0.6;
-        this.ctx.lineWidth = isTargeted ? 2.5 : 1.5;
-
-        // Four corner L-shapes around npc.x, npc.y
-        // Top-left
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.x - half, npc.y - half + arm);
-        this.ctx.lineTo(npc.x - half, npc.y - half);
-        this.ctx.lineTo(npc.x - half + arm, npc.y - half);
-        this.ctx.stroke();
-        // Top-right
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.x + half - arm, npc.y - half);
-        this.ctx.lineTo(npc.x + half, npc.y - half);
-        this.ctx.lineTo(npc.x + half, npc.y - half + arm);
-        this.ctx.stroke();
-        // Bottom-left
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.x - half, npc.y + half - arm);
-        this.ctx.lineTo(npc.x - half, npc.y + half);
-        this.ctx.lineTo(npc.x - half + arm, npc.y + half);
-        this.ctx.stroke();
-        // Bottom-right
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.x + half - arm, npc.y + half);
-        this.ctx.lineTo(npc.x + half, npc.y + half);
-        this.ctx.lineTo(npc.x + half, npc.y + half - arm);
-        this.ctx.stroke();
-
-        // Targeted center dot
-        if (isTargeted) {
-            this.ctx.fillStyle = palette.accent || '#ff4444';
-            this.ctx.globalAlpha = 0.9;
-            this.ctx.beginPath();
-            this.ctx.arc(npc.x, npc.y, Math.max(1.5, size*0.08), 0, Math.PI*2);
-            this.ctx.fill();
-        }
-
-        this.ctx.restore();
-    }
     
-    /**
-     * Render NPC state indicator
-     */
-    renderNPCStateIndicator(npc) {
-        const iconY = npc.y + npc.size + 15;
-        const iconSize = 8;
-        
-        this.ctx.save();
-        this.ctx.translate(npc.x, iconY);
-        
-        switch(npc.state) {
-            case 'pursuing':
-                // Exclamation mark in red
-                this.ctx.fillStyle = '#ff4444';
-                this.ctx.fillRect(-1, -iconSize/2, 2, iconSize * 0.6);
-                this.ctx.beginPath();
-                this.ctx.arc(0, iconSize/2 - 1, 1.5, 0, Math.PI * 2);
-                this.ctx.fill();
-                break;
-                
-            case 'fleeing':
-                // Arrows pointing away
-                this.ctx.strokeStyle = '#ffff44';
-                this.ctx.lineWidth = 2;
-                this.ctx.beginPath();
-                this.ctx.moveTo(-iconSize, 0);
-                this.ctx.lineTo(-iconSize/2, -iconSize/2);
-                this.ctx.moveTo(-iconSize, 0);
-                this.ctx.lineTo(-iconSize/2, iconSize/2);
-                this.ctx.moveTo(iconSize, 0);
-                this.ctx.lineTo(iconSize/2, -iconSize/2);
-                this.ctx.moveTo(iconSize, 0);
-                this.ctx.lineTo(iconSize/2, iconSize/2);
-                this.ctx.stroke();
-                break;
-                
-            case 'warning':
-                // Warning triangle
-                this.ctx.strokeStyle = '#ff8800';
-                this.ctx.fillStyle = 'rgba(255, 136, 0, 0.3)';
-                this.ctx.lineWidth = 2;
-                this.ctx.beginPath();
-                this.ctx.moveTo(0, -iconSize);
-                this.ctx.lineTo(-iconSize, iconSize);
-                this.ctx.lineTo(iconSize, iconSize);
-                this.ctx.closePath();
-                this.ctx.fill();
-                this.ctx.stroke();
-                break;
-                
-            case 'patrolling':
-                // Small rotating circle segments
-                const angle = Date.now() * 0.002;
-                this.ctx.strokeStyle = '#4488ff';
-                this.ctx.lineWidth = 2;
-                this.ctx.rotate(angle);
-                for (let i = 0; i < 3; i++) {
-                    this.ctx.beginPath();
-                    this.ctx.arc(0, 0, iconSize/2, i * Math.PI * 2/3, i * Math.PI * 2/3 + Math.PI/4);
-                    this.ctx.stroke();
-                }
-                break;
-        }
-        
-        this.ctx.restore();
-    }
-    
-    /**
-     * Render NPC communication bubble
-     */
-    renderNPCMessage(npc) {
-        const fadeTime = 3000; // Match NPCSystem message duration
-        const timeSinceMessage = Date.now() - npc.messageTime;
-        const alpha = Math.max(0, 1 - (timeSinceMessage / fadeTime));
-        
-        if (alpha <= 0) return;
-        
-        this.ctx.save();
-        
-        // Measure text
-        this.ctx.font = 'bold 11px "JetBrains Mono", monospace';
-        const textWidth = this.ctx.measureText(npc.message).width;
-        const bubbleWidth = textWidth + 16;
-        const bubbleHeight = 20;
-        const bubbleX = npc.x - bubbleWidth / 2;
-        const bubbleY = npc.y - npc.size - 35;
-        
-        // Draw speech bubble
-        this.ctx.globalAlpha = alpha;
-        
-        // Bubble background
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        this.ctx.strokeStyle = npc.color;
-        this.ctx.lineWidth = 1.5;
-        
-        // Rounded rectangle for bubble
-        const radius = 4;
-        this.ctx.beginPath();
-        this.ctx.moveTo(bubbleX + radius, bubbleY);
-        this.ctx.lineTo(bubbleX + bubbleWidth - radius, bubbleY);
-        this.ctx.quadraticCurveTo(bubbleX + bubbleWidth, bubbleY, bubbleX + bubbleWidth, bubbleY + radius);
-        this.ctx.lineTo(bubbleX + bubbleWidth, bubbleY + bubbleHeight - radius);
-        this.ctx.quadraticCurveTo(bubbleX + bubbleWidth, bubbleY + bubbleHeight, bubbleX + bubbleWidth - radius, bubbleY + bubbleHeight);
-        
-        // Tail pointing to NPC
-        this.ctx.lineTo(npc.x + 5, bubbleY + bubbleHeight);
-        this.ctx.lineTo(npc.x, bubbleY + bubbleHeight + 5);
-        this.ctx.lineTo(npc.x - 5, bubbleY + bubbleHeight);
-        
-        this.ctx.lineTo(bubbleX + radius, bubbleY + bubbleHeight);
-        this.ctx.quadraticCurveTo(bubbleX, bubbleY + bubbleHeight, bubbleX, bubbleY + bubbleHeight - radius);
-        this.ctx.lineTo(bubbleX, bubbleY + radius);
-        this.ctx.quadraticCurveTo(bubbleX, bubbleY, bubbleX + radius, bubbleY);
-        this.ctx.closePath();
-        
-        this.ctx.fill();
-        this.ctx.stroke();
-        
-        // Text
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(npc.message, npc.x, bubbleY + bubbleHeight / 2);
-        
-        this.ctx.restore();
-    }
     
     /**
      * Render specific NPC ship type
@@ -1390,8 +1710,7 @@ export class RenderSystem {
         // Try sprite render if enabled and assets are ready
         if ((this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites) && (this.stateManager.state.assets && this.stateManager.state.assets.ready)) {
             const assets = this.stateManager.state.assets;
-            const idMap = { pirate: 'ships/pirate_0', trader: 'ships/trader_0', patrol:'ships/patrol_0', freighter:'ships/freighter_0', interceptor:'ships/interceptor_0' };
-            const spriteId = npc.spriteId || idMap[npc.type] || 'ships/pirate_0';
+            const spriteId = npc.spriteId || typeToSpriteId[npc.type] || 'ships/pirate_0';
             // For sprites, we are not applying outer scale in renderNPCs
             let drew = false;
             const has = !!(assets.sprites && assets.sprites[spriteId]);
@@ -1661,7 +1980,9 @@ export class RenderSystem {
             // Frustum cull projectiles outside the viewport with margin
             if (proj.x < viewLeft || proj.x > viewRight || proj.y < viewTop || proj.y > viewBottom) continue;
             // Trail effect
-            const seg = Math.max(3, Math.min(12, proj.trailLen || 5));
+            let seg = Math.max(3, Math.min(12, proj.trailLen || 5));
+            const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+            if (this.quality === 'low' || heavy) seg = Math.min(seg, 5);
             const trailGradient = this.ctx.createLinearGradient(
                 proj.x - proj.vx * seg, proj.y - proj.vy * seg,
                 proj.x, proj.y
@@ -1681,7 +2002,7 @@ export class RenderSystem {
             trailGradient.addColorStop(1, color);
             
             this.ctx.strokeStyle = trailGradient;
-            this.ctx.lineWidth = Math.max(1.5, Math.min(5, proj.trailWidth || 3));
+            this.ctx.lineWidth = Math.max(1.2, Math.min(heavy ? 3 : 4, proj.trailWidth || 3));
             this.ctx.beginPath();
             this.ctx.moveTo(proj.x - proj.vx * seg, proj.y - proj.vy * seg);
             this.ctx.lineTo(proj.x, proj.y);
@@ -1856,6 +2177,17 @@ export class RenderSystem {
             // If no sprite drawn, fall back to vector below
         }
         if (!drewSprite) {
+            // Avoid one-frame triangle flash when sprites are intended but not ready yet
+            const rs = this.stateManager.state.renderSettings || {};
+            const assets = this.stateManager.state.assets || {};
+            const now = performance.now ? performance.now() : Date.now();
+            const spritesDesired = !!rs.useSprites; // default gameplay desires sprites
+            const warming = (now < (this._suppressVectorUntil || 0));
+            const notReady = !assets.ready;
+            if ((spritesDesired && (warming || notReady))) {
+                this.ctx.restore();
+                return; // skip vector fallback this frame
+            }
             const palette = FactionVisuals.getPalette(state.ship.faction || 'civilian');
             const playerDesign = (state.ship.class === 'interceptor') ? 'dart' :
                                  (state.ship.class === 'freighter') ? 'hauler' :
@@ -1953,11 +2285,14 @@ export class RenderSystem {
     renderHitSparks(state) {
         const sparks = state.hitSparks || [];
         if (sparks.length === 0) return;
+        const heavyS = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+        const stride = (heavyS || (this.quality === 'low' && sparks.length > 60)) ? 2 : 1;
         const viewLeft = this.camera.x - this.screenCenter.x - 50;
         const viewTop = this.camera.y - this.screenCenter.y - 50;
         const viewRight = this.camera.x + this.screenCenter.x + 50;
         const viewBottom = this.camera.y + this.screenCenter.y + 50;
-        for (const s of sparks) {
+        for (let i = 0; i < sparks.length; i += stride) {
+            const s = sparks[i];
             if (s.x < viewLeft || s.x > viewRight || s.y < viewTop || s.y > viewBottom) continue;
             const t = s.lifetime / s.maxLifetime;
             const alpha = 1 - t;
@@ -1983,11 +2318,14 @@ export class RenderSystem {
     renderMuzzleFlashes(state) {
         const flashes = state.muzzleFlashes || [];
         if (flashes.length === 0) return;
+        const heavyM = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+        const stride = (heavyM || (this.quality === 'low' && flashes.length > 40)) ? 2 : 1;
         const viewLeft = this.camera.x - this.screenCenter.x - 50;
         const viewTop = this.camera.y - this.screenCenter.y - 50;
         const viewRight = this.camera.x + this.screenCenter.x + 50;
         const viewBottom = this.camera.y + this.screenCenter.y + 50;
-        for (const fx of flashes) {
+        for (let i = 0; i < flashes.length; i += stride) {
+            const fx = flashes[i];
             if (fx.x < viewLeft || fx.x > viewRight || fx.y < viewTop || fx.y > viewBottom) continue;
             const t = fx.lifetime / fx.maxLifetime;
             const alpha = 1 - t;
@@ -2135,6 +2473,13 @@ export class RenderSystem {
      */
     renderMinimap(state) {
         if (!this.minimapCtx) return;
+        try {
+            const now = performance.now ? performance.now() : Date.now();
+            if (!this._minimapLastTs) this._minimapLastTs = 0;
+            // Throttle minimap to ~30Hz to reduce bursty cost on fast displays
+            if (now - this._minimapLastTs < 33) return;
+            this._minimapLastTs = now;
+        } catch(_) {}
         
         const centerX = 50;
         const centerY = 50;

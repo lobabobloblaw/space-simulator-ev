@@ -45,6 +45,7 @@
         import InputSystem from './js/systems/InputSystem.js';
         import PhysicsSystem from './js/systems/PhysicsSystem.js';
         import RenderSystem from './js/systems/RenderSystem.js';
+        import AssetSystem from './js/systems/AssetSystem.js';
         import { planets } from './js/data/gameData.js';
         
         // Setup canvas
@@ -121,7 +122,12 @@
         systems.physics = new PhysicsSystem();
         await systems.physics.init();
         console.log('✅ PhysicsSystem ready');
-        
+
+        // Ensure assets (atlas + sprites) are initialized for TargetCam silhouettes
+        systems.assets = new AssetSystem();
+        await systems.assets.init();
+        console.log('✅ AssetSystem ready');
+
         systems.render = new RenderSystem(canvas);
         await systems.render.init();
         console.log('✅ RenderSystem ready');

@@ -343,8 +343,17 @@ export class WeaponSystem {
      * Handle projectile hitting an NPC
      */
     handleProjectileHitNPC(projectile, npc, explosions) {
-        // Apply damage
-        npc.health -= projectile.damage;
+        // Ignore further damage once death sequence has started
+        if (npc.deathSeq) {
+            // Still allow a small visual hit effect without altering state
+            if (explosions && this.createExplosion) {
+                explosions.push(this.createExplosion(projectile.x, projectile.y, true));
+            }
+            this.createHitSpark(projectile.x, projectile.y, projectile.type);
+            return;
+        }
+        // Apply damage with clamp to prevent negative health
+        npc.health = Math.max(0, (npc.health || 0) - projectile.damage);
         
         // Mark killer if NPC dies
         if (npc.health <= 0 && !npc.killedBy) {
@@ -368,10 +377,13 @@ export class WeaponSystem {
         });
         
         if (npc.health <= 0) {
-            this.eventBus.emit(GameEvents.NPC_DEATH, {
-                npc: npc,
-                killedBy: npc.killedBy
-            });
+            if (!npc.deathEventEmitted) {
+                npc.deathEventEmitted = true;
+                this.eventBus.emit(GameEvents.NPC_DEATH, {
+                    npc: npc,
+                    killedBy: npc.killedBy
+                });
+            }
         }
     }
     

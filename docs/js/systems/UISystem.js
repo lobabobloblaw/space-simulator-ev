@@ -32,8 +32,9 @@ export class UISystem {
         console.log('[UISystem] Created');
 
         // Image provider preference for planet landscapes
-        // Options: 'lexica' (search existing high-res), 'pollinations' (generate), 'auto' (try lexica then pollinations)
-        this.landscapeImageProvider = 'auto';
+        // Options: 'lexica' (search existing high-res), 'unsplash' (photo keywords), 'auto' (lexica→unsplash), 'none' (disable)
+        // Default to 'unsplash' to avoid CORS warnings during local runs
+        this.landscapeImageProvider = 'unsplash';
         // If true, when using Pollinations, prefer a single HQ attempt and wait longer
         this.pollinationsHQOnly = false;
         // Max wait per attempt (ms)
@@ -46,6 +47,10 @@ export class UISystem {
         // Radio scanning animation timers
         this.radioScanInterval = null;
         this.radioScanTimeout = null;
+
+        // Notification queue (sequential, no stack overlap)
+        this._notifQueue = [];
+        this._notifActive = false;
     }
     
     /**
@@ -64,6 +69,17 @@ export class UISystem {
         // Initialize UI elements
         this.initializeUI();
         
+        // Allow runtime override for landscape provider to avoid CORS noise during QA
+        try {
+            const prov = (typeof window !== 'undefined') ? window.UI_LANDSCAPE_PROVIDER : null;
+            if (prov && typeof prov === 'string') {
+                const v = prov.toLowerCase();
+                if (v === 'lexica' || v === 'unsplash' || v === 'auto' || v === 'none') {
+                    this.landscapeImageProvider = v;
+                }
+            }
+        } catch(_) {}
+
         // Wire mute toggle click if present
         const muteKey = document.getElementById('muteKey');
         if (muteKey) {
@@ -190,8 +206,8 @@ export class UISystem {
      */
     handleUIMessage(data) {
         if (!data || !data.message) return;
-        
-        this.showNotification(data.message, data.type || 'info', data.duration || 2000);
+        // Enqueue and play sequentially to avoid stacked overlap
+        this.enqueueNotification(data.message, data.type || 'info', data.duration || 2000);
     }
     
     /**
@@ -314,7 +330,11 @@ export class UISystem {
         
         const updateElement = (id, value) => {
             const element = document.getElementById(id);
-            if (element) element.textContent = value;
+            if (!element) return;
+            // Avoid unnecessary DOM writes to reduce layout/reflow
+            if (element.textContent !== String(value)) {
+                element.textContent = String(value);
+            }
         };
         
         updateElement('health', Math.max(0, Math.round(ship.health)) + '%');
@@ -404,7 +424,8 @@ export class UISystem {
         
         // Draw planet visual
         if (this.planetCanvas) {
-            this.drawPlanetVisual(planet, this.planetCanvas, true);
+            const useAI = this.landscapeImageProvider !== 'none';
+            this.drawPlanetVisual(planet, this.planetCanvas, useAI);
         }
         
         // Show landing info panel by default
@@ -1275,14 +1296,50 @@ export class UISystem {
      * Show notification message
      */
     showNotification(message, type = 'info', duration = 2000) {
+        // Backward-compatible: still usable directly, but prefer enqueueNotification
         const msg = document.createElement('div');
         msg.className = `game-notification ${type}`;
         msg.textContent = message;
         document.body.appendChild(msg);
-        
         setTimeout(() => {
-            msg.remove();
+            try {
+                msg.classList.add('fade-out');
+                msg.addEventListener('transitionend', () => msg.remove(), { once: true });
+            } catch(_) { msg.remove(); }
         }, duration);
+    }
+
+    enqueueNotification(message, type = 'info', duration = 2000) {
+        this._notifQueue.push({ message, type, duration });
+        if (!this._notifActive) this._drainNotifications();
+    }
+
+    _drainNotifications() {
+        if (this._notifActive) return;
+        const next = this._notifQueue.shift();
+        if (!next) return;
+        this._notifActive = true;
+        const el = document.createElement('div');
+        el.className = `game-notification ${next.type}`;
+        el.textContent = next.message;
+        document.body.appendChild(el);
+        // schedule fade-out then play next
+        const totalMs = Math.max(800, Number(next.duration) || 2000);
+        setTimeout(() => {
+            try {
+                el.classList.add('fade-out');
+                el.addEventListener('transitionend', () => {
+                    el.remove();
+                    this._notifActive = false;
+                    // slight gap to mimic "rolodex" paging
+                    setTimeout(() => this._drainNotifications(), 120);
+                }, { once: true });
+            } catch (_) {
+                el.remove();
+                this._notifActive = false;
+                setTimeout(() => this._drainNotifications(), 120);
+            }
+        }, totalMs);
     }
     
     /**

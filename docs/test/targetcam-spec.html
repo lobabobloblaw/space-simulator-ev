@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TargetCam Spec Fixture</title>
+  <style>
+    body { background: #000; color: #9cf; font-family: monospace; margin: 0; padding: 10px; }
+    #panel { display: flex; gap: 16px; align-items: center; }
+    canvas { image-rendering: pixelated; }
+    #camBox { width: 120px; height: 120px; border: 1px solid #3af; display: grid; place-items: center; }
+  </style>
+  <script>
+    window.DEBUG_SPRITES = 'errors'; // compact errors only
+  </script>
+  <script type="module">
+    import { getEventBus, GameEvents } from '../js/core/EventBus.js';
+    import { getStateManager } from '../js/core/StateManager.js';
+    import AssetSystem from '../js/systems/AssetSystem.js';
+    import RenderSystem from '../js/systems/RenderSystem.js';
+
+    const eventBus = getEventBus();
+    const stateManager = getStateManager();
+    const state = stateManager.state;
+
+    // Minimal world state
+    state.ship = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, size: 10, maxHealth: 100, health: 100 };
+    state.camera = { x: 0, y: 0 };
+    state.npcShips = [];
+    state.stars = { far: [], mid: [], near: [] };
+    state.planets = [];
+    state.asteroids = [];
+    state.projectiles = [];
+    state.explosions = [];
+    state.renderSettings = { useSprites: true };
+
+    // Spawn one of each type
+    const types = ['pirate','patrol','trader','freighter','interceptor','shuttle'];
+    let id = 1;
+    for (const t of types) {
+      state.npcShips.push({ id: id++, x: Math.random()*400-200, y: Math.random()*400-200, vx: 0, vy: 0, angle: Math.random()*Math.PI*2, type: t, size: 10, health: 100, maxHealth: 100 });
+    }
+
+    // Canvas setup
+    const gameCanvas = document.createElement('canvas');
+    gameCanvas.width = 480; gameCanvas.height = 320; // offscreen world; we mainly care about TargetCam
+    document.body.appendChild(gameCanvas);
+
+    // TargetCam DOM
+    const panel = document.createElement('div');
+    panel.id = 'panel';
+    panel.innerHTML = `
+      <div id="camBox">
+        <canvas id="centerViewportCanvas" width="100" height="100"></canvas>
+      </div>
+      <div>
+        Force path:
+        <label><input type="radio" name="force" value="" checked>auto</label>
+        <label><input type="radio" name="force" value="standalone">standalone</label>
+        <label><input type="radio" name="force" value="preloaded">preloaded</label>
+        <label><input type="radio" name="force" value="direct">direct</label>
+        <label><input type="radio" name="force" value="atlas">atlas</label>
+        <label><input type="radio" name="force" value="baseline">baseline</label>
+      </div>
+      <div>
+        <button id="prev">Prev</button>
+        <button id="next">Next</button>
+        <label><input type="checkbox" id="spr" checked>Sprites</label>
+        <label><input type="checkbox" id="fx">FX</label>
+      </div>
+      <div id="info"></div>
+    `;
+    document.body.insertBefore(panel, gameCanvas);
+
+    // Systems
+    const assets = new AssetSystem(); await assets.init();
+    const render = new RenderSystem(gameCanvas); await render.init();
+
+    // Target control
+    let selIdx = 0;
+    const updateTarget = () => {
+      const npc = state.npcShips[selIdx % state.npcShips.length];
+      state.targeting = state.targeting || {};
+      state.targeting.selectedId = npc.id;
+      eventBus.emit(GameEvents.TARGET_SET, { id: npc.id });
+      document.getElementById('info').textContent = `Target: ${npc.type} (id=${npc.id})`;
+    };
+    document.getElementById('prev').onclick = () => { selIdx = (selIdx + state.npcShips.length - 1) % state.npcShips.length; updateTarget(); };
+    document.getElementById('next').onclick = () => { selIdx = (selIdx + 1) % state.npcShips.length; updateTarget(); };
+    document.getElementById('spr').onchange = (e) => eventBus.emit('render.useSprites', { enabled: e.target.checked });
+    document.getElementById('fx').onchange = (e) => { window.TC_FX = !!e.target.checked; };
+
+    // Force selector wiring
+    for (const el of panel.querySelectorAll('input[name="force"]')) {
+      el.addEventListener('change', (e) => {
+        if (!e.target.checked) return;
+        window.TC_FORCE = e.target.value || null;
+      });
+    }
+
+    updateTarget();
+
+    // Simple loop
+    function loop() {
+      render.render(state, 16.6);
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</head>
+<body>
+</body>
+</html>

@@ -26,6 +26,32 @@ export default class NPCSystem {
             }
         });
         
+        // Respond to distress beacons (patrol assist)
+        this.eventBus.on(GameEvents.NPC_DISTRESS, (data) => {
+            try {
+                const st = this.stateManager.state;
+                if (!st?.npcShips) return;
+                const { x, y } = data || {};
+                // Nearest patrol responds
+                let best = null; let bestDist = Infinity;
+                for (const npc of st.npcShips) {
+                    if (npc.behavior !== 'lawful') continue;
+                    const dx = (x||0) - npc.x; const dy = (y||0) - npc.y; const d = Math.hypot(dx, dy);
+                    if (d < bestDist) { best = npc; bestDist = d; }
+                }
+                if (best && bestDist < 1600) {
+                    best.respondTarget = { x, y, expires: Date.now() + 6000 };
+                    best.state = 'responding';
+                    best.pursuing = true;
+                    if (!best.lastAssistMsg || Date.now() - best.lastAssistMsg > 6000) {
+                        best.message = 'PATROL: Responding to distress'; best.messageTime = Date.now(); best.lastAssistMsg = Date.now();
+                    }
+                }
+            } catch(_) {}
+        });
+
+        // Scavenger spawn disabled to reduce confusion. (Previously listened to NPC_DESTROYED.)
+
         console.log('[NPCSystem] Initialized with sophisticated AI');
     }
     
@@ -363,6 +389,8 @@ export default class NPCSystem {
                 return this.makePatrolDecision(npc, state, playerHostility, decision);
             case "passive":
                 return this.makeTraderDecision(npc, state, decision);
+            case "scavenger":
+                return this.makeScavengerDecision(npc, state, decision);
             default:
                 return this.makeDefaultDecision(npc, state, decision);
         }
@@ -527,6 +555,17 @@ export default class NPCSystem {
     makePatrolDecision(npc, state, playerHostility, decision) {
         const ship = state.ship;
         const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
+
+        // Respond to distress target first
+        if (npc.respondTarget && Date.now() < npc.respondTarget.expires) {
+            const dx = npc.respondTarget.x - npc.x; const dy = npc.respondTarget.y - npc.y;
+            const dist = Math.hypot(dx, dy);
+            decision.desiredAngle = Math.atan2(dy, dx);
+            const ang = this.normalizeAngle(decision.desiredAngle - npc.angle);
+            if (Math.abs(ang) < Math.PI * 0.9) decision.shouldThrust = true;
+            if (dist < 120) { npc.respondTarget = null; npc.pursuing = false; }
+            return decision;
+        }
         
         // Check if player is friendly (pirate hunter)
         const playerIsFriendly = ship.pirateKills >= 3 && (!ship.kills || ship.pirateKills >= ship.kills * 0.8);
@@ -760,6 +799,12 @@ export default class NPCSystem {
                     npc.lastPanicMessage = Date.now();
                 }
                 
+                // Emit a distress beacon (throttled)
+                if (!npc._lastDistress || Date.now() - npc._lastDistress > 6000) {
+                    npc._lastDistress = Date.now();
+                    this.eventBus.emit(GameEvents.NPC_DISTRESS, { id: npc.id, x: npc.x, y: npc.y, type: npc.type });
+                }
+
                 let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
                 
                 if (Math.abs(angleDiff) < Math.PI / 6) {
@@ -789,6 +834,11 @@ export default class NPCSystem {
                         npc.lastPirateMessage = Date.now();
                     }
                     
+                    // Emit distress for pirates too (throttled)
+                    if (!npc._lastDistress || Date.now() - npc._lastDistress > 6000) {
+                        npc._lastDistress = Date.now();
+                        this.eventBus.emit(GameEvents.NPC_DISTRESS, { id: npc.id, x: npc.x, y: npc.y, type: npc.type });
+                    }
                     let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
                     
                     if (Math.abs(angleDiff) < Math.PI / 6) {
@@ -842,6 +892,43 @@ export default class NPCSystem {
             }
         }
         
+        return decision;
+    }
+
+    /**
+     * Scavenger AI - seek pickups near recent battles, then leave
+     */
+    makeScavengerDecision(npc, state, decision) {
+        const pickups = state.pickups || [];
+        // Retire after some time or inventory
+        if ((npc.inventory || 0) >= 4 || npc.lifetime > 2000) {
+            npc.readyToDock = true; return decision;
+        }
+        // Find nearest pickup
+        let best = null; let bestDist = 900;
+        for (const p of pickups) {
+            const dx = p.x - npc.x, dy = p.y - npc.y; const d = Math.hypot(dx, dy);
+            if (d < bestDist) { best = p; bestDist = d; }
+        }
+        if (best) {
+            decision.desiredAngle = Math.atan2(best.y - npc.y, best.x - npc.x);
+            const ang = this.normalizeAngle(decision.desiredAngle - npc.angle);
+            if (Math.abs(ang) < Math.PI / 2) decision.shouldThrust = true;
+            // Collect if close
+            if (bestDist < 12) {
+                const idx = pickups.indexOf(best);
+                if (idx !== -1) pickups.splice(idx, 1);
+                npc.inventory = (npc.inventory || 0) + 1;
+                this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, { by: 'npc', npc });
+            }
+        } else {
+            // Drift / wander
+            if (!npc.wanderAngle || Math.random() < 0.02) npc.wanderAngle = Math.random()*Math.PI*2;
+            decision.desiredAngle = npc.wanderAngle;
+            const ang = this.normalizeAngle(decision.desiredAngle - npc.angle);
+            if (Math.abs(ang) < Math.PI/3) decision.shouldThrust = true;
+        }
+        npc.state = best ? 'scavenging' : 'wandering';
         return decision;
     }
     

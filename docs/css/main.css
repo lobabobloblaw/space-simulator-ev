@@ -91,7 +91,7 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     height: 100%;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start; /* pack items; center expands to fill */
     padding: var(--spacing-md) var(--spacing-md);
     gap: var(--spacing-md);
     overflow: visible;  /* Allow overflow */
@@ -494,6 +494,16 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     position: relative;
     margin-bottom: 2px;
     margin-top: 4px;
+}
+
+#logo-container #logo-img {
+    display: block;
+    max-height: 128px; /* larger presence; can overflow HUD (allowed) */
+    width: auto;
+    opacity: 0.95;
+    filter: drop-shadow(0 0 6px rgba(0,255,255,0.12));
+    margin: 0 auto; /* center horizontally */
+    transform: translateY(-5px); /* nudge upward ~5px */
 }
 
 #logo-ascii {
@@ -1183,7 +1193,7 @@ body.ship-destroyed #tutorialHint { display: none !important; }
     z-index: 9999;  /* Just below tutorial hint */
     animation: notificationSlide 0.3s ease-out;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    transition: top 0.2s ease-out;
+    transition: top 0.2s ease-out, opacity 0.25s ease-in, transform 0.25s ease-in;
 }
 
 /* Stack multiple notifications */
@@ -1208,6 +1218,12 @@ body.ship-destroyed #tutorialHint { display: none !important; }
         opacity: 1;
         transform: translateX(-50%) translateY(0);
     }
+}
+
+/* Rolodex-style fade out */
+.game-notification.fade-out {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
 }
 
 .game-notification.success {

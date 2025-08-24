@@ -21,6 +21,8 @@ export default class AssetSystem {
             await this.loadExplosionFlipbook();
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
+            // Prime known ship sprites so TargetCam can upgrade silhouettes quickly
+            await this.loadKnownShipSprites();
             state.assets.ready = true;
             // Default to sprites ON; user can toggle via debug overlay
             state.renderSettings = state.renderSettings || {};
@@ -70,10 +72,14 @@ export default class AssetSystem {
             const state = this.stateManager.state;
             state.assets = state.assets || {};
             const sprites = state.assets.sprites || (state.assets.sprites = {});
+            // Resolve URLs relative to docs/ (JSON uses './assets/...')
+            const docsRoot = new URL('../../', import.meta.url);
             const loads = list.map(async (entry) => {
                 if (!entry || !entry.id || !entry.src) return;
                 try {
-                    const img = await this.loadImage(entry.src);
+                    const clean = String(entry.src).replace(/^\.\//, '');
+                    const href = new URL(clean, docsRoot).href;
+                    const img = await this.loadImage(href);
                     sprites[entry.id] = { image: img, w: img.width, h: img.height };
                 } catch (_) { /* ignore missing */ }
             });
@@ -112,7 +118,7 @@ export default class AssetSystem {
         ctx.fill();
         ctx.restore();
         const img = await this.canvasToImage(canvas);
-        return { image: img, frames: meta.frames || {}, tileSize: { w: tw, h: th } };
+            return { image: img, canvas, frames: meta.frames || {}, tileSize: { w: tw, h: th } };
     }
 
     async generateEffectsAtlas() {
@@ -166,6 +172,26 @@ export default class AssetSystem {
         return { image: img, frames, tileSize: { w: tw, h: th } };
     }
 
+    async loadKnownShipSprites() {
+        try {
+            const ids = ['ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0'];
+            const state = this.stateManager.state;
+            state.assets = state.assets || {};
+            const sprites = state.assets.sprites || (state.assets.sprites = {});
+            const loads = ids.map(async (id) => {
+                if (sprites[id]?.image) return;
+                try {
+                    const url = new URL(`../../assets/sprites/${id}.png`, import.meta.url).href;
+                    const img = await this.loadImage(url);
+                    sprites[id] = { image: img, w: img.naturalWidth || img.width, h: img.naturalHeight || img.height };
+                } catch (_) { /* ignore missing */ }
+            });
+            await Promise.allSettled(loads);
+            const count = ids.filter(id => sprites[id]?.image).length;
+            console.log(`[AssetSystem] Preloaded ship sprites: ${count}/${ids.length}`);
+        } catch (_) { /* optional */ }
+    }
+
     canvasToImage(canvas) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -177,6 +203,7 @@ export default class AssetSystem {
     loadImage(src) {
         return new Promise((resolve, reject) => {
             const img = new Image();
+            img.crossOrigin = 'anonymous';
             img.onload = () => resolve(img);
             img.onerror = (e) => reject(e);
             img.src = src;
@@ -185,13 +212,25 @@ export default class AssetSystem {
 
     async loadExplosionFlipbook() {
         try {
-            const url = new URL('../assets/explosion.json', import.meta.url).href;
-            const res = await fetch(url, { cache: 'no-cache' });
+            // Resolve manifest relative to this module
+            const manifestURL = new URL('../assets/explosion.json', import.meta.url);
+            const res = await fetch(manifestURL.href, { cache: 'no-cache' });
             if (!res.ok) throw new Error('no flipbook manifest');
             const manifest = await res.json();
             if (!manifest || !Array.isArray(manifest.frames) || manifest.frames.length === 0) throw new Error('empty flipbook');
             const fps = Math.max(6, Math.min(60, manifest.fps || 24));
-            const imgs = await Promise.all(manifest.frames.map(src => this.loadImage(src)));
+            // Frames in manifest are authored relative to docs/ (e.g., './assets/explosions/...').
+            // Build absolute URLs relative to docs/ root.
+            const docsRoot = new URL('../../', import.meta.url); // from js/systems/ -> docs/
+            const imgs = await Promise.all(manifest.frames.map(src => {
+                try {
+                    const clean = String(src).replace(/^\.\//, '');
+                    const href = new URL(clean, docsRoot).href;
+                    return this.loadImage(href);
+                } catch (_) {
+                    return this.loadImage(src);
+                }
+            }));
             const state = this.stateManager.state;
             state.assets.effects = state.assets.effects || {};
             state.assets.effects.explosionFlipbook = { fps, frames: imgs };
@@ -222,4 +261,58 @@ export default class AssetSystem {
             } catch (_) {}
         }
     }
+
+    // Return a per-frame canvas for a given atlas frame id.
+    // Uses placeholder atlas by default. Returns null if not ready.
+    getFrameCanvas(id, atlasName = 'placeholder') {
+        try {
+            const state = this.stateManager.state;
+            const atlases = state.assets?.atlases;
+            if (!atlases || !atlases[atlasName]) return null;
+            const atlas = atlases[atlasName];
+            const frames = atlas.frames || {};
+            const fr = frames[id];
+            const src = atlas.canvas || (atlas.image && atlas.image.naturalWidth > 0 ? atlas.image : null);
+            if (!fr || !src) return null;
+            state.assets._frameCanvases = state.assets._frameCanvases || {};
+            const cacheKey = `${atlasName}:${id}`;
+            let c = state.assets._frameCanvases[cacheKey];
+            if (c && c.width === fr.w && c.height === fr.h) return c;
+            c = document.createElement('canvas');
+            c.width = fr.w; c.height = fr.h;
+            const ctx = c.getContext('2d');
+            try {
+                ctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
+                state.assets._frameCanvases[cacheKey] = c;
+                return c;
+            } catch (_) {
+                return null;
+            }
+        } catch (_) {
+            return null;
+        }
+    }
+}
+
+// Convenience for consumers that only have StateManager.state
+export function getFrameCanvasFromState(state, id, atlasName = 'placeholder') {
+    try {
+        const atlases = state.assets?.atlases;
+        if (!atlases || !atlases[atlasName]) return null;
+        const atlas = atlases[atlasName];
+        const frames = atlas.frames || {};
+        const fr = frames[id];
+        const src = atlas.canvas || (atlas.image && atlas.image.naturalWidth > 0 ? atlas.image : null);
+        if (!fr || !src) return null;
+        state.assets._frameCanvases = state.assets._frameCanvases || {};
+        const cacheKey = `${atlasName}:${id}`;
+        let c = state.assets._frameCanvases[cacheKey];
+        if (c && c.width === fr.w && c.height === fr.h) return c;
+        c = document.createElement('canvas');
+        c.width = fr.w; c.height = fr.h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
+        state.assets._frameCanvases[cacheKey] = c;
+        return c;
+    } catch (_) { return null; }
 }

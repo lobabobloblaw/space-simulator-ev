@@ -83,6 +83,8 @@ export default class TradingSystem {
         const planet = state.ship.landedPlanet;
         
         if (!planet || !planet.commodityPrices) return;
+        // Reputation effect used for adjusted pricing
+        const repEff = this.getTraderRepEffect();
 
         // Update credits and cargo display
         document.getElementById('tradeCredits').textContent = state.ship.credits;

@@ -80,8 +80,17 @@ export class SpawnSystem {
         this.handleAsteroidDestroyed = this.handleAsteroidDestroyed.bind(this);
         this.handlePickupExpired = this.handlePickupExpired.bind(this);
         this.handleExplosion = this.handleExplosion.bind(this);
+        this.handleWarpEffectCreated = this.handleWarpEffectCreated.bind(this);
+        this.handleShipTakeoff = this.handleShipTakeoff.bind(this);
+        this.handleShipLanded = this.handleShipLanded.bind(this);
+        this._spawnCooldown = { until: 0 };
+        this._recentTypeCooldown = {}; // { [type]: untilTs }
+        this._typeCooldownMs = 6000;   // suppress same-type spawns briefly after a death
+        this._recentPirateSuppressUntil = 0; // global pirate suppression window after any death
+        this._pirateSuppressMs = 4500;
+        this._syncSpawnPolicyFromWindow();
         
-        console.log('[SpawnSystem] Created');
+        try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log('[SpawnSystem] Created'); } catch(_) {}
     }
     
     /**
@@ -91,21 +100,76 @@ export class SpawnSystem {
         // Subscribe to events
         this.subscribeToEvents();
         
-        console.log('[SpawnSystem] Initialized');
+        try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log('[SpawnSystem] Initialized'); } catch(_) {}
     }
     
     /**
      * Subscribe to game events
      */
     subscribeToEvents() {
-        this.eventBus.on(GameEvents.NPC_DEATH, this.handleNPCDeath);
+        this.eventBus.on(GameEvents.NPC_DEATH, (data) => {
+            // Small cooldown to avoid immediate replacement spawns right after a death
+            try { this._spawnCooldown.until = (performance.now ? performance.now() : Date.now()) + 2000; } catch(_) {}
+            // Also suppress pirate spawns for a short window after any death
+            try { const now = performance.now ? performance.now() : Date.now(); this._recentPirateSuppressUntil = now + this._pirateSuppressMs; } catch(_) {}
+            this.handleNPCDeath(data);
+        });
+        this.eventBus.on(GameEvents.SHIP_DEATH, () => {
+            // Also pause spawns briefly when the player dies
+            try { const now = performance.now ? performance.now() : Date.now(); this._spawnCooldown.until = now + 2500; this._recentPirateSuppressUntil = Math.max(this._recentPirateSuppressUntil||0, now + this._pirateSuppressMs + 1500); } catch(_) {}
+        });
         this.eventBus.on('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.on('pickup.expired', this.handlePickupExpired);
         this.eventBus.on(GameEvents.EXPLOSION, this.handleExplosion);
+        // Centralize warp effect creation for arrivals/departures/landings
+        this.eventBus.on(GameEvents.WARP_EFFECT_CREATED, this.handleWarpEffectCreated);
+        this.eventBus.on(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
+        this.eventBus.on(GameEvents.SHIP_LANDED, this.handleShipLanded);
         // Small debris on projectile hits
         this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, (data) => {
             try { this.handleProjectileHitDebris(data); } catch(_) {}
         });
+    }
+
+    // Generic handler to create a warp effect and manage pooling
+    _pushWarpEffect(x, y, type, state) {
+        try {
+            if (!state.warpEffects) state.warpEffects = [];
+            if (!state.pools) state.pools = {};
+            if (!state.pools.warpEffects) state.pools.warpEffects = [];
+            const e = state.pools.warpEffects.pop() || {};
+            e.x = x; e.y = y; e.type = type; e.lifetime = 0;
+            e.maxLifetime = (type === 'arrive' || type === 'depart') ? 30 : 20;
+            if (state.warpEffects.length > 40) {
+                const old = state.warpEffects.shift();
+                if (old) state.pools.warpEffects.push(old);
+            }
+            state.warpEffects.push(e);
+        } catch(_) {}
+    }
+
+    handleWarpEffectCreated(data) {
+        if (!data) return;
+        const state = this.stateManager.state;
+        const { x, y, type } = data;
+        if (typeof x !== 'number' || typeof y !== 'number' || !type) return;
+        this._pushWarpEffect(x, y, type, state);
+    }
+
+    handleShipTakeoff() {
+        const state = this.stateManager.state;
+        const ship = state.ship;
+        if (!ship) return;
+        this._pushWarpEffect(ship.x, ship.y, 'takeoff', state);
+    }
+
+    handleShipLanded(evt) {
+        try {
+            const state = this.stateManager.state;
+            const pos = evt?.ship || state.ship;
+            if (!pos) return;
+            this._pushWarpEffect(pos.x, pos.y, 'land', state);
+        } catch(_) {}
     }
     
     /**
@@ -116,6 +180,11 @@ export class SpawnSystem {
         
         const npc = data.npc;
         const state = this.stateManager.state;
+        // Suppress spawning the same type briefly to avoid "instant replacement"
+        try {
+            const now = performance.now ? performance.now() : Date.now();
+            if (npc.type) this._recentTypeCooldown[npc.type] = now + this._typeCooldownMs;
+        } catch(_) {}
         
         // Pirates drop loot
         if (npc.type === 'pirate' && Math.random() < 0.6) {
@@ -459,17 +528,30 @@ export class SpawnSystem {
     spawnNPC() {
         const state = this.stateManager.state;
         
-        // Select NPC type based on weights
-        let random = Math.random();
-        let type = 'trader';
-        let cumulative = 0;
-        
-        for (let t in this.spawnWeights) {
-            cumulative += this.spawnWeights[t];
-            if (random < cumulative) {
-                type = t;
-                break;
+        // Select NPC type based on weights, with temporary suppression for recent-death type(s)
+        const now = performance.now ? performance.now() : Date.now();
+        const base = this.spawnWeights;
+        const adj = { freighter: base.freighter, trader: base.trader, patrol: base.patrol, pirate: base.pirate };
+        for (const t of Object.keys(adj)) {
+            if (this._recentTypeCooldown[t] && now < this._recentTypeCooldown[t]) {
+                // Zero weight to avoid this type during cooldown window
+                adj[t] = 0;
             }
+        }
+        // Also zero pirates globally if under the recent pirate suppression window
+        if (now < (this._recentPirateSuppressUntil || 0)) {
+            adj.pirate = 0;
+        }
+        // Normalize and pick; if everything zeroed, fall back to base weights
+        let sum = Object.values(adj).reduce((a,b)=>a+b,0);
+        let pickFrom = adj;
+        if (sum <= 0) { pickFrom = base; sum = Object.values(base).reduce((a,b)=>a+b,0); }
+        let r = Math.random() * sum;
+        let type = 'trader';
+        let acc = 0;
+        for (const [t,w] of Object.entries(pickFrom)) {
+            acc += w;
+            if (r < acc) { type = t; break; }
         }
         
         const template = this.npcTypes[type];
@@ -499,7 +581,8 @@ export class SpawnSystem {
                     const orbitAngle = angle + Math.PI/2;
                     initialVx = Math.cos(orbitAngle) * template.maxSpeed * 0.2;
                     initialVy = Math.sin(orbitAngle) * template.maxSpeed * 0.2;
-                    spawnEffect = null; // No effect for already-present ships
+                    // Still show a brief arrive flash so ships don't pop in
+                    spawnEffect = 'arrive';
                 }
             } else {
                 // Spawn in transit between planets
@@ -516,7 +599,8 @@ export class SpawnSystem {
                 const angleVariance = (Math.random() - 0.5) * Math.PI/6; // ±30 degrees
                 initialVx = Math.cos(travelAngle + angleVariance) * template.maxSpeed * (0.4 + Math.random() * 0.3);
                 initialVy = Math.sin(travelAngle + angleVariance) * template.maxSpeed * (0.4 + Math.random() * 0.3);
-                spawnEffect = null; // Already in system
+                // Always show an arrival flash at spawn so ships never blink in
+                spawnEffect = 'arrive';
             }
         } else if (type === 'pirate') {
             // Pirates spawn at edges but with varied trajectories
@@ -543,7 +627,8 @@ export class SpawnSystem {
                 initialVx = Math.cos(huntAngle) * template.maxSpeed * 0.3;
                 initialVy = Math.sin(huntAngle) * template.maxSpeed * 0.3;
             }
-            spawnEffect = Math.random() < 0.3 ? 'arrive' : null; // Only some show warp effect
+            // Always show an arrival flash so pirates don't blink in
+            spawnEffect = 'arrive';
         } else if (type === 'patrol') {
             // Patrols spawn in patrol patterns around the system
             const patrolPattern = Math.random();
@@ -560,7 +645,8 @@ export class SpawnSystem {
                 const orbitAngle = angle + Math.PI/2 * orbitDirection;
                 initialVx = Math.cos(orbitAngle) * template.maxSpeed * (0.3 + Math.random() * 0.2);
                 initialVy = Math.sin(orbitAngle) * template.maxSpeed * (0.3 + Math.random() * 0.2);
-                spawnEffect = null; // Already patrolling
+                // Brief arrive flash at spawn to avoid pop-in
+                spawnEffect = 'arrive';
             } else if (patrolPattern < 0.7) {
                 // Patrolling trade routes
                 const planet = state.planets[Math.floor(Math.random() * state.planets.length)];
@@ -573,7 +659,8 @@ export class SpawnSystem {
                 const patrolAngle = Math.random() * Math.PI * 2;
                 initialVx = Math.cos(patrolAngle) * template.maxSpeed * 0.35;
                 initialVy = Math.sin(patrolAngle) * template.maxSpeed * 0.35;
-                spawnEffect = null;
+                // Brief arrive flash at spawn to avoid pop-in
+                spawnEffect = 'arrive';
             } else {
                 // Responding to something (moving with purpose)
                 const angle = Math.random() * Math.PI * 2;
@@ -598,7 +685,8 @@ export class SpawnSystem {
             const velAngle = Math.random() * Math.PI * 2;
             initialVx = Math.cos(velAngle) * template.maxSpeed * (0.2 + Math.random() * 0.3);
             initialVy = Math.sin(velAngle) * template.maxSpeed * (0.2 + Math.random() * 0.3);
-            spawnEffect = Math.random() < 0.2 ? 'arrive' : null;
+            // Always show an arrival flash so ships never blink in
+            spawnEffect = 'arrive';
         }
         
         // Create warp effect at spawn location if appropriate (with pooling)
@@ -644,7 +732,7 @@ export class SpawnSystem {
         // Emit spawn event
         this.eventBus.emit(GameEvents.NPC_SPAWN, { npc, type });
         
-        console.log(`[SpawnSystem] Spawned ${type} NPC`);
+        try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log(`[SpawnSystem] Spawned ${type} NPC`); } catch(_) {}
     }
     
     /**
@@ -652,6 +740,7 @@ export class SpawnSystem {
      */
     update(state, deltaTime) {
         if (!state) return;
+        this._syncSpawnPolicyFromWindow();
         
         // Count nearby NPCs
         let nearbyCount = 0;
@@ -667,9 +756,12 @@ export class SpawnSystem {
             };
         }
         
+        const now = performance.now ? performance.now() : Date.now();
+        const cooled = now >= (this._spawnCooldown.until || 0);
         if (Date.now() > state.npcSpawnState.nextShipSpawn && 
             nearbyCount < this.maxNearbyNPCs && 
-            state.npcShips.length < this.maxTotalNPCs) {
+            state.npcShips.length < this.maxTotalNPCs &&
+            cooled) {
             
             this.spawnNPC();
             
@@ -705,7 +797,7 @@ export class SpawnSystem {
                 
                 // Remove NPC
                 state.npcShips.splice(i, 1);
-                console.log(`[SpawnSystem] Despawned distant NPC`);
+                try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log(`[SpawnSystem] Despawned distant NPC`); } catch(_) {}
             }
         }
         
@@ -865,6 +957,22 @@ export class SpawnSystem {
             }
         }
     }
+
+    // Allow QA to tune suppression windows at runtime (OFF by default)
+    _syncSpawnPolicyFromWindow() {
+        try {
+            const win = (typeof window !== 'undefined') ? window : null;
+            if (!win) return;
+            if (typeof win.SPAWN_TYPE_COOLDOWN_MS !== 'undefined') {
+                const v = Number(win.SPAWN_TYPE_COOLDOWN_MS);
+                if (!Number.isNaN(v)) this._typeCooldownMs = Math.max(0, Math.min(20000, v|0));
+            }
+            if (typeof win.SPAWN_PIRATE_SUPPRESS_MS !== 'undefined') {
+                const p = Number(win.SPAWN_PIRATE_SUPPRESS_MS);
+                if (!Number.isNaN(p)) this._pirateSuppressMs = Math.max(0, Math.min(20000, p|0));
+            }
+        } catch(_) {}
+    }
     
     /**
      * Clean up spawn system
@@ -872,9 +980,13 @@ export class SpawnSystem {
     destroy() {
         // Unsubscribe from events
         this.eventBus.off(GameEvents.NPC_DEATH, this.handleNPCDeath);
+        this.eventBus.off(GameEvents.SHIP_DEATH, () => {}); // legacy inline handler; kept for safety
         this.eventBus.off('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.off('pickup.expired', this.handlePickupExpired);
         this.eventBus.off(GameEvents.EXPLOSION, this.handleExplosion);
+        this.eventBus.off(GameEvents.WARP_EFFECT_CREATED, this.handleWarpEffectCreated);
+        this.eventBus.off(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
+        this.eventBus.off(GameEvents.SHIP_LANDED, this.handleShipLanded);
         
         console.log('[SpawnSystem] Destroyed');
     }

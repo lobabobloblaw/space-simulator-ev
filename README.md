@@ -72,3 +72,8 @@ git push
 - Debug Lint: Debug overlay (TAB) → Lint/Trace/Reset to detect & auto-reset canvas state leaks during development.
 
 Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
+
+## For Maintainers / AI Sessions
+
+- Start with `AGENTS.md` (AI Session Playbook) for coding rules, render hygiene, and TargetCam guidelines.
+- Internal developer docs live under `INTERNAL_DEV_DOCS/` (not published via GitHub Pages) for architecture, systems, events/state, rendering, and assets.

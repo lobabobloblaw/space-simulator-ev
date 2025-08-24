@@ -188,7 +188,7 @@ export default class DebugSystem {
             <div>Quality: ${dbg.renderQuality||'high'} (F3 to cycle)</div>
             <div>Sprites: ${useSprites ? 'ON' : 'OFF'} • Loaded: ${spriteCount}</div>
             <div>Overlay: Culling ${spriteCulling?'ON':'OFF'} • FX Thrusters ${useEffectsSprites?'ON':'OFF'}</div>
-            <div>Render Lint: ${dbg.renderLint?'ON':'OFF'} • Trace ${dbg.renderLintTrace?'ON':'OFF'} • Reset ${dbg.renderLintReset?'ON':'OFF'}</div>
+            <div>Render Lint: ${dbg.renderLint?'ON':'OFF'} • Trace ${dbg.renderLintTrace?'ON':'OFF'} • Reset ${dbg.renderLintReset?'ON':'OFF'} • Warns ${dbg.renderLintCount||0}${dbg.renderLintLastStage?(' ['+dbg.renderLintLastStage+']'):''}</div>
             <div style="margin-top:6px; color:#aaa;">1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo</div>
             <div style="color:#8ac;">[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj</div>
             <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">

@@ -49,6 +49,15 @@ npx http-server
 http://localhost:8000/docs/
 ```
 
+## TargetCam Quickstart (Maintainers)
+- Deterministic source: direct → preloaded → standalone → atlas → baseline. One source per target; upgrades only.
+- Orientation: PNG adds `+90°` inner rotation; atlas/baseline use only `npc.angle`.
+- Warm-up: Auto suppresses atlas/baseline for ~450ms after target change; silhouette may briefly omit rather than mismatch. Tweak `window.TC_WARM_MS`.
+- Debug:
+  - `window.TC_SHOW_PATH = true` shows the active source tag in the viewport.
+  - `window.DEBUG_SPRITES = 'errors'` logs only failures.
+  - `window.TC_FX = true` enables transient static/scanlines.
+
 ## Technologies
 - Pure JavaScript (ES6 modules)
 - HTML5 Canvas
@@ -57,3 +66,7 @@ http://localhost:8000/docs/
 
 ## Credits
 Created with Claude (Anthropic)
+
+## For Maintainers / AI Sessions
+- See `AGENTS.md` at the repo root for the AI Session Playbook (coding rules, render hygiene, TargetCam playbook).
+- Internal developer docs are in `INTERNAL_DEV_DOCS/` (in the repo root, not served by GitHub Pages).
