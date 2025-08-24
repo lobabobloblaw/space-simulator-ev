@@ -589,7 +589,11 @@ async function initializeSystems() {
     
     try {
         const canvas = document.getElementById('gameCanvas');
-        const useWebGL = (typeof window !== 'undefined') && !!window.RENDER_WEBGL;
+        const useWebGL = (typeof window !== 'undefined') && (
+            !!window.RENDER_WEBGL ||
+            /(?:^|[?&])webgl=1(?:&|$)/.test(window.location.search || '') ||
+            (typeof localStorage !== 'undefined' && localStorage.getItem('RENDER_WEBGL') === '1')
+        );
         systems.render = useWebGL ? new WebGLRenderSystem(canvas) : new RenderSystem(canvas);
         await systems.render.init();
         console.log(useWebGL ? '✅ WebGLRenderSystem initialized' : '✅ RenderSystem initialized');
