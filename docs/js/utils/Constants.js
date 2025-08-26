@@ -17,7 +17,20 @@ export const GameConstants = {
         MAX_DELTA_TIME: 0.05,      // Maximum frame delta (50ms) to prevent large jumps
         SPACE_FRICTION: 0.999,     // Very slight space friction
         BOUNCE_RESTITUTION: 0.8,   // Default bounce factor for collisions
-        GRAVITY: 0.0001           // Minimal gravity for atmosphere effects
+        GRAVITY: 0.0001,           // Minimal gravity for atmosphere effects
+        TURN_SPEED: 0.025,         // Player turn speed (radians per frame)
+        ASTEROID_IMPACT_DAMAGE_MULT: 3, // Damage multiplier for ship-asteroid impacts
+        MIN_COLLISION_DAMAGE: 5,   // Minimum collision damage
+        BOUNCE_FORCE_BASE: 0.5,    // Base bounce impulse on impact
+        BOUNCE_FORCE_SPEED_MULT: 0.3, // Speed-scaled bounce impulse multiplier
+        SCREEN_SHAKE_DECAY: 0.8,     // Default decay factor per frame
+        DAMAGE_FLASH_INITIAL: 1.0,   // Initial red damage flash value
+        DAMAGE_FLASH_DECAY: 0.05,    // Per-frame decay of damage flash
+        DAMAGE_FLASH_ALPHA_MULT: 0.3, // Alpha multiplier for damage flash overlay
+        // Warnings/thresholds
+        HEAVY_COLLISION_DAMAGE_WARN: 30, // UI warning threshold for heavy collisions
+        // Landing
+        LANDING_CLEAR_DISTANCE: 100 // Additional distance beyond planet radius to clear before takeoff
     },
 
     // Ship configuration
@@ -44,9 +57,16 @@ export const GameConstants = {
         
         // Landing/takeoff
         LANDING_DISTANCE: 50,      // Distance from planet edge to land
+        LANDING_POS_OFFSET: 40,    // Placement offset from planet surface on land
         LANDING_COOLDOWN: 60,      // Frames between landing attempts
+        RESPAWN_LANDING_COOLDOWN: 30, // Cooldown frames right after respawn
+        DESTRUCT_SEQUENCE_MS: 600, // Duration of pre-explosion destruct sequence
         RESPAWN_SHIELD_FRACTION: 0.5, // Fraction of max shield on respawn
         DEATH_PENALTY: 100         // Credits lost on death
+        ,
+        // Thrust/brake tuning
+        BRAKE_THRUST_MULT: 1.0,    // Retro-thrust relative to ship.thrust while braking
+        BRAKE_FUEL_COST: 0.1       // Fuel consumed per frame while braking
     },
 
     // Weapon system
@@ -83,8 +103,25 @@ export const GameConstants = {
             color: '#00ffff'
         },
         
-        PROJECTILE_LIFETIME: 60,   // Frames before projectile expires
-        PROJECTILE_TRAIL_LENGTH: 5 // Length of projectile trail effect
+        PROJECTILE_LIFETIME: 60,   // Frames before projectile expires (laser/default)
+        PROJECTILE_TRAIL_LENGTH: 5, // Length of projectile trail effect
+        // Per-type projectile lifetime overrides (frames)
+        PROJECTILE_LIFETIME_FRAMES: {
+            laser: 60,
+            rapid: 80,
+            plasma: 140,
+            mining: 100
+        },
+        // Recoil/bloom tuning
+        RECOIL_BLOOM: {
+            MAX: 6.0,               // Maximum dynamic bloom
+            DECAY_PER_FRAME: 0.03,  // Bloom decay per frame
+            ADD_PER_SHOT: {         // Bloom added per shot by type
+                rapid: 0.4,
+                plasma: 0.3,
+                default: 0.25
+            }
+        }
     },
 
     // NPC configuration
@@ -94,6 +131,7 @@ export const GameConstants = {
         SPAWN_DISTANCE_MIN: 400,   // Minimum spawn distance from player
         SPAWN_DISTANCE_MAX: 1200,  // Maximum spawn distance from player
         DESPAWN_DISTANCE: 3000,    // Distance at which NPCs despawn
+        NEARBY_RADIUS: 1000,       // Distance considered "nearby" player
         
         BASE_SPAWN_DELAY: 3000,    // Base milliseconds between spawns
         SPAWN_DELAY_VARIANCE: 2000, // Random variance in spawn delay
@@ -126,11 +164,46 @@ export const GameConstants = {
         },
         
         MOVEMENT_PENALTY: 0.5,     // Accuracy penalty for moving targets
-        
+
         // Patrol warning system
         PATROL_WARNING_DURATION: 2000, // Milliseconds
         PATROL_FORGIVENESS_TIME: 5000,  // Milliseconds to clear hostility
-        HOSTILE_CRIMINAL_RATIO: 0.5     // Pirate kill ratio for hostility
+        HOSTILE_CRIMINAL_RATIO: 0.5,    // Pirate kill ratio for hostility
+
+        // Engage distances (player/pirate/merchant interactions)
+        REP_COMMS_NEAR_DIST: 450,
+        PATROL_WARNING_DISTANCE: 1000,
+        PATROL_FIRE_DISTANCE: 450,
+        PATROL_FIRE_PIRATE_DISTANCE: 600,
+        PATROL_PURSUIT_MSG_DISTANCE: 500,
+        PIRATE_ENGAGE_DISTANCE: 800,
+        PIRATE_TAUNT_DISTANCE: 400,
+        PIRATE_BREAKOFF_DISTANCE: 800,
+        PIRATE_NEAR_MERCHANT_DISTANCE: 400,
+        PATROL_HELP_PLAYER_DISTANCE: 500,
+        TRADER_FLEE_PLAYER_DISTANCE: 300,
+        TRADER_FLEE_HOSTILE_DISTANCE: 200,
+        SCAVENGER_SCAN_DISTANCE: 900,
+
+        // Message cooldowns (ms)
+        HAIL_COOLDOWN_MS: 9000,
+        TAUNT_COOLDOWN_MS: 8000,
+        PURSUIT_MSG_COOLDOWN_MS: 6000,
+        HOSTILE_MSG_COOLDOWN_MS: 5000,
+        PANIC_COOLDOWN_MS: 4000,
+        PIRATE_PANIC_COOLDOWN_MS: 5000,
+        ASSIST_MSG_COOLDOWN_MS: 6000,
+
+        // Distress beacons
+        DISTRESS_RESPOND_RANGE: 1600,
+        DISTRESS_RESPOND_DURATION_MS: 6000,
+        DISTRESS_THROTTLE_MS: 6000,
+
+        // Pursuit/stand down
+        PURSUIT_TIMEOUT: 300,           // Frames before giving up pursuit
+        PURSUIT_TIMEOUT_BREAK_CHANCE: 0.1,
+        PIRATE_BREAKOFF_CHANCE: 0.05,
+        PATROL_STAND_DOWN_RESET_MS: 2000
     },
 
     // World generation
@@ -178,7 +251,10 @@ export const GameConstants = {
         
         // Film grain effect
         FILM_GRAIN_OPACITY: 0.15,
-        FILM_GRAIN_ANIMATION_SPEED: 8 // seconds
+        FILM_GRAIN_ANIMATION_SPEED: 8, // seconds
+        // Muzzle flashes
+        MUZZLE_FLASH_MAX_LIFETIME_FRAMES: 6,
+        MUZZLE_FLASH_SOFT_CAP: 40
     },
 
     // Audio settings
@@ -198,6 +274,27 @@ export const GameConstants = {
     UI: {
         NOTIFICATION_DURATION: 2000, // Milliseconds
         HUD_UPDATE_INTERVAL: 16,     // Milliseconds (60fps)
+        NOTIF_SHIP_DESTROYED_MS: 5000, // Ship destroyed banner
+        NOTIF_WEAPON_SWITCH_MS: 1000,  // Weapon switch popup
+        NOTIF_REPUTATION_MS: 1200,     // Reputation change popup
+        PLANET_NAME_OFFSET: 25,       // px above planet surface
+        PLANET_DISTANCE_OFFSET: 10,   // px above planet surface for distance
+        PLANET_NAME_SHADOW_BLUR: 8,   // blur radius when high quality
+        // HUD speed readout cadence
+        SPEED_READOUT_MS: 333,
+
+        // Radio UI timings
+        RADIO: {
+            SCAN_ROLL_MS: 140,
+            LOCK_MS: 1200,
+            BUTTON_LOCK_MS: 1000,
+            DIAL_STATIC_INTERVAL_MS: 120,
+            DIAL_NOISE_ROLL_MS: 80
+        },
+
+        // Landing overlay image timeouts
+        LANDSCAPE_FETCH_TIMEOUT_MS: 3500, // Lexica fetch timeout
+        POLLINATIONS_TIMEOUT_MS: 12000,   // Per-attempt timeout for Pollinations
         
         MINIMAP: {
             SCALE: 0.018,
@@ -218,6 +315,11 @@ export const GameConstants = {
         }
     },
 
+    // NPC settings
+    NPC_SETTINGS: {
+        DESTRUCT_SEQUENCE_MS: 450 // NPC pre-explosion sequence duration
+    },
+
     // Performance settings
     PERFORMANCE: {
         TARGET_FPS: 60,
@@ -229,6 +331,30 @@ export const GameConstants = {
         LOD_DISTANCE_NEAR: 500,
         LOD_DISTANCE_MEDIUM: 1000,
         LOD_DISTANCE_FAR: 2000
+    },
+
+    // TargetCam settings
+    TARGET_CAM: {
+        WARM_UP_MS: 450,            // Suppress atlas/baseline during warm-up
+        FRAME_THROTTLE_MS: 33,      // Render throttle (~30 Hz)
+        TRANSITION_DURATION_MS: 320,
+        TRANSITION_HOLD_MS: 140,
+        BLIP_DURATION_MS: 320,
+        BUILD_MIN_INTERVAL_MS: 90,  // Silhouette rebuild minimum spacing
+        ANGLE_EPS_RAD: 0.12,        // Angle epsilon for rebuild
+        HEAVY_FRAME_MS: 24,         // Consider frames > this heavy
+        IDLE_LIGHT_STREAK: 6,       // Required consecutive light frames before building
+        IDLE_LIGHT_MS: 16,          // A light frame is <= this
+        RETRY_BUILD_MS: 150         // Retry delay when skipping build
+    },
+
+    // Spawn settings
+    SPAWN: {
+        TYPE_COOLDOWN_MS: 6000,                 // Suppress same-type spawns after death
+        PIRATE_SUPPRESS_MS: 4500,               // Suppress pirate spawns after any death
+        POST_NPC_DEATH_PAUSE_MS: 2000,          // Pause spawning briefly after any NPC death
+        POST_SHIP_DEATH_PAUSE_MS: 2500,         // Pause spawning after player death
+        SHIP_DEATH_EXTRA_PIRATE_SUPPRESS_MS: 1500 // Additional pirate suppress after player death
     },
 
     // Save system

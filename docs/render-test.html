@@ -146,86 +146,8 @@
         </div>
     </div>
 
-    <!-- Load old game data first -->
-    <script type="module">
-        // Set flag to prevent old game loop
-        window.preventOldInit = true;
-        import './js/main.js';
-    </script>
-    
-    <!-- Then initialize refactored game -->
-    <script type="module">
-        const statusDiv = document.getElementById('status');
-        
-        async function initGame() {
-            try {
-                statusDiv.textContent = 'Loading refactored modules...';
-                
-                // Load modules
-                const { getEventBus } = await import('./js/core/EventBus.js');
-                const { getStateManager } = await import('./js/core/StateManager.js');
-                const { getMigrationBridge } = await import('./js/core/MigrationBridge.js');
-                const Game = (await import('./js/core/Game.js')).default;
-                
-                statusDiv.textContent = 'Initializing systems...';
-                
-                // Initialize core
-                const eventBus = getEventBus();
-                const stateManager = getStateManager();
-                const migrationBridge = getMigrationBridge();
-                
-                // Wait for old code to load
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                statusDiv.textContent = 'Initializing migration bridge...';
-                migrationBridge.init();
-                
-                // Create game
-                statusDiv.textContent = 'Creating game instance...';
-                const canvas = document.getElementById('gameCanvas');
-                const game = new Game(canvas);
-                
-                statusDiv.textContent = 'Initializing game...';
-                await game.init();
-                
-                statusDiv.textContent = 'Starting game...';
-                game.start();
-                
-                // Make available globally
-                window.refactorDebug = {
-                    eventBus,
-                    stateManager,
-                    migrationBridge,
-                    game
-                };
-                
-                // Check systems
-                const systems = Array.from(game.systems.keys());
-                const status = migrationBridge.getStatus();
-                
-                statusDiv.innerHTML = `
-                    <div>✅ Refactored Game Running</div>
-                    <div>Systems: ${systems.join(', ')}</div>
-                    <div>Migration: ${status.progress}% complete</div>
-                    <div>Press W/A/S/D to move, F to fire</div>
-                `;
-                
-                console.log('Refactored game started successfully!');
-                console.log('Systems loaded:', systems);
-                console.log('Migration status:', status);
-                
-            } catch (error) {
-                statusDiv.innerHTML = `<div style="color: red">Error: ${error.message}</div>`;
-                console.error('Failed to start refactored game:', error);
-            }
-        }
-        
-        // Start after DOM is ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initGame);
-        } else {
-            initGame();
-        }
-    </script>
+    <!-- Use modular EventBus entry for render testing -->
+    <script type="module" src="./js/main_eventbus_pure.js"></script>
+    <script type="module" src="./js/qaToggles.js"></script>
 </body>
 </html>

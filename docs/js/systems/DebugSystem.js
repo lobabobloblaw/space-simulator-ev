@@ -42,9 +42,14 @@ export default class DebugSystem {
         this.eventBus.on('debug.toggle', this.toggle);
         this.eventBus.on('input.keyDown', this.handleKey);
         this.eventBus.on('debug.damage', (d) => {
+            // Only collect when debug overlay is enabled and proj info display is on
             const s = this.stateManager.state;
-            s.debug.damageNumbers = s.debug.damageNumbers || [];
-            s.debug.damageNumbers.push({ x: d.x, y: d.y, amount: d.amount, life: 0, max: 40 });
+            const dbg = s.debug || {};
+            if (!dbg.enabled || !dbg.showProjInfo) return;
+            dbg.damageNumbers = dbg.damageNumbers || [];
+            // Soft cap to avoid growth if display is toggled on for long periods
+            if (dbg.damageNumbers.length > 300) dbg.damageNumbers.shift();
+            dbg.damageNumbers.push({ x: d.x, y: d.y, amount: d.amount, life: 0, max: 40 });
         });
 
         // Create overlay DOM

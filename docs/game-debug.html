@@ -29,35 +29,22 @@
         log(`Document ready state: ${document.readyState}`);
     </script>
     
-    <!-- Import main.js as module -->
+    <!-- Import modular entry as module -->
     <script type="module">
-        import('./js/main.js').then(() => {
+        import('./js/main_eventbus_pure.js').then(() => {
             const log = (msg) => {
                 const div = document.createElement('div');
                 div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
                 document.getElementById('log').appendChild(div);
             };
             
-            log('✅ main.js loaded successfully');
+            log('✅ main_eventbus_pure.js loaded successfully');
             
             // Check what was created
             setTimeout(() => {
-                log(`window.gameStarted: ${window.gameStarted}`);
-                log(`window.ship exists: ${!!window.ship}`);
-                log(`window.game exists: ${!!window.game}`);
-                log(`window.initGame exists: ${typeof window.initGame}`);
-                log(`window.planets: ${window.planets ? window.planets.length : 'undefined'}`);
-                
-                // Try to manually init if needed
-                if (window.initGame && !window.gameStarted) {
-                    log('Calling initGame manually...');
-                    try {
-                        window.initGame();
-                        log('✅ initGame called successfully');
-                    } catch (e) {
-                        log(`❌ initGame error: ${e.message}`);
-                    }
-                }
+                const dbg = window.refactorDebug;
+                log(`eventBus present: ${!!dbg?.eventBus}`);
+                log(`stateManager present: ${!!dbg?.stateManager}`);
             }, 1000);
         }).catch(error => {
             const log = (msg) => {
@@ -67,7 +54,7 @@
                 document.getElementById('log').appendChild(div);
             };
             
-            log(`❌ Failed to load main.js: ${error.message}`);
+            log(`❌ Failed to load main_eventbus_pure.js: ${error.message}`);
             log(`Stack: ${error.stack}`);
         });
     </script>

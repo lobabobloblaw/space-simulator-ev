@@ -1,5 +1,6 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { GameConstants } from '../utils/Constants.js';
 
 /**
  * UISystem - Handles all UI elements (HUD, panels, overlays, notifications)
@@ -15,6 +16,8 @@ export class UISystem {
         this.planetCanvas = null;
         this.planetCtx = null;
         this.tutorialStage = 'start';
+        this._thrustActive = false;
+        this._brakeActive = false;
         
         // Bind event handlers
         this.handleStateChange = this.handleStateChange.bind(this);
@@ -38,7 +41,7 @@ export class UISystem {
         // If true, when using Pollinations, prefer a single HQ attempt and wait longer
         this.pollinationsHQOnly = false;
         // Max wait per attempt (ms)
-        this.pollinationsTimeoutMs = 12000;
+        this.pollinationsTimeoutMs = (GameConstants?.UI?.POLLINATIONS_TIMEOUT_MS ?? 12000);
         // Control whether Pollinations enhances prompts (can drift undesirably)
         this.usePollinationsEnhance = false;
         // Show provider/resolution debug overlay (off by default)
@@ -51,6 +54,17 @@ export class UISystem {
         // Notification queue (sequential, no stack overlap)
         this._notifQueue = [];
         this._notifActive = false;
+        // Tiny console readout (reuse #tutorialHint area)
+        this._consoleTimer = null;
+        // Disable floating toast notifications by default (console line only)
+        this._toastsEnabled = false;
+
+        // HUD cache to minimize DOM churn
+        this._hudCache = {
+            values: {},
+            lastSpeedTs: 0,
+            speedMs: (GameConstants?.UI?.SPEED_READOUT_MS ?? 333) // update speed readout at ~3 Hz
+        };
     }
     
     /**
@@ -68,6 +82,10 @@ export class UISystem {
         
         // Initialize UI elements
         this.initializeUI();
+        // Cache console element (tiny readout area)
+        this._consoleEl = document.getElementById('tutorialHint');
+        // Optional override to re-enable toasts for QA
+        try { const g = (typeof window !== 'undefined') ? window : globalThis; if (typeof g.UI_TOASTS === 'boolean') this._toastsEnabled = !!g.UI_TOASTS; } catch(_) {}
         
         // Allow runtime override for landscape provider to avoid CORS noise during QA
         try {
@@ -105,6 +123,9 @@ export class UISystem {
     subscribeToEvents() {
         // State changes
         this.eventBus.on(GameEvents.UI_UPDATE, this.handleStateChange);
+        // Physics input state (for fuel alert)
+        this.eventBus.on(GameEvents.PHYSICS_THRUST_CHANGED, (e) => { try { this._thrustActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} });
+        this.eventBus.on(GameEvents.PHYSICS_BRAKE_CHANGED, (e) => { try { this._brakeActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} });
         
         // Landing/overlay events
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleShipLanded);
@@ -263,8 +284,45 @@ export class UISystem {
         const play = document.getElementById('radioPlay');
         const next = document.getElementById('radioNext');
         const title = document.getElementById('radioTitle');
+        const dial = document.getElementById('radioDial');
         if (!(prev && play && next && title)) return;
-        const startScan = (lockAfterMs = 1200) => {
+
+        // Install a lightweight static overlay inside the dial to avoid solid black
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (dial && !document.getElementById('radioStatic') && !(g.RADIO_STATIC === false || g.UI_PANEL_STATIC === false)) {
+                const c = document.createElement('canvas');
+                c.id = 'radioStatic';
+                // Size canvas to the dial's pixel size
+                const rect = dial.getBoundingClientRect();
+                const sz = Math.max(1, Math.round(rect.width || 128));
+                c.width = sz; c.height = sz;
+                dial.appendChild(c);
+                this._radioStaticCanvas = c;
+                this._radioStaticCtx = c.getContext('2d', { alpha: true, desynchronized: true }) || c.getContext('2d');
+                // Offscreen noise tile
+                const tile = document.createElement('canvas'); tile.width = 64; tile.height = 64;
+                this._radioNoiseTile = tile; this._radioNoiseCtx = tile.getContext('2d');
+                this._radioNoiseLast = 0;
+                // Draw once immediately
+                this._drawRadioStatic();
+                // Update on interval (lightweight)
+                if (this._radioStaticTimer) clearInterval(this._radioStaticTimer);
+                this._radioStaticTimer = setInterval(() => this._drawRadioStatic(), (GameConstants?.UI?.RADIO?.DIAL_STATIC_INTERVAL_MS ?? 120));
+                // Handle resize: keep canvas backing store sized to visual size
+                const ro = new ResizeObserver(() => {
+                    try {
+                        const r = dial.getBoundingClientRect();
+                        const s = Math.max(1, Math.round(r.width || sz));
+                        if (c.width !== s || c.height !== s) { c.width = s; c.height = s; }
+                        this._drawRadioStatic();
+                    } catch(_) {}
+                });
+                ro.observe(dial);
+                this._radioResizeObs = ro;
+            }
+        } catch (_) {}
+        const startScan = (lockAfterMs = (GameConstants?.UI?.RADIO?.LOCK_MS ?? 1200)) => {
             if (!title) return;
             if (radioBox) { radioBox.classList.add('scanning'); radioBox.classList.remove('tuned'); }
             // Clear any existing scan
@@ -279,7 +337,7 @@ export class UISystem {
                 title.textContent = `SCANNING${dots} ${freq} ${band} ${channel}`;
             };
             roll();
-            this.radioScanInterval = setInterval(roll, 140);
+            this.radioScanInterval = setInterval(roll, (GameConstants?.UI?.RADIO?.SCAN_ROLL_MS ?? 140));
             this.radioScanTimeout = setTimeout(() => {
                 if (this.radioScanInterval) { clearInterval(this.radioScanInterval); this.radioScanInterval = null; }
                 // Lock to a tuned readout
@@ -292,9 +350,39 @@ export class UISystem {
         };
 
         play.onclick = () => this.eventBus.emit(GameEvents.AUDIO_MUSIC_TOGGLE);
-        prev.onclick = () => { startScan(1000); this.eventBus.emit(GameEvents.AUDIO_MUSIC_PREV); };
-        next.onclick = () => { startScan(1000); this.eventBus.emit(GameEvents.AUDIO_MUSIC_NEXT); };
+        prev.onclick = () => { startScan((GameConstants?.UI?.RADIO?.BUTTON_LOCK_MS ?? 1000)); this.eventBus.emit(GameEvents.AUDIO_MUSIC_PREV); };
+        next.onclick = () => { startScan((GameConstants?.UI?.RADIO?.BUTTON_LOCK_MS ?? 1000)); this.eventBus.emit(GameEvents.AUDIO_MUSIC_NEXT); };
         title.textContent = 'SCANNING… 118.7 MHz CH-12';
+    }
+
+    _drawRadioStatic() {
+        try {
+            const ctx = this._radioStaticCtx; const c = this._radioStaticCanvas; const tctx = this._radioNoiseCtx; const t = this._radioNoiseTile;
+            if (!(ctx && c && tctx && t)) return;
+            const now = Date.now();
+            if (now - (this._radioNoiseLast || 0) > (GameConstants?.UI?.RADIO?.DIAL_NOISE_ROLL_MS ?? 80)) {
+                const img = tctx.createImageData(t.width, t.height);
+                for (let i = 0; i < img.data.length; i += 4) {
+                    const v = (Math.random() * 255) | 0;
+                    img.data[i] = v; img.data[i+1] = v; img.data[i+2] = v; img.data[i+3] = 255;
+                }
+                tctx.putImageData(img, 0, 0);
+                this._radioNoiseLast = now;
+            }
+            ctx.save();
+            ctx.setTransform(1,0,0,1,0,0);
+            // Clear only alpha to keep CSS dial visuals underneath
+            ctx.clearRect(0,0,c.width,c.height);
+            // Noise
+            ctx.globalAlpha = 0.06;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(t, 0, 0, c.width, c.height);
+            // Scanlines
+            ctx.globalAlpha = 0.05;
+            ctx.fillStyle = '#000';
+            for (let y = 0; y < c.height; y += 2) ctx.fillRect(0, y, c.width, 1);
+            ctx.restore();
+        } catch (_) {}
     }
 
     handleMusicState(data) {
@@ -327,7 +415,8 @@ export class UISystem {
      */
     updateHUD(ship) {
         if (!ship) return;
-        
+        const now = performance.now ? performance.now() : Date.now();
+
         const updateElement = (id, value) => {
             const element = document.getElementById(id);
             if (!element) return;
@@ -336,21 +425,53 @@ export class UISystem {
                 element.textContent = String(value);
             }
         };
-        
+
+        // Health/Shield/Fuel: rounded values minimize updates
         updateElement('health', Math.max(0, Math.round(ship.health)) + '%');
         updateElement('shield', ship.shield > 0 ? Math.round(ship.shield) : 'EQUIP');
         updateElement('fuel', Math.round(ship.fuel) + '%');
-        updateElement('speed', (Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy) * 100).toFixed(1));
-        
+        // Update fuel alert based on latest values
+        this._updateFuelAlert();
+
+        // Speed: gate to reduce frequent layout thrash
+        try {
+            const ms = (typeof window !== 'undefined' && Number(window.UI_SPEED_MS)) || this._hudCache.speedMs;
+            if (now - (this._hudCache.lastSpeedTs || 0) >= Math.max(120, ms)) {
+                this._hudCache.lastSpeedTs = now;
+                const sp = (Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy) * 100).toFixed(1);
+                // Cache string to avoid DOM reads
+                if (this._hudCache.values.speed !== sp) {
+                    this._hudCache.values.speed = sp;
+                    updateElement('speed', sp);
+                }
+            }
+        } catch(_) {}
+
         const cargoUsed = Array.isArray(ship.cargo)
             ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
             : 0;
-        updateElement('cargo', cargoUsed + '/' + (ship.cargoCapacity || 10));
-        updateElement('location', ship.isLanded && ship.landedPlanet ? ship.landedPlanet.name : 'SPACE');
-        updateElement('credits', ship.credits || 0);
+        const cargoStr = cargoUsed + '/' + (ship.cargoCapacity || 10);
+        if (this._hudCache.values.cargo !== cargoStr) { this._hudCache.values.cargo = cargoStr; updateElement('cargo', cargoStr); }
+        const locStr = ship.isLanded && ship.landedPlanet ? ship.landedPlanet.name : 'SPACE';
+        if (this._hudCache.values.location !== locStr) { this._hudCache.values.location = locStr; updateElement('location', locStr); }
+        const credStr = String(ship.credits || 0);
+        if (this._hudCache.values.credits !== credStr) { this._hudCache.values.credits = credStr; updateElement('credits', credStr); }
         updateElement('weapon', ship.weapons && ship.weapons.length > 0 ? 
             ship.weapons[ship.currentWeapon].type.toUpperCase() : 'UNARMED');
         // Kills and target readouts removed from HUD by design
+    }
+
+    _updateFuelAlert() {
+        try {
+            const el = document.getElementById('fuel');
+            if (!el) return;
+            const ship = this.stateManager.state?.ship;
+            // Use displayed value semantics: blink when the shown percent is 0%
+            const zero = !!(ship && Math.round(ship.fuel || 0) <= 0);
+            const active = this._thrustActive || this._brakeActive;
+            if (zero && active) el.classList.add('fuel-alert');
+            else el.classList.remove('fuel-alert');
+        } catch(_) {}
     }
     
     /**
@@ -359,24 +480,22 @@ export class UISystem {
     updateTutorialHint(ship) {
         const hintElement = document.getElementById('tutorialHint');
         if (!hintElement) return;
+        // If console is showing a readout, do not override it
+        if (hintElement.dataset && hintElement.dataset.console === '1') return;
         
         let message = null;
         
         switch(this.tutorialStage) {
             case 'start':
-                if (!ship.weapons || ship.weapons.length === 0) {
-                    message = "WEAPONS OFFLINE";
-                } else {
+                // Suppress old WEAPONS OFFLINE banner; rely on console readouts
+                if (ship.weapons && ship.weapons.length > 0) {
                     this.tutorialStage = 'armed';
                 }
                 break;
                 
             case 'armed':
-                message = "WEAPONS ONLINE";
-                setTimeout(() => {
-                    this.tutorialStage = 'combat';
-                    this.updateTutorialHint(ship);
-                }, 5000);
+                // Suppress WEAPONS ONLINE banner; move to combat state silently
+                this.tutorialStage = 'combat';
                 break;
                 
             case 'combat':
@@ -384,11 +503,8 @@ export class UISystem {
                 break;
                 
             case 'complete':
-                message = "TARGET ELIMINATED // CONTINUE TRADING FOR UPGRADES";
-                setTimeout(() => {
-                    this.tutorialStage = 'done';
-                    this.updateTutorialHint(ship);
-                }, 5000);
+                // Suppress completion banner to keep area as console readout
+                this.tutorialStage = 'done';
                 break;
         }
         
@@ -655,7 +771,7 @@ export class UISystem {
         const q = encodeURIComponent(prompt);
         const endpoint = `https://lexica.art/api/v1/search?q=${q}`;
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 3500);
+        const t = setTimeout(() => ctrl.abort(), (GameConstants?.UI?.LANDSCAPE_FETCH_TIMEOUT_MS ?? 3500));
         try {
             const res = await fetch(endpoint, { signal: ctrl.signal });
             clearTimeout(t);
@@ -1296,7 +1412,8 @@ export class UISystem {
      * Show notification message
      */
     showNotification(message, type = 'info', duration = 2000) {
-        // Backward-compatible: still usable directly, but prefer enqueueNotification
+        // If toasts are disabled, use console-only readout
+        if (!this._toastsEnabled) { this._setConsoleReadout(message, duration); return; }
         const msg = document.createElement('div');
         msg.className = `game-notification ${type}`;
         msg.textContent = message;
@@ -1310,6 +1427,9 @@ export class UISystem {
     }
 
     enqueueNotification(message, type = 'info', duration = 2000) {
+        // Always mirror into tiny console readout
+        this._setConsoleReadout(message, duration);
+        if (!this._toastsEnabled) return;
         this._notifQueue.push({ message, type, duration });
         if (!this._notifActive) this._drainNotifications();
     }
@@ -1341,17 +1461,33 @@ export class UISystem {
             }
         }, totalMs);
     }
+
+    _setConsoleReadout(message, duration = 2000) {
+        try {
+            const el = this._consoleEl || document.getElementById('tutorialHint');
+            if (!el) return;
+            // Mark as console-driven so tutorial hint logic won’t override
+            el.dataset.console = '1';
+            el.textContent = String(message || '').toUpperCase();
+            el.classList.add('visible');
+            // Reset timer
+            if (this._consoleTimer) clearTimeout(this._consoleTimer);
+            const ms = Math.max(800, Number(duration) || 2000);
+            this._consoleTimer = setTimeout(() => {
+                try {
+                    el.classList.remove('visible');
+                    delete el.dataset.console;
+                } catch(_) {}
+            }, ms);
+        } catch(_) {}
+    }
     
     /**
      * Update UI (called each frame)
+     * Avoid per-frame DOM churn; HUD updates are driven by throttled UI_UPDATE events.
      */
     update(state, deltaTime) {
-        // Update HUD if ship state changed
-        if (state && state.ship) {
-            this.updateHUD(state.ship);
-        }
-        
-        // Update tutorial if needed
+        // Only react to tutorial stage drift here (rare), HUD uses UI_UPDATE
         if (state && state.ship && state.ship.tutorialStage !== this.tutorialStage) {
             this.tutorialStage = state.ship.tutorialStage;
             this.updateTutorialHint(state.ship);

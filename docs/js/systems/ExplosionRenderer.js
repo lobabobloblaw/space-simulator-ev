@@ -91,16 +91,29 @@ export class ExplosionRenderer {
         ctx.restore();
       }
 
-      // Sparks (world space)
-      if (progress < 0.5 && showParticles) {
-        ctx.fillStyle = `rgba(255, 255, 0, ${1 - progress * 2})`;
+      // Sparks (world space) — treat as debris chunks. Keep per-explosion angles stable.
+      if (progress < 0.55 && showParticles) {
         const sc = sparkCountFor(quality, isTiny);
+        // Lazily initialize stable spark angles + radial multipliers per explosion
+        if (!exp.__sparks || exp.__sparks.length !== sc) {
+          const arr = new Array(sc);
+          for (let i = 0; i < sc; i++) {
+            arr[i] = {
+              a: Math.random() * Math.PI * 2,        // angle
+              m: 0.9 + Math.random() * 0.8           // radial multiplier
+            };
+          }
+          exp.__sparks = arr;
+        }
+        // Slightly warmer debris color improves visibility against rings
+        ctx.fillStyle = `rgba(255, 200, 80, ${Math.max(0, 1 - progress * 2)})`;
         for (let i = 0; i < sc; i++) {
-          const angle = (Math.PI * 2 / 8) * i;
-          const dist = radius * 1.5 * progress;
-          const sx = exp.x + Math.cos(angle) * dist;
-          const sy = exp.y + Math.sin(angle) * dist;
-          ctx.fillRect(sx - 1, sy - 1, 2, 2);
+          const s = exp.__sparks[i];
+          const dist = radius * 1.6 * progress * s.m;
+          const sx = exp.x + Math.cos(s.a) * dist;
+          const sy = exp.y + Math.sin(s.a) * dist;
+          // Make chunks ~50% smaller (from 2x2 -> 1x1) for a finer debris look
+          ctx.fillRect((sx|0), (sy|0), 1, 1);
         }
       }
     }
@@ -133,4 +146,3 @@ export class ExplosionRenderer {
 }
 
 export default ExplosionRenderer;
-

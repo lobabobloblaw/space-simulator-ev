@@ -81,9 +81,21 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
         var(--bg-dark) 100%);
     border: 1px solid var(--border-subtle);
     border-bottom: 2px solid var(--accent-border);
-    backdrop-filter: blur(10px);
+    /* Default: no backdrop blur to avoid heavy composite cost */
+    backdrop-filter: none;
+    /* Isolate HUD layout but allow children to paint outside (radio dial overflow) */
+    contain: layout;
     overflow: visible;
 }
+
+/* Opt-in heavy HUD effects (blur) */
+body.ui-heavy #gameHUD { backdrop-filter: blur(10px); }
+
+/* QA: Lightweight UI mode reduces heavy effects during profiling */
+body.ui-light #gameHUD { backdrop-filter: none !important; }
+body.ui-light #radioViz::after { animation: none !important; }
+body.ui-light #shipRadio.radio-radial.scanning #radioDial::after { animation: none !important; }
+body.ui-light #logo-ascii::after { animation: none !important; }
 
 /* HUD Container */
 .hud-container {
@@ -117,6 +129,8 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     padding: 6px 8px;
     min-width: 130px;
     width: max-content;
+    /* Isolate layout only; allow paint to overflow for dial */
+    contain: layout;
 }
 
 #shipRadio.radio-radial {
@@ -130,6 +144,7 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     background: transparent !important; /* backplate handled via pseudo-elements */
     border: none !important;
     overflow: visible; /* allow the dial to exceed HUD bounds */
+    z-index: 200; /* ensure above HUD chrome/borders */
     /* layout variables for precise alignment */
     --dial-size: 128px;
     --dial-offset: 6px;
@@ -199,6 +214,17 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     z-index: 1;
 }
 
+/* Radio dial static overlay canvas (lightweight, non-interactive) */
+#shipRadio.radio-radial #radioDial canvas#radioStatic {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0; /* under sweep (::after) */
+}
+
 #shipRadio.radio-radial.scanning #radioDial::after,
 #shipRadio.radio-radial.tuned #radioDial::after {
     content: '';
@@ -211,9 +237,9 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     z-index: 1;
 }
 
-#shipRadio.radio-radial.scanning #radioDial::after {
-    animation: radial-sweep 1.6s linear infinite;
-}
+/* Default: no radial sweep animation (opt-in via body.ui-heavy) */
+#shipRadio.radio-radial.scanning #radioDial::after { animation: none; }
+body.ui-heavy #shipRadio.radio-radial.scanning #radioDial::after { animation: radial-sweep 1.6s linear infinite; }
 
 #shipRadio.radio-radial.tuned #radioDial::after {
     animation: none;
@@ -373,8 +399,10 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     top: 0; left: -30%;
     width: 30%; height: 100%;
     background: linear-gradient(90deg, transparent, rgba(0,255,255,0.3), transparent);
-    animation: scan-sweep 1.2s linear infinite;
+    /* Default: no animation to minimize compositor work; opt-in via body.ui-heavy */
+    animation: none;
 }
+body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
 @keyframes scan-sweep {
     to { transform: translateX(450%); }
 }
@@ -401,6 +429,7 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     box-sizing: border-box;
     overflow: visible;  /* Allow overflow for bottom values */
     position: relative;
+    contain: layout; /* isolate layout only (no paint clipping) */
 }
 
 /* no responsive width adjustments needed */
@@ -415,6 +444,7 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     margin: 0;
     padding: 4px 0;
     align-content: center;  /* Center content */
+    contain: layout; /* layout containment only */
 }
 
 .status-item {
@@ -619,6 +649,14 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     white-space: nowrap;
 }
 
+/* Fuel zero alert (blink red when thrust/brake with zero fuel) */
+#health, #shield, #fuel, #speed, #cargo, #location, #credits, #weapon { transition: color 120ms linear; }
+#fuel.fuel-alert { animation: fuel-blink 0.6s steps(2, end) infinite; }
+@keyframes fuel-blink {
+    0%, 100% { color: #ff4444; }
+    50% { color: #ffffff; }
+}
+
 /* Minimap/Viewport - Cyberpunk Radar */
 #centerViewport, #minimap {
     width: 80px;
@@ -630,6 +668,7 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     border: 1px solid var(--accent-border);
     position: relative;
     overflow: hidden;
+    contain: content;
 }
 
 #centerViewport::before, #minimap::before {
@@ -1034,11 +1073,14 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     text-transform: uppercase;
     letter-spacing: 1px;
     z-index: 1000;  /* above HUD */
-    display: none;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease-in-out;
+    will-change: opacity;
     text-shadow: 0 0 6px rgba(255, 255, 255, 0.18);
 }
 
-#tutorialHint.visible { display: block; }
+#tutorialHint.visible { opacity: 1; }
 
 /* Hide hint when ship is destroyed (UI already shows a banner) */
 body.ship-destroyed #tutorialHint { display: none !important; }

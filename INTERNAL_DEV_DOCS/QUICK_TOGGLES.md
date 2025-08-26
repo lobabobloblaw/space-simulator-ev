@@ -5,6 +5,7 @@ TargetCam
 - `window.TC_DEBUG = true` — draw axes overlay in TargetCam
 - `window.TC_WARM_MS = 450` — adjust warm-up window (~450ms default)
 - `window.TC_ANGLE_EPS`, `window.TC_MIN_MS` — threshold overrides; sensible ranges: eps 0.02–0.6 rad; min 30–300 ms
+- `window.TC_STATIC = false` — disable TargetCam transitional static/scanlines
 
 Profiling
 - `window.RENDER_PROF_OVERLAY = true` — overlay worst bucket
@@ -18,11 +19,17 @@ Spawn QA
 
 UI/Images
 - `window.UI_LANDSCAPE_PROVIDER = 'unsplash'|'lexica'|'auto'|'none'` — 'none' to suppress external fetches
+- `window.RADIO_STATIC = false` — disable faint static inside the radio dial
 
 Renderer Spike (optional)
 - Enable WebGL spike: `?webgl=1` (URL) or `localStorage.setItem('RENDER_WEBGL','1')`
 - Disable: remove `?webgl=1` and `localStorage.removeItem('RENDER_WEBGL')`
 
 Reset All (examples)
-- `delete window.TC_SHOW_PATH; delete window.TC_DEBUG; delete window.RENDER_PROF_OVERLAY; delete window.RENDER_PROF_LOG; delete window.UPDATE_PROF_OVERLAY; delete window.UPDATE_PROF_LOG`
+- `delete window.TC_SHOW_PATH; delete window.TC_DEBUG; delete window.RENDER_PROF_OVERLAY; delete window.RENDER_PROF_LOG; delete window.UPDATE_PROF_OVERLAY; delete window.UPDATE_PROF_LOG; delete window.TC_STATIC; delete window.RADIO_STATIC; delete window.MINIMAP_STATIC`
 
+Minimap
+- `window.MINIMAP_STATIC = false` — disable minimap ramp static overlay
+
+Weapons/Debug
+- `window.DEBUG_WEAPONS = true` — enable WeaponSystem logs (fired/switch). Keep OFF; logging is expensive.

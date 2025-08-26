@@ -58,11 +58,34 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 
 - ExplosionRenderer: Uses flipbook if available, otherwise synthesized puffs.
 - ThrusterFXRenderer: Optional flame overlay from effects atlas; controlled by `render.useEffectsSprites`.
+- Ore pickups (Session 63): smaller core/glow (~1/3 previous size) with a subtle glitter cross. Low‑quality path draws only a tiny core. These are screen‑space HUD draws in `renderPickups()`.
+
+## Quality & Boot Ramp (Session 59/62)
+
+- Auto quality: Enabled by default (unless `window.RENDER_AUTO_QUALITY === false`). Degrades quickly on repeated over‑budget frames and recovers slowly.
+- Stars: On `medium` and `high`, far/mid/near now render every frame for consistent brightness; blur remains enabled only on `high`. On `low`, far layer only (no blur). Nebula draws only on `high`.
+- Boot ramp: For ~3s after boot (`window.BOOT_QUALITY_MS`, default 3000):
+  - Force `quality='medium'`.
+  - Skip minimap draw and screen‑space HUD overlays.
+  - Skip planet labels/distance text.
+  This avoids initial composite/raster spikes; the ramp expires automatically.
+  - Optional first‑paint star stride: skip first N star passes with `window.STAR_BOOT_SKIP = N` (or `QA.starBootSkip(N)`), default 0.
+
+### Pixel Sprite Sizing (Session 62)
+
+- Do not vary pixel sprite dimensions by quality (low/medium/high). Keep `dw/dh` independent of the quality tier to avoid size “pops” when the boot ramp ends.
+- A global `sizeMultiplier` may be used for game‑wide tuning, but it must be constant across quality levels.
+
+## Minimap & HUD (Soft UI)
+
+- Minimap is throttled to ~30Hz internally and can be skipped by the “other‑spike guard”.
+- During boot ramp, minimap/HUD are skipped for a short window to minimize early paints.
 
 ## Debugging
 
 - Minimal diagnostics: `window.DEBUG_SPRITES = 'errors'` logs only TargetCam failures; `'verbose'` adds informational reasons.
 - Render Lint toggles live under `state.debug.*` (where present). Keep OFF in production.
+ - Quick reference: see `INTERNAL_DEV_DOCS/QUICK_TOGGLES.md` for a consolidated list of QA/debug toggles.
 
 ### Renderer Selection (Spike Only)
 
@@ -76,6 +99,20 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
   - Threshold: `window.RENDER_OTHER_GUARD_MS = 12` (ms) — frames with `other > threshold` will arm the guard for the next frame(s).
   - Duration: `window.RENDER_OTHER_GUARD_N = 1` — number of subsequent frames to skip. Keep small (1–2).
 - Scope: only affects minimap and HUD draws; world and TargetCam remain unaffected.
+
+### LongTask Tracing (QA only)
+
+- `QA.longTasks(s)`: start a `PerformanceObserver('longtask')` and warn on each entry.
+- `QA.ltTrace(true)` (or `?lt=1` in URL): arms a lightweight phase marker ring buffer; longtasks log an `[LTTrace]` payload and `[LTTraceStr]` tail showing recent phases: `u:<system>`, `ui:emit`, `r:start/end`, `save:tick`.
+- UI long‑task guard (opt‑in): `QA.uiGuard(true)` skips a UI emission briefly after a longtask to break bursty patterns.
+
+## CSS & HUD Effects
+
+- Default HUD uses “light” mode (`body.ui-light`): backdrop blur and sweep animations are disabled to avoid compositor cost.
+- Opt‑in heavy mode (`body.ui-heavy` or `QA.uiHeavy(true)`): enables blur/animations; use sparingly during QA.
+- Containment: prefer `contain: layout` (not `layout paint`) on HUD containers to allow children (e.g., radio dial) to paint beyond bounds.
+- Panel underlays: TargetCam/Minimap canvases use alpha:true contexts and clear to transparent so the CSS radial gradient remains visible. Transitional static overlays are lightweight and can be disabled via `UI_PANEL_STATIC=false` (or `QA.panels(false)`).
+- Tiny console readout: `#tutorialHint` now serves as a one‑line console. It fades in/out and mirrors `UI_MESSAGE`. Old tutorial “WEAPONS OFFLINE/ONLINE” banners are suppressed to keep this area dedicated to player messages.
 
 ### TargetCam QA Tuning
 

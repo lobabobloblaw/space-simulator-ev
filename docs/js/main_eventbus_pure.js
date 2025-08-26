@@ -33,6 +33,24 @@ console.log('[EventBus] Current URL:', window.location.href);
 console.log('[EventBus] Script base path:', import.meta.url);
 window.eventBusModuleLoaded = true;
 
+// Arm a LongTask observer as early as possible when LT_TRACE is enabled
+try {
+    if (typeof window !== 'undefined') {
+        const qs = window.location.search || '';
+        if (/(?:^|[?&])lt=1(?:&|$)/.test(qs)) window.LT_TRACE = true;
+    }
+    if (typeof window !== 'undefined' && window.LT_TRACE && 'PerformanceObserver' in window && !window.__earlyLTObs) {
+        const obs = new PerformanceObserver((list) => {
+            for (const e of list.getEntries() || []) {
+                window.__LAST_LONGTASK_TS = e.startTime || performance.now();
+                window.__LAST_LONGTASK_DUR = e.duration || 0;
+            }
+        });
+        obs.observe({ type: 'longtask', buffered: true });
+        window.__earlyLTObs = obs;
+    }
+} catch(_) {}
+
 // Get singletons
 const eventBus = getEventBus();
 const stateManager = getStateManager();
@@ -40,62 +58,44 @@ const stateManager = getStateManager();
 // Systems container
 const systems = {};
 
-/**
- * Initialize complete game state in StateManager
- */
-async function initializeGameState() {
-    const state = stateManager.state;
-    
-    // Import game data dynamically
-    console.log('[EventBus] initializeGameState called');
-    console.log('[EventBus] Importing game data...');
-    
-    // Import game data
-    let planetsData, missionsData;
+// ---- initializeGameState() helper splits (no behavior changes) ----
+async function loadGameData() {
+    let planetsData = [], missionsData = [];
     try {
         console.log('[EventBus] Attempting to import gameData.js...');
         const gameDataModule = await import('./data/gameData.js');
-        console.log('[EventBus] Import returned:', gameDataModule);
-        planetsData = gameDataModule.planets;
-        missionsData = gameDataModule.missions;
-        console.log('[EventBus] Game data imported successfully');
-        console.log('[EventBus] Planets loaded:', planetsData?.length || 'NO');
-        console.log('[EventBus] Missions loaded:', missionsData?.length || 'NO');
-        
-        // Verify planets data
-        if (!planetsData || planetsData.length === 0) {
-            console.error('[EventBus] WARNING: No planets in imported data!');
-            console.log('[EventBus] gameDataModule keys:', Object.keys(gameDataModule));
-        }
+        planetsData = gameDataModule.planets || [];
+        missionsData = gameDataModule.missions || [];
+        console.log('[EventBus] Game data imported. Planets:', planetsData.length, 'Missions:', missionsData.length);
+        if (!planetsData.length) console.error('[EventBus] WARNING: No planets in imported data!');
     } catch (e) {
         console.error('[EventBus] Failed to import game data:', e);
-        console.error('[EventBus] Error stack:', e.stack);
-        // Fallback to empty arrays to prevent crashes
-        planetsData = [];
-        missionsData = [];
         console.error('[EventBus] Using empty arrays as fallback');
     }
-    
-    // CHECK FOR SAVED DATA FIRST!
-    const savedData = localStorage.getItem('galaxyTraderSave');
-    let shipData = null;
-    let missionData = null;
-    
+    return { planetsData, missionsData };
+}
+
+function loadSaveOrDefaults(state) {
+    const skipSave = /(?:^|[?&])(fresh|nosave)=1(?:&|$)/.test(window.location.search || '');
+    const savedData = skipSave ? null : localStorage.getItem('galaxyTraderSave');
+    let shipData = null, missionData = null;
     if (savedData) {
         try {
             const save = JSON.parse(savedData);
-            shipData = save.ship;
-            missionData = save.missionSystem;
+            shipData = save.ship || null;
+            missionData = save.missionSystem || null;
             console.log('[EventBus] Found save during init - loading credits:', shipData?.credits);
-            console.log('[EventBus] Save data keys:', Object.keys(save));
+            state.__loadedFromSave = true;
         } catch (e) {
             console.log('[EventBus] Invalid save data, using defaults:', e);
         }
     } else {
         console.log('[EventBus] No save found - using defaults');
     }
-    
-    // Initialize ship with saved data OR defaults
+    return { shipData, missionData };
+}
+
+function initShip(state, shipData) {
     state.ship = {
         x: shipData?.x ?? 0,
         y: shipData?.y ?? 0,
@@ -106,13 +106,13 @@ async function initializeGameState() {
         maxSpeed: shipData?.maxSpeed ?? 0.8,
         fuel: shipData?.fuel ?? 100,
         maxFuel: shipData?.maxFuel ?? 100,
-        credits: shipData?.credits ?? 250,  // Use saved credits or default 250
+        credits: shipData?.credits ?? 250,
         tutorialStage: shipData?.tutorialStage ?? 'start',
         size: shipData?.size ?? 8,
-        isLanded: false,  // Always start not landed
+        isLanded: false,
         landedPlanet: null,
         landingCooldown: 0,
-        class: shipData?.class ?? "shuttle",
+        class: shipData?.class ?? 'shuttle',
         health: shipData?.health ?? 100,
         maxHealth: shipData?.maxHealth ?? 100,
         weaponCooldown: 0,
@@ -130,129 +130,80 @@ async function initializeGameState() {
         currentPlanet: null,
         pirateKills: shipData?.pirateKills ?? 0
     };
-    
-    // Assign basic faction for the player (generic civilian)
     state.ship.faction = state.ship.faction || 'civilian';
-    console.log('[EventBus] Ship initialized with credits:', state.ship.credits);
-    
-    // Initialize camera
     state.camera = { x: 0, y: 0 };
-    
-    // Initialize game meta
     state.paused = false;
     state.gameTime = 0;
-    
-    // Initialize entities - ALWAYS fresh, never from save
-    state.planets = planetsData;  // Always use fresh planet data
-    console.log('[EventBus] Assigned planets to state:', state.planets?.length);
-    
-    // Initialize with some NPCs already in the system
+    console.log('[EventBus] Ship initialized with credits:', state.ship.credits);
+}
+
+function seedNPCs(state, planetsData) {
     state.npcShips = [];
-    
-    // Spawn 3-5 initial NPCs already traveling through the system
     const initialNPCCount = 3 + Math.floor(Math.random() * 3);
     const npcTypes = ['trader', 'freighter', 'patrol', 'pirate'];
     const npcTemplates = {
-        freighter: {
-            size: 18, color: "#4488ff", maxSpeed: 0.25, thrust: 0.002,
-            turnSpeed: 0.008, health: 80, maxHealth: 80, credits: 100,
-            behavior: "passive", weapon: { type: "laser", damage: 5, cooldown: 30 }
-        },
-        trader: {
-            size: 12, color: "#44ff88", maxSpeed: 0.35, thrust: 0.003,
-            turnSpeed: 0.01, health: 60, maxHealth: 60, credits: 75,
-            behavior: "passive", weapon: null
-        },
-        patrol: {
-            size: 14, color: "#8888ff", maxSpeed: 0.45, thrust: 0.004,
-            turnSpeed: 0.012, health: 100, maxHealth: 100, credits: 50,
-            behavior: "lawful", weapon: { type: "rapid", damage: 7, cooldown: 9 }
-        },
-        pirate: {
-            size: 10, color: "#ff4444", maxSpeed: 0.5, thrust: 0.005,
-            turnSpeed: 0.015, health: 70, maxHealth: 70, credits: 150,
-            behavior: "aggressive", weapon: { type: "plasma", damage: 15, cooldown: 26 }
-        }
+        freighter: { size: 18, color: '#4488ff', maxSpeed: 0.25, thrust: 0.002, turnSpeed: 0.008, health: 80, maxHealth: 80, credits: 100, behavior: 'passive', weapon: { type: 'laser', damage: 5, cooldown: 30 } },
+        trader: { size: 12, color: '#44ff88', maxSpeed: 0.35, thrust: 0.003, turnSpeed: 0.01, health: 60, maxHealth: 60, credits: 75, behavior: 'passive', weapon: null },
+        patrol: { size: 14, color: '#8888ff', maxSpeed: 0.45, thrust: 0.004, turnSpeed: 0.012, health: 100, maxHealth: 100, credits: 50, behavior: 'lawful', weapon: { type: 'rapid', damage: 7, cooldown: 9 } },
+        pirate: { size: 10, color: '#ff4444', maxSpeed: 0.5, thrust: 0.005, turnSpeed: 0.015, health: 70, maxHealth: 70, credits: 150, behavior: 'aggressive', weapon: { type: 'plasma', damage: 15, cooldown: 26 } }
     };
-    
     state.nextEntityId = state.nextEntityId || 1;
     for (let i = 0; i < initialNPCCount; i++) {
         const type = npcTypes[Math.floor(Math.random() * npcTypes.length)];
         const template = npcTemplates[type];
-        
-        // Random position in the system (not too close to player start)
         const angle = Math.random() * Math.PI * 2;
         const distance = 300 + Math.random() * 700;
         const x = Math.cos(angle) * distance;
         const y = Math.sin(angle) * distance;
-        
-        // Random velocity (already traveling)
         const velAngle = Math.random() * Math.PI * 2;
         const speed = template.maxSpeed * (0.3 + Math.random() * 0.4);
         const vx = Math.cos(velAngle) * speed;
         const vy = Math.sin(velAngle) * speed;
-        
-        // For traders/freighters, set a target planet
         let targetPlanet = null;
         if ((type === 'trader' || type === 'freighter') && planetsData.length > 0) {
             targetPlanet = planetsData[Math.floor(Math.random() * planetsData.length)];
         }
-        
         state.npcShips.push({
-            id: state.nextEntityId++,
-            x: x,
-            y: y,
-            vx: vx,
-            vy: vy,
-            angle: Math.atan2(vy, vx),
-            type: type,
-            ...template,
+            id: state.nextEntityId++, x, y, vx, vy,
+            angle: Math.atan2(vy, vx), type, ...template,
             faction: (type === 'patrol') ? 'patrol' : (type === 'pirate') ? 'pirate' : 'trader',
-            targetPlanet: targetPlanet,
-            weaponCooldown: Math.random() * 30,  // Random cooldown state
-            lifetime: Math.floor(Math.random() * 300),  // Been around for a while
-            thrusting: false,
+            targetPlanet, weaponCooldown: Math.random() * 30, lifetime: Math.floor(Math.random() * 300), thrusting: false,
             state: type === 'patrol' ? 'patrolling' : null
         });
     }
-    
-    console.log(`[EventBus] Spawned ${initialNPCCount} initial NPCs already in system`)
-    state.asteroids = [];  // Will be generated below
-    state.projectiles = [];  // Projectiles don't persist
-    state.explosions = [];  // Effects don't persist
-    state.warpEffects = [];  // Effects don't persist
-    state.pickups = [];  // Pickups don't persist
-    
-    // Generate asteroids
+    console.log(`[EventBus] Spawned ${initialNPCCount} initial NPCs already in system`);
+}
+
+function initAsteroids(state) {
+    state.asteroids = [];
+    state.projectiles = [];
+    state.explosions = [];
+    state.warpEffects = [];
+    state.pickups = [];
     for (let i = 0; i < 50; i++) {
         const shapePoints = [];
-        for (let j = 0; j < 8; j++) {
-            shapePoints.push(0.7 + Math.random() * 0.6);
-        }
-        
+        for (let j = 0; j < 8; j++) shapePoints.push(0.7 + Math.random() * 0.6);
         state.asteroids.push({
             x: (Math.random() - 0.5) * 4000,
             y: (Math.random() - 0.5) * 4000,
             vx: (Math.random() - 0.5) * 0.3,
             vy: (Math.random() - 0.5) * 0.3,
             radius: Math.random() * 8 + 2,
-            color: "#666",
+            color: '#666',
             rotationSpeed: (Math.random() - 0.5) * 0.02,
             rotation: Math.random() * Math.PI * 2,
             health: 20, maxHealth: 20,
             oreContent: Math.floor(Math.random() * 3) + 1,
-            shapePoints: shapePoints
+            shapePoints
         });
     }
-    
-    // Generate stars - ALWAYS fresh, never from save
-    // Density is configurable for easy tuning
-    const STAR_DENSITY = 2.0; // 1.0 = baseline; increase for denser fields
+}
+
+function initStars(state) {
+    const STAR_DENSITY = 2.0;
     state.renderSettings = state.renderSettings || {};
     state.renderSettings.starDensity = STAR_DENSITY;
-    // Default sprites ON; can be toggled via debug overlay
     state.renderSettings.useSprites = state.renderSettings.useSprites ?? true;
-    // Optional overlay toggles (persist if available)
     try {
         const persistedCull = localStorage.getItem('gt.render.spriteCulling');
         if (persistedCull !== null) state.renderSettings.spriteCulling = (persistedCull === 'true');
@@ -260,7 +211,6 @@ async function initializeGameState() {
         const persistedFX = localStorage.getItem('gt.render.useEffectsSprites');
         if (persistedFX !== null) state.renderSettings.useEffectsSprites = (persistedFX === 'true');
         else state.renderSettings.useEffectsSprites = state.renderSettings.useEffectsSprites || false;
-        // NPC FX overlays remain opt-in (default OFF)
         const persistedFXNPC = localStorage.getItem('gt.render.useEffectsSpritesNPC');
         if (persistedFXNPC !== null) state.renderSettings.useEffectsSpritesNPC = (persistedFXNPC === 'true');
         else state.renderSettings.useEffectsSpritesNPC = state.renderSettings.useEffectsSpritesNPC || false;
@@ -270,21 +220,15 @@ async function initializeGameState() {
         state.renderSettings.useEffectsSpritesNPC = state.renderSettings.useEffectsSpritesNPC || false;
     }
     state.stars = { far: [], mid: [], near: [] };
-    
-    // Far stars
     for (let i = 0; i < Math.floor(3000 * STAR_DENSITY); i++) {
         state.stars.far.push({
             x: (Math.random() - 0.5) * 12000,
             y: (Math.random() - 0.5) * 12000,
             brightness: Math.random() * 0.5 + 0.3,
             size: Math.random() < 0.95 ? 1 : 2,
-            color: Math.random() < 0.94 ? '#ffffff' : 
-                   Math.random() < 0.5 ? '#ffeeee' :
-                   Math.random() < 0.7 ? '#eeeeff' : '#ffffee'
+            color: Math.random() < 0.94 ? '#ffffff' : (Math.random() < 0.5 ? '#ffeeee' : (Math.random() < 0.7 ? '#eeeeff' : '#ffffee'))
         });
     }
-    
-    // Mid stars
     for (let i = 0; i < Math.floor(1200 * STAR_DENSITY); i++) {
         state.stars.mid.push({
             x: (Math.random() - 0.5) * 8000,
@@ -293,12 +237,9 @@ async function initializeGameState() {
             size: Math.random() < 0.9 ? 1 : 2,
             twinkle: Math.random() * Math.PI * 2,
             twinkleSpeed: 0.01 + Math.random() * 0.03,
-            color: Math.random() < 0.92 ? '#ffffff' : 
-                   Math.random() < 0.6 ? '#ffeeee' : '#eeeeff'
+            color: Math.random() < 0.92 ? '#ffffff' : (Math.random() < 0.6 ? '#ffeeee' : '#eeeeff')
         });
     }
-    
-    // Near stars
     for (let i = 0; i < Math.floor(600 * STAR_DENSITY); i++) {
         state.stars.near.push({
             x: (Math.random() - 0.5) * 6000,
@@ -308,47 +249,41 @@ async function initializeGameState() {
             color: '#ffffff'
         });
     }
-    
-    // Initialize mission system with saved data OR defaults
+}
+
+function initMissions(state, missionsData, missionData) {
     state.missionSystem = {
         active: missionData?.active ?? null,
         completed: missionData?.completed ?? [],
         available: missionData?.available ?? missionsData
     };
-    
-    // Initialize reputation scaffold
+}
+
+function initOtherState(state) {
     state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
-    
-    // Initialize spawn state
-    state.npcSpawnState = {
-        nextShipSpawn: Date.now() + Math.random() * 3000 + 2000
-    };
-    
-    // Initialize audio state
-    state.audio = {
-        enabled: false, // SFX muted by default
-        masterVolume: 0.3,
-        musicVolume: 0.6
-    };
-    
-    // Initialize input state
-    state.input = {
-        keys: new Set(),
-        mouse: { x: 0, y: 0, pressed: false },
-        touch: { x: 0, y: 0, active: false }
-    };
-    
-    // Initialize physics state
-    state.physics = {
-        entities: [],
-        collisions: []
-    };
-    
-    // Add compatibility property for audioSystem
-    state.audioSystem = null;       // Will be set after systems init
-    // Note: DO NOT create state.keys reference - it causes Proxy issues
-    // Systems should use state.input.keys directly
-    
+    state.npcSpawnState = { nextShipSpawn: Date.now() + Math.random() * 3000 + 2000 };
+    state.audio = { enabled: false, masterVolume: 0.3, musicVolume: 0.6 };
+    state.input = { keys: new Set(), mouse: { x: 0, y: 0, pressed: false }, touch: { x: 0, y: 0, active: false } };
+    state.physics = { entities: [], collisions: [] };
+    state.audioSystem = null;
+}
+
+/**
+ * Initialize complete game state in StateManager (orchestrates helpers)
+ */
+async function initializeGameState() {
+    const state = stateManager.state;
+    console.log('[EventBus] initializeGameState called');
+    const { planetsData, missionsData } = await loadGameData();
+    const { shipData, missionData } = loadSaveOrDefaults(state);
+    initShip(state, shipData);
+    state.planets = planetsData;
+    console.log('[EventBus] Assigned planets to state:', state.planets?.length);
+    seedNPCs(state, planetsData);
+    initAsteroids(state);
+    initStars(state);
+    initMissions(state, missionsData, missionData);
+    initOtherState(state);
     console.log('[EventBus] Game state initialized in StateManager');
 }
 
@@ -369,7 +304,7 @@ function setupEventHandlers() {
         const state = stateManager.state;
         const now = performance.now ? performance.now() : Date.now();
         // Begin destruct sequence; delay final explosion a bit for drama
-        state.ship.deathSeq = { start: now, duration: 600 };
+        state.ship.deathSeq = { start: now, duration: (GameConstants?.SHIP?.DESTRUCT_SEQUENCE_MS ?? 600) };
         // Audio: subtle crackle during pre-explosion
         try { eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'crackle', intensity: 0.12 }); } catch(_) {}
         // Stop motion
@@ -387,7 +322,7 @@ function setupEventHandlers() {
             eventBus.emit(GameEvents.UI_MESSAGE, {
                 message: 'SHIP DESTROYED - Press R to respawn',
                 type: 'error',
-                duration: 5000
+                duration: (GameConstants?.UI?.NOTIF_SHIP_DESTROYED_MS ?? 5000)
             });
         }, 600);
     });
@@ -399,15 +334,14 @@ function setupEventHandlers() {
         for (let planet of state.planets) {
             const dx = state.ship.x - planet.x;
             const dy = state.ship.y - planet.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance < planet.radius + 50 && planet.landable) {
+            const rr = (planet.radius + (GameConstants?.SHIP?.LANDING_DISTANCE ?? 50));
+            if ((dx*dx + dy*dy) < rr * rr && planet.landable) {
                 state.ship.vx = 0;
                 state.ship.vy = 0;
                 state.ship.isLanded = true;
                 state.ship.landedPlanet = planet;
                 state.ship.currentPlanet = planet;
-                state.ship.landingCooldown = 60;
+                state.ship.landingCooldown = (GameConstants?.SHIP?.LANDING_COOLDOWN ?? 60);
                 
                 state.npcShips = [];
                 state.projectiles = [];
@@ -417,8 +351,9 @@ function setupEventHandlers() {
                 state.ship.credits += 50;
                 
                 const angle = Math.atan2(dy, dx);
-                state.ship.x = planet.x + Math.cos(angle) * (planet.radius + 40);
-                state.ship.y = planet.y + Math.sin(angle) * (planet.radius + 40);
+                const posOff = (GameConstants?.SHIP?.LANDING_POS_OFFSET ?? 40);
+                state.ship.x = planet.x + Math.cos(angle) * (planet.radius + posOff);
+                state.ship.y = planet.y + Math.sin(angle) * (planet.radius + posOff);
                 
                 eventBus.emit(GameEvents.SHIP_LANDED, {
                     ship: state.ship,
@@ -442,7 +377,7 @@ function setupEventHandlers() {
             eventBus.emit(GameEvents.UI_MESSAGE, {
                 message: `Weapon: ${state.ship.weapons[state.ship.currentWeapon].type}`,
                 type: 'info',
-                duration: 1000
+                duration: (GameConstants?.UI?.NOTIF_WEAPON_SWITCH_MS ?? 1000)
             });
         }
     });
@@ -474,7 +409,7 @@ function setupEventHandlers() {
                 state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
                 state.reputation.patrol = (state.reputation.patrol || 0) + 1;
                 eventBus.emit(GameEvents.REPUTATION_CHANGED, { faction: 'patrol', delta: +1, total: state.reputation.patrol });
-                eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Reputation +1 (Patrol)', type: 'info', duration: 1200 });
+                eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Reputation +1 (Patrol)', type: 'info', duration: (GameConstants?.UI?.NOTIF_REPUTATION_MS ?? 1200) });
                 // Reputation: pirates dislike you for killing their own
                 state.reputation.pirate = (state.reputation.pirate || 0) - 1;
                 eventBus.emit(GameEvents.REPUTATION_CHANGED, { faction: 'pirate', delta: -1, total: state.reputation.pirate });
@@ -537,7 +472,7 @@ function respawnPlayer() {
     ship.vx = 0;
     ship.vy = 0;
     ship.weaponCooldown = 0;
-    ship.landingCooldown = 30;
+    ship.landingCooldown = (GameConstants?.SHIP?.RESPAWN_LANDING_COOLDOWN ?? 30);
     ship.isLanded = false;
     ship.currentPlanet = planet || null;
     
@@ -730,8 +665,20 @@ async function initGame() {
     // Create game loop
     // Lightweight update profiler (auto-logs on spikes; off by default, auto armed)
     const __updProf = { lastLogTs: 0, cooldownUntil: 0 };
-    // Throttle UI_UPDATE to reduce DOM churn; emit at ~8–10Hz
-    const __ui = { lastTs: 0, minInterval: 120 };
+    // Throttle UI_UPDATE to reduce DOM churn; emit at ~8–10Hz with adaptive backoff
+    const __ui = { lastTs: 0, minInterval: 120, backoffUntil: 0, lastCost: 0 };
+    // Optional: UI long-task guard (armed via window.UI_LONG_GUARD). On first use, installs a LongTask observer
+    const __uiLT = { armed: false };
+    // Optional: basic mark ring buffer for LongTask attribution (armed via window.LT_TRACE)
+    const __marks = { list: [], cap: 256 };
+    const mark = (label) => {
+        try {
+            if (!(typeof window !== 'undefined' && window.LT_TRACE)) return;
+            const t = performance.now ? performance.now() : Date.now();
+            __marks.list.push({ t, l: String(label) });
+            if (__marks.list.length > __marks.cap) __marks.list.splice(0, __marks.list.length - __marks.cap);
+        } catch(_) {}
+    };
     const loop = new GameLoop({
         onUpdate: (deltaTime) => {
             const state = stateManager.state;
@@ -747,8 +694,10 @@ async function initGame() {
                 let totalMs = 0; const breakdown = {}; let worstK = null, worstV = -1;
                 for (const [key, system] of Object.entries(systems)) {
                     if (!system || typeof system.update !== 'function') continue;
+                    mark('u:' + key);
                     const t0 = doProf ? (performance.now ? performance.now() : Date.now()) : 0;
                     system.update(state, deltaTime);
+                    mark('u:' + key + ':done');
                     if (doProf) {
                         const dt = (performance.now ? performance.now() : Date.now()) - t0;
                         breakdown[key] = Number(dt.toFixed(2));
@@ -777,12 +726,82 @@ async function initGame() {
                 } catch(_) {}
             }
             
-            // Update HUD (throttled)
+            // Update HUD (throttled, light-frame gated, adaptive backoff)
             try {
                 const now = performance.now ? performance.now() : Date.now();
-                if (now - (__ui.lastTs||0) >= (__ui.minInterval||120)) {
-                    __ui.lastTs = now;
-                    eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+                // Allow runtime override of UI update throttle and disabling
+                try { if (typeof window !== 'undefined' && Number(window.UI_UPDATE_MS)) __ui.minInterval = Math.max(60, Number(window.UI_UPDATE_MS)); } catch(_) {}
+                const uiDisabled = !!(typeof window !== 'undefined' && window.UI_DISABLE_UPDATE);
+                // If guard requested, arm a LongTask observer once and consult recent activity before emitting UI updates
+                try {
+                    if (typeof window !== 'undefined' && (window.UI_LONG_GUARD || window.LT_TRACE) && !__uiLT.armed && 'PerformanceObserver' in window) {
+                        const obs = new PerformanceObserver((list) => {
+                            for (const e of list.getEntries() || []) {
+                                // record ts/dur for latest longtask
+                                window.__LAST_LONGTASK_TS = e.startTime || performance.now();
+                                window.__LAST_LONGTASK_DUR = e.duration || 0;
+                                // If LT tracing enabled, dump recent marks within ~500ms of start
+                                try {
+                                    if (window.LT_TRACE) {
+                                        const cut = (e.startTime || (performance.now?performance.now():Date.now())) - 500;
+                                        const recent = __marks.list.filter(m => m.t >= cut && m.t <= ((e.startTime||0) + 5)).map(m => m.l);
+                                        const payload = {
+                                            ts: Number(((e.startTime||0).toFixed?.(1)) || e.startTime || 0),
+                                            dur: Number(((e.duration||0).toFixed?.(1)) || e.duration || 0),
+                                            lastFrameMs: Number((((window.__lastFrameMs)||0).toFixed?.(1)) || (window.__lastFrameMs||0)),
+                                            lastUiMs: Number((((window.LAST_UI_UPDATE_COST_MS)||0).toFixed?.(1)) || (window.LAST_UI_UPDATE_COST_MS||0)),
+                                            recent
+                                        };
+                                        try { window.LAST_LTTRACE = payload; } catch(_) {}
+                                        // Log a compact, expandable, and a joined recent string for quick scanning
+                                        console.warn('[LTTrace]', payload);
+                                        try { console.warn('[LTTraceStr]', recent.join(' -> ')); } catch(_) {}
+                                    }
+                                } catch(_) {}
+                            }
+                        });
+                        obs.observe({ type: 'longtask', buffered: true });
+                        __uiLT.armed = true;
+                        window.__uiLTObs = obs;
+                    }
+                } catch(_) {}
+                if (!uiDisabled) {
+                    // Skip if last render frame was heavy to avoid compounding jank
+                    const lastFrameMs = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+                    const heavyFrame = lastFrameMs > 24; // ~40fps budget miss
+                    // Optional long-task presence guard: skip UI emission briefly after a long task
+                    const lastLT = (typeof window !== 'undefined' && window.__LAST_LONGTASK_TS) ? window.__LAST_LONGTASK_TS : 0;
+                    const recentLongTask = lastLT && (now - lastLT) < 260; // ~quarter second cooldown after a long task
+                    // Adaptive backoff if prior UI emission was costly (> 24ms)
+                    const inBackoff = now < (__ui.backoffUntil || 0);
+                    const baseInterval = __ui.minInterval || 120;
+                    const interval = inBackoff ? Math.max(baseInterval, 300) : baseInterval;
+                    if (!heavyFrame && !recentLongTask && now - (__ui.lastTs || 0) >= interval) {
+                        __ui.lastTs = now;
+                        let t0 = 0;
+                        try { t0 = performance.now ? performance.now() : Date.now(); } catch(_) {}
+                        mark('ui:emit');
+                        eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+                        try {
+                            const dt = (performance.now ? performance.now() : Date.now()) - t0;
+                            __ui.lastCost = dt;
+                            // If UI work was heavy, extend backoff window briefly
+                            if (dt > 24) {
+                                __ui.backoffUntil = (performance.now ? performance.now() : Date.now()) + 4000; // 4s
+                                try {
+                                    if (typeof window !== 'undefined' && window.UI_PROF_WARN) {
+                                        console.warn('[UIProfile]', { costMs: Number(dt.toFixed(2)), heavyFrame, interval, backoffUntil: __ui.backoffUntil });
+                                    }
+                                } catch(_) {}
+                            }
+                            // Always expose last UI cost for QA
+                            if (typeof window !== 'undefined') {
+                                window.LAST_UI_UPDATE_COST_MS = dt;
+                                window.LAST_UI_UPDATE_TS = (performance.now ? performance.now() : Date.now());
+                            }
+                        } catch(_) {}
+                        mark('ui:emit:done');
+                    }
                 }
             } catch(_) {
                 // Fallback if perf API unavailable
@@ -791,7 +810,9 @@ async function initGame() {
         },
         onRender: (interpolation, deltaTime) => {
             if (systems.render && systems.render.render) {
+                mark('r:start');
                 systems.render.render(stateManager.state, deltaTime);
+                mark('r:end');
             }
         },
         onFPS: (stats) => {
@@ -800,24 +821,18 @@ async function initGame() {
         }
     });
     
-    // Check if we loaded a saved game during initialization
-    const savedData = localStorage.getItem('galaxyTraderSave');
-    if (savedData) {
-        try {
-            const save = JSON.parse(savedData);
-            if (save.ship) {
-                // Show a brief notification that save was loaded
-                eventBus.emit(GameEvents.UI_MESSAGE, {
-                    message: `Save loaded - Credits: ${save.ship.credits}, Kills: ${save.ship.kills}`,
-                    type: 'success',
-                    duration: 3000
-                });
-                console.log('[EventBus] Save automatically loaded during initialization');
-            }
-        } catch (e) {
-            console.log('[EventBus] Could not parse save notification:', e);
+    // Notify if we loaded a saved game during initialization (no re-parse)
+    try {
+        const st = stateManager.state;
+        if (st && st.__loadedFromSave) {
+            eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Save loaded - Credits: ${st.ship?.credits ?? 0}, Kills: ${st.ship?.kills ?? 0}`,
+                type: 'success',
+                duration: 3000
+            });
+            console.log('[EventBus] Save automatically loaded during initialization');
         }
-    }
+    } catch(_) {}
     
     // Wire up UI buttons
     const departBtn = document.getElementById('departBtn');
@@ -866,13 +881,27 @@ async function initGame() {
         });
     }
     
-    // Autosave every 30 seconds (idle-coalesced in adapter)
-    setInterval(() => {
-        const state = stateManager.state;
-        if (!state.paused && state.ship.health > 0 && !state.ship.isDestroyed) {
-            eventBus.emit(GameEvents.GAME_SAVE, { reason: 'auto' });
-        }
-    }, 30000);
+    // Autosave (idle/light gated in adapter). QA controls:
+    //  - window.SAVE_DISABLED = true (skip)
+    //  - window.SAVE_INTERVAL_MS (default 30000)
+    //  - window.SAVE_FIRST_DELAY_MS (default 120000)
+    const __SAVE_DISABLED = !!(typeof window !== 'undefined' && window.SAVE_DISABLED);
+    const __SAVE_IVL = (typeof window !== 'undefined' && Number(window.SAVE_INTERVAL_MS)) || 30000;
+    const __SAVE_FIRST = (typeof window !== 'undefined' && Number(window.SAVE_FIRST_DELAY_MS)) || 120000;
+    if (!__SAVE_DISABLED && __SAVE_IVL > 0) {
+        setTimeout(() => {
+            // Fire and then schedule interval to keep cadence predictable
+            const tick = () => {
+                const state = stateManager.state;
+                if (!state.paused && state.ship.health > 0 && !state.ship.isDestroyed) {
+                    mark('save:tick');
+                    eventBus.emit(GameEvents.GAME_SAVE, { reason: 'auto' });
+                }
+            };
+            tick();
+            setInterval(tick, __SAVE_IVL);
+        }, __SAVE_FIRST);
+    }
     
     console.log('[EventBus] 🎉 PURE EVENTBUS ARCHITECTURE DEPLOYED!');
     console.log('[EventBus] All systems use StateManager - no window globals');

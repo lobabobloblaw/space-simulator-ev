@@ -31,3 +31,14 @@ This document covers NPC spawn/despawn behavior, post‑death damping, and warp 
 - Scavenger ships were removed (previously spawned on `NPC_DESTROYED`) to reduce confusion.
 - Debris, muzzle flashes, and explosions are pooled and soft‑capped to prevent GC churn.
 
+## Asteroid Breakup & Ore (Session 63)
+
+- Three tiers: large (radius ≥ 8) → medium (≥ 5) → small (< 5).
+- Fragmentation:
+  - Large breaks into ~3 mediums; medium breaks into ~2 smalls; smalls do not fragment further.
+- Ore drops per destruction:
+  - Large → 2 ore slivers; Medium → 1 ore; Small → 1 ore.
+- Ore pickups: smaller visuals (~1/3 of old size) with subtle glitter; collected immediately on touch:
+  - Adds `ore` to cargo if space; otherwise grants small credits (§+10).
+- Helpers in `SpawnSystem`: `_emitOreDrops`, `_emitAsteroidShards`, `_emitAsteroidChunks`, `_emitSliverDebris`, `_getAsteroidTier`, `_spawnChildAsteroids`.
+- Optional VFX polish (OFF by default): `window.VFX_DEBRIS_POLISH = true` adds occasional thin molten sliver debris.

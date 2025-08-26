@@ -13,8 +13,12 @@ Responsible for preparing atlases and loading sprites/effects into `state.assets
   - Procedurally builds thruster/explosion puff frames.
 
 - Explosion flipbook
-  - Loads from `docs/js/assets/explosion.json` → `{ fps, frames[] }`.
-  - Fallback: synthesized 6‑frame sequence from effects atlas.
+  - Heavy sequence loads from `docs/js/assets/explosion.json` → `{ fps, frames[] }` (PNG frames). Deferred at idle (~12s by default) to avoid boot hitches.
+  - Fallback: synthesized 6‑frame sequence from effects atlas; built lazily at idle (~1.5s) to keep the main boot path light.
+  - QA toggles (set before reload):
+    - `window.EXPLO_FALLBACK_DELAY_MS` (default 1500)
+    - `window.EXPLO_FLIPBOOK_DELAY_MS` (default 12000)
+    - `window.DISABLE_EXPLOSION_FLIPBOOK = true` to skip heavy flipbook load entirely.
 
 - Standalone sprites (ships)
   - Optional `sprites.json` manifest; additionally preloads known ship PNGs by id.

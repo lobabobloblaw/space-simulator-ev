@@ -12,10 +12,18 @@ export class SaveSystemAdapterFixed {
         this.stateManager = getStateManager();
         this.SAVE_KEY = 'galaxyTraderSave';
         this.LOAD_PENDING_KEY = 'galaxyTraderLoadPending';
-        this.SAVE_MAX_NPCS = 40; // cap payload to avoid long JSON tasks
+        this.SAVE_MAX_NPCS = 28; // tighter cap to reduce JSON size and stall risk
         this._saveScheduled = false;
         this._savePending = false;
         this._saveDeferCount = 0;
+        // Idle gating for autosave: require a streak of light frames before writing
+        this._idleLightStreak = 0;
+        this._idleLightMs = 16;   // treat <16ms as light frame (stricter)
+        this._idleLightNeed = 12; // require a longer streak of light frames
+        this._idleRecheckMs = 180; // recheck cadence while waiting
+        // Interaction gating: postpone autosave shortly after target cycling
+        this._activeInteractUntil = 0; // timestamp when it's OK to autosave again
+        this._quietMs = 12000; // default quiet window after input/targeting (12s)
         
         // Bind event handlers
         this.handleSave = this.handleSave.bind(this);
@@ -69,6 +77,22 @@ export class SaveSystemAdapterFixed {
         this.eventBus.on(GameEvents.GAME_SAVE, this.handleSave);
         this.eventBus.on(GameEvents.GAME_LOAD, this.handleLoad);
         this.eventBus.on(GameEvents.GAME_CLEAR_SAVE, this.handleClearSave);
+        // Watch target changes to avoid saving mid-cycling
+        this.eventBus.on(GameEvents.TARGET_SET, () => {
+            try {
+                const now = performance.now ? performance.now() : Date.now();
+                // Avoid autosaves for a short window after targeting interaction
+                const quiet = (typeof window !== 'undefined' && Number(window.SAVE_QUIET_MS)) || this._quietMs;
+                this._activeInteractUntil = now + Math.max(1000, quiet|0);
+            } catch(_) {}
+        });
+        // Watch user input (keys/mouse/touch) to extend quiet window during active interaction
+        const bumpQuiet = () => {
+            try { const now = performance.now ? performance.now() : Date.now(); const quiet = (typeof window !== 'undefined' && Number(window.SAVE_QUIET_MS)) || this._quietMs; this._activeInteractUntil = Math.max(this._activeInteractUntil||0, now + Math.max(1000, quiet|0)); } catch(_) {}
+        };
+        this.eventBus.on(GameEvents.INPUT_KEY_DOWN, bumpQuiet);
+        this.eventBus.on(GameEvents.INPUT_MOUSE_DOWN, bumpQuiet);
+        this.eventBus.on(GameEvents.INPUT_TOUCH_START, bumpQuiet);
         
         console.log('[SaveSystemAdapterFixed] Initialized');
     }
@@ -78,6 +102,13 @@ export class SaveSystemAdapterFixed {
      */
     handleSave(data = null) {
         try { if (typeof window !== 'undefined' && window.DEBUG_SAVE) console.log('[SaveSystemAdapterFixed] SAVE triggered'); } catch(_) {}
+        try {
+            // QA override to disable autosave entirely
+            if ((data && data.reason === 'auto') && (typeof window !== 'undefined' && window.SAVE_DISABLED)) {
+                if (window.DEBUG_SAVE) console.log('[SaveSystemAdapterFixed] Autosave disabled via SAVE_DISABLED');
+                return true;
+            }
+        } catch(_) {}
         // Coalesce autosaves; run off the critical path during idle time
         if (this._saveScheduled) { this._savePending = true; return true; }
         this._saveScheduled = true;
@@ -86,13 +117,48 @@ export class SaveSystemAdapterFixed {
                 // Avoid saving on heavy frames to prevent visible hitches
                 try {
                     const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
-                    if (heavy && this._saveDeferCount < 6) { // defer up to ~2–3s total
+                    const isAuto = !data || data.reason === 'auto';
+                    if (isAuto && heavy && this._saveDeferCount < 20) { // extend defers to reduce visible hitches
                         this._saveDeferCount++;
-                        setTimeout(run, 400);
+                        setTimeout(run, 350);
                         return;
                     }
                 } catch(_) {}
-                const payload = this._buildSaveData();
+                // Interaction quiet window after target cycling
+                try {
+                    const isAuto = !data || data.reason === 'auto';
+                    if (isAuto) {
+                        const now = performance.now ? performance.now() : Date.now();
+                        if (now < (this._activeInteractUntil || 0)) {
+                            setTimeout(run, 600);
+                            return;
+                        }
+                    }
+                } catch(_) {}
+                // Skip autosave while profilers are active (to avoid test-induced "other" spikes)
+                try {
+                    const isAuto = !data || data.reason === 'auto';
+                    const diagOn = !!(typeof window !== 'undefined' && (window.RENDER_PROF_OVERLAY || window.RENDER_PROF_LOG || window.UPDATE_PROF_LOG || window.UPDATE_PROF_OVERLAY));
+                    if (isAuto && diagOn) {
+                        setTimeout(run, 1200);
+                        return;
+                    }
+                } catch(_) {}
+                // For autosave, also require a brief streak of light frames
+                try {
+                    const isAuto = !data || data.reason === 'auto';
+                    if (isAuto) {
+                        const last = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+                        if (last > 0 && last <= this._idleLightMs) this._idleLightStreak += 1; else this._idleLightStreak = 0;
+                        if (this._idleLightStreak < this._idleLightNeed) {
+                            setTimeout(run, this._idleRecheckMs);
+                            return;
+                        }
+                        this._idleLightStreak = 0;
+                    }
+                } catch(_) {}
+                const light = (!data || data.reason === 'auto');
+                const payload = this._buildSaveData(light);
                 // JSON + setItem can be a long task; do it here (idle/fallback timeout)
                 const json = JSON.stringify(payload);
                 localStorage.setItem(this.SAVE_KEY, json);
@@ -129,10 +195,10 @@ export class SaveSystemAdapterFixed {
         return true;
     }
 
-    _buildSaveData() {
+    _buildSaveData(light = false) {
         const state = this.stateManager.state;
         // Trim large arrays to keep payloads small and stable
-        const npcList = (state.npcShips || []).slice(0, this.SAVE_MAX_NPCS);
+        const npcList = light ? [] : (state.npcShips || []).slice(0, this.SAVE_MAX_NPCS);
         return {
             version: '6.0',
             timestamp: Date.now(),
@@ -162,26 +228,10 @@ export class SaveSystemAdapterFixed {
                 activeId: state.missionSystem?.active?.id || null,
                 completed: state.missionSystem?.completed || []
             },
-            npcs: npcList.map(npc => ({
-                x: npc.x,
-                y: npc.y,
-                vx: npc.vx,
-                vy: npc.vy,
-                angle: npc.angle,
-                type: npc.type,
-                size: npc.size,
-                health: npc.health,
-                maxHealth: npc.maxHealth,
-                behavior: npc.behavior,
-                credits: npc.credits,
-                cargo: npc.cargo,
-                weapons: npc.weapons,
-                currentWeapon: npc.currentWeapon,
-                faction: npc.faction,
-                personality: npc.personality,
-                homeStation: npc.homeStation
-            })),
-            asteroids: (state.asteroids || []).slice(0, 20).map(ast => ({
+            // Persist essentials for NPCs only on manual saves; autosave omits
+            npcs: npcList.map(npc => ({ x: npc.x, y: npc.y, vx: npc.vx, vy: npc.vy, angle: npc.angle, type: npc.type, size: npc.size, health: npc.health, maxHealth: npc.maxHealth })),
+            // Autosave omits asteroids/pickups entirely; manual keeps a small slice
+            asteroids: light ? [] : (state.asteroids || []).slice(0, 12).map(ast => ({
                 x: ast.x,
                 y: ast.y,
                 vx: ast.vx,
@@ -190,7 +240,7 @@ export class SaveSystemAdapterFixed {
                 oreContent: ast.oreContent,
                 radius: ast.radius
             })),
-            pickups: (state.pickups || []).map(p => ({ x: p.x, y: p.y, type: p.type, value: p.value }))
+            pickups: light ? [] : (state.pickups || []).slice(0, 20).map(p => ({ x: p.x, y: p.y, type: p.type, value: p.value }))
         };
     }
     

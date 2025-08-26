@@ -1,8 +1,9 @@
 import { GameEvents } from '../core/EventBus.js';
 import { withScreen, toWhiteMaskCanvas } from './RenderHelpers.js';
+import { GameConstants } from '../utils/Constants.js';
 import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES } from './SpriteMappings.js';
 import { getFrameCanvasFromState } from './AssetSystem.js';
-import { isImageReady, getStandaloneSpriteIfReady, getAtlasFrameIfReady } from './AssetReadiness.js';
+import { isImageReady, getStandaloneSpriteIfReady } from './AssetReadiness.js';
 
 export default class TargetCamRenderer {
   constructor(eventBus, stateManager, canvas) {
@@ -44,17 +45,24 @@ export default class TargetCamRenderer {
     this._resolved = { targetId: null, kind: null, src: null, w: 0, h: 0 };
     this._lastPath = null; // for optional on-canvas label
     // Warm-up window before allowing atlas/baseline fallbacks (ms)
-    this._fallbackGraceMs = 450;
+    this._fallbackGraceMs = (GameConstants?.TARGET_CAM?.WARM_UP_MS ?? 450);
     this._warmUntil = 0;
     this._lastRenderTs = 0;
     // Redraw policy for silhouette (time/angle gating)
-    this._policy = { minIntervalMs: 90, angleEps: 0.12 };
+    this._policy = {
+      minIntervalMs: (GameConstants?.TARGET_CAM?.BUILD_MIN_INTERVAL_MS ?? 90),
+      angleEps: (GameConstants?.TARGET_CAM?.ANGLE_EPS_RAD ?? 0.12)
+    };
     this._lastDraw = { ts: 0, angle: 0, targetId: null };
 
     // Strict buffer-blit: persistent offscreen silhouette buffer
     this._buf = { canvas: null, ctx: null, dw: 0, dh: 0, kind: null, spriteKey: null, targetId: null };
     this._buildPending = false;       // collapse bursts during cycling
     this._queuedBuild = null;         // latest requested build params to coalesce
+    // Idle gating to avoid off-render work causing 'other' spikes
+    this._idleLightStreak = 0;
+    this._idleLightNeed = (GameConstants?.TARGET_CAM?.IDLE_LIGHT_STREAK ?? 6);
+    this._idleLightMs = (GameConstants?.TARGET_CAM?.IDLE_LIGHT_MS ?? 16);
   }
 
   /*
@@ -90,11 +98,17 @@ export default class TargetCamRenderer {
     // Subscribe to targeting events
     this.eventBus.on(GameEvents.TARGET_SET, () => {
       const now = performance.now();
-      this.targetCamBlip = { start: now, duration: 320 };
+      this.targetCamBlip = { start: now, duration: (GameConstants?.TARGET_CAM?.BLIP_DURATION_MS ?? 320) };
       const st = this.stateManager.state;
       const toId = st.targeting?.selectedId || null;
       const fromId = this._lastSilhouetteId || null;
-      this.targetCamTransition = { fromId, toId, start: now, duration: 320, hold: 140 };
+      this.targetCamTransition = {
+        fromId,
+        toId,
+        start: now,
+        duration: (GameConstants?.TARGET_CAM?.TRANSITION_DURATION_MS ?? 320),
+        hold: (GameConstants?.TARGET_CAM?.TRANSITION_HOLD_MS ?? 140)
+      };
       // Reset resolved source on target change; will lazily resolve on render
       this._resolved = { targetId: toId, kind: null, src: null, w: 0, h: 0 };
       // Set warm-up deadline for fallbacks; allow runtime override via window.TC_WARM_MS
@@ -122,13 +136,19 @@ export default class TargetCamRenderer {
     // Apply live QA overrides if present (cheap check)
     this._syncPolicyFromWindow();
     // Throttle TargetCam to ~30Hz to reduce spikes during cycling
-    try { const nowTs = performance.now ? performance.now() : Date.now(); if (nowTs - (this._lastRenderTs||0) < 33) return; this._lastRenderTs = nowTs; } catch(_) {}
+    try {
+      const nowTs = performance.now ? performance.now() : Date.now();
+      const throttle = (GameConstants?.TARGET_CAM?.FRAME_THROTTLE_MS ?? 33);
+      if (nowTs - (this._lastRenderTs||0) < throttle) return;
+      this._lastRenderTs = nowTs;
+    } catch(_) {}
     const w = this.canvas.width || 100;
     const h = this.canvas.height || 100;
     try { this.ctx.setTransform(1,0,0,1,0,0); } catch(_) {}
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
     this.ctx.imageSmoothingEnabled = false;
+    // Clear to transparent so CSS gradient underlay shows
     this.ctx.clearRect(0,0,w,h);
 
     // Target resolve + transition
@@ -263,6 +283,22 @@ export default class TargetCamRenderer {
         ctx.save(); try { ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=0.65; ctx.fillStyle='#9cc'; ctx.font='10px VT323, monospace'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('OFFLINE', w/2, h/2); } finally { ctx.restore(); }
       }
 
+      // Transitional static when offline (no target) or silhouette suppressed (warm-up/hold)
+      try {
+        const now = performance.now ? performance.now() : Date.now();
+        const inHold = !!(this.targetCamTransition && (now - this.targetCamTransition.start) < (this.targetCamTransition.hold || 0));
+        const inWarm = now < (this._warmUntil || 0);
+        const noTarget = !npc;
+        const noBuf = !(this._buf && this._buf.canvas && npc && this._buf.targetId === npc.id && this._buf.dw > 0 && this._buf.dh > 0);
+        const needStatic = noTarget || (!drawSilhouette) || (npc && noBuf && inWarm);
+        const g = (typeof window !== 'undefined') ? window : globalThis;
+        const staticOn = !(g.TC_STATIC === false || g.UI_PANEL_STATIC === false);
+        if (needStatic && staticOn) {
+          this.drawStaticNoise(w, h, 0.08);
+          this.drawScanlines(w, h, 0.05);
+        }
+      } catch(_) {}
+
       if (fxEnabled && fxActive) { this.drawStaticNoise(w,h,0.05,true); this.drawRollingBand(w,h,0.06); }
       // Optional path label
       if (!((typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24)) && window.TC_SHOW_PATH && this._lastPath) {
@@ -297,9 +333,11 @@ export default class TargetCamRenderer {
     this._buildPending = true;
     const schedule = () => {
       const run = () => { try { this._tryBuildFromQueue(); } finally { this._buildPending = false; if (this._queuedBuild) { this._buildPending = true; schedule(); } } };
-      // Defer to after next paint; keep off the rAF handler path
-      try { requestAnimationFrame(() => setTimeout(run, 0)); }
-      catch(_) { setTimeout(run, 0); }
+      // Prefer idle time; fallback to after next paint
+      try {
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(() => setTimeout(run, 0), { timeout: 500 });
+        else requestAnimationFrame(() => setTimeout(run, 0));
+      } catch(_) { setTimeout(run, 0); }
     };
     schedule();
   }
@@ -319,7 +357,8 @@ export default class TargetCamRenderer {
     const req = this._queuedBuild; this._queuedBuild = null;
     if (!req) return;
     // Avoid heavy frames; reschedule if needed
-    const isHeavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+    const lastMs = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+    const isHeavy = !!(lastMs && lastMs > (GameConstants?.TARGET_CAM?.HEAVY_FRAME_MS ?? 24));
     if (isHeavy) {
       // Re-queue the latest request and try next frame
       this._queuedBuild = req;
@@ -327,6 +366,20 @@ export default class TargetCamRenderer {
       requestAnimationFrame(() => Promise.resolve().then(() => this._tryBuildFromQueue()));
       return;
     }
+    // Require a short streak of light frames before building to avoid 'other' spikes
+    try {
+      if (lastMs > 0 && lastMs <= this._idleLightMs) this._idleLightStreak += 1; else this._idleLightStreak = 0;
+      // Skip building while profiling overlays/logging are active
+      const diagOn = !!(typeof window !== 'undefined' && (window.RENDER_PROF_OVERLAY || window.RENDER_PROF_LOG || window.UPDATE_PROF_LOG || window.UPDATE_PROF_OVERLAY));
+      if (this._idleLightStreak < this._idleLightNeed || diagOn) {
+        // Re-queue and retry shortly
+        this._queuedBuild = req;
+        setTimeout(() => this._tryBuildFromQueue(), (GameConstants?.TARGET_CAM?.RETRY_BUILD_MS ?? 150));
+        return;
+      }
+      // reset streak once proceeding
+      this._idleLightStreak = 0;
+    } catch(_) {}
     const state = this.stateManager?.state;
     if (!state) return;
     const npc = (state.npcShips || []).find(n => n && n.id === req.targetId);

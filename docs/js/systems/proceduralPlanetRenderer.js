@@ -202,9 +202,9 @@ export class ProceduralPlanetRenderer {
             for (let x = 0; x < size; x++) {
                 const dx = x - center;
                 const dy = y - center;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                
-                if (dist <= radius) {
+                const dist2 = dx * dx + dy * dy;
+                const r2 = radius * radius;
+                if (dist2 <= r2) {
                     // Convert to sphere coordinates
                     const nx = dx / radius;
                     const ny = dy / radius;
@@ -317,9 +317,9 @@ export class ProceduralPlanetRenderer {
             for (let x = 0; x < size; x++) {
                 const dx = x - center;
                 const dy = y - center;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                
-                if (dist <= radius) {
+                const dist2 = dx * dx + dy * dy;
+                const r2 = radius * radius;
+                if (dist2 <= r2) {
                     const nx = dx / radius;
                     const ny = dy / radius;
                     const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
@@ -391,9 +391,8 @@ export class ProceduralPlanetRenderer {
             for (let x = 0; x < size; x++) {
                 const dx = x - center;
                 const dy = y - center;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                
-                if (dist <= radius) {
+                const dist2 = dx * dx + dy * dy;
+                if (dist2 <= radius * radius) {
                     const nx = dx / radius;
                     const ny = dy / radius;
                     const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
@@ -477,9 +476,8 @@ export class ProceduralPlanetRenderer {
                     3, 2.0, 0.5
                 );
                 const effectiveRadius = radius * (0.8 + shapeNoise * 0.3);
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                
-                if (dist <= effectiveRadius) {
+                const dist2 = dx * dx + dy * dy;
+                if (dist2 <= effectiveRadius * effectiveRadius) {
                     const nx = dx / effectiveRadius;
                     const ny = dy / effectiveRadius;
                     const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));

@@ -29,22 +29,21 @@
             log(`Stack: ${error?.stack || 'no stack'}`, 'error');
         };
         
-        log('Starting import of main.js...');
+        log('Starting import of main_eventbus_pure.js...');
         
-        import('./js/main.js')
+        import('./js/main_eventbus_pure.js')
             .then(module => {
-                log('✓ main.js imported successfully');
+                log('✓ main_eventbus_pure.js imported successfully');
                 log(`Module keys: ${Object.keys(module).join(', ')}`);
                 
                 // Check what was initialized
                 setTimeout(() => {
-                    log(`window.ship: ${window.ship ? 'exists' : 'missing'}`);
-                    log(`window.game: ${window.game ? 'exists' : 'missing'}`);
-                    log(`window.planets: ${window.planets ? 'exists' : 'missing'}`);
+                    log(`stateManager present: ${!!window.refactorDebug?.stateManager}`);
+                    log(`eventBus present: ${!!window.refactorDebug?.eventBus}`);
                 }, 1000);
             })
             .catch(error => {
-                log(`✗ Failed to import main.js: ${error.message}`, 'error');
+                log(`✗ Failed to import main_eventbus_pure.js: ${error.message}`, 'error');
                 log(`Stack trace: ${error.stack}`, 'error');
             });
     </script>

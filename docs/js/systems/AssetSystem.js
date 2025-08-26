@@ -17,8 +17,9 @@ export default class AssetSystem {
             // Generate a tiny effects atlas (thruster/explosion) procedurally
             const effects = await this.generateEffectsAtlas();
             state.assets.atlases.effects = effects;
-            // Try to load an external explosion flipbook (PNG sequence) or build a tiny fallback
-            await this.loadExplosionFlipbook();
+            // Defer explosion flipbooks to avoid boot hitches
+            this.scheduleExplosionFallbackBuild();
+            this.scheduleExplosionFlipbookLoad();
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
             // Prime known ship sprites so TargetCam can upgrade silhouettes quickly
@@ -238,28 +239,61 @@ export default class AssetSystem {
         } catch (_) {
             // Fallback: synthesize a 6-frame flipbook from effects atlas explosion frames
             try {
-                const state = this.stateManager.state;
-                const effects = state.assets?.atlases?.effects;
-                if (!effects?.image || !effects?.frames) return;
-                const srcFrames = ['effects/explosion_0','effects/explosion_1','effects/explosion_2'];
-                const frames = [];
-                for (let i = 0; i < 6; i++) {
-                    const key = srcFrames[Math.min(srcFrames.length-1, Math.floor(i/2))];
-                    const f = effects.frames[key];
-                    const c = document.createElement('canvas');
-                    c.width = f.w; c.height = f.h; const ctx = c.getContext('2d');
-                    ctx.drawImage(effects.image, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
-                    // subtle tint variation per frame
-                    ctx.globalCompositeOperation = 'lighter';
-                    ctx.fillStyle = `rgba(255,200,100,${0.15 + (i*0.02)})`;
-                    ctx.fillRect(0,0,c.width,c.height);
-                    frames.push(await this.canvasToImage(c));
-                }
-                state.assets.effects = state.assets.effects || {};
-                state.assets.effects.explosionFlipbook = { fps: 18, frames };
-                console.log('[AssetSystem] Explosion flipbook synthesized (6 frames)');
+                await this.buildExplosionFallback();
             } catch (_) {}
         }
+    }
+
+    async buildExplosionFallback() {
+        const state = this.stateManager.state;
+        const effects = state.assets?.atlases?.effects;
+        if (!effects?.image || !effects?.frames) return;
+        const srcFrames = ['effects/explosion_0','effects/explosion_1','effects/explosion_2'];
+        const frames = [];
+        for (let i = 0; i < 6; i++) {
+            const key = srcFrames[Math.min(srcFrames.length-1, Math.floor(i/2))];
+            const f = effects.frames[key];
+            const c = document.createElement('canvas');
+            c.width = f.w; c.height = f.h; const ctx = c.getContext('2d');
+            ctx.drawImage(effects.image, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+            // subtle tint variation per frame
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = `rgba(255,200,100,${0.15 + (i*0.02)})`;
+            ctx.fillRect(0,0,c.width,c.height);
+            frames.push(await this.canvasToImage(c));
+        }
+        state.assets.effects = state.assets.effects || {};
+        state.assets.effects.explosionFlipbook = { fps: 18, frames };
+        console.log('[AssetSystem] Explosion flipbook fallback ready (6 frames)');
+    }
+
+    scheduleExplosionFallbackBuild() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            const delay = Number(g.EXPLO_FALLBACK_DELAY_MS) || 1500;
+            const run = () => { this.buildExplosionFallback().catch(()=>{}); };
+            if (typeof g.requestIdleCallback === 'function') {
+                setTimeout(() => g.requestIdleCallback(run, { timeout: 3000 }), delay);
+            } else {
+                setTimeout(run, delay);
+            }
+            console.log('[AssetSystem] Scheduled explosion fallback build in', delay, 'ms');
+        } catch (_) {}
+    }
+
+    scheduleExplosionFlipbookLoad() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g.DISABLE_EXPLOSION_FLIPBOOK) return;
+            const delay = Number(g.EXPLO_FLIPBOOK_DELAY_MS) || 12000;
+            const run = () => { this.loadExplosionFlipbook().catch(()=>{}); };
+            if (typeof g.requestIdleCallback === 'function') {
+                setTimeout(() => g.requestIdleCallback(run, { timeout: 5000 }), delay);
+            } else {
+                setTimeout(run, delay);
+            }
+            console.log('[AssetSystem] Scheduled heavy explosion flipbook load in', delay, 'ms');
+        } catch (_) {}
     }
 
     // Return a per-frame canvas for a given atlas frame id.

@@ -4,7 +4,9 @@ Notifications are surfaced via the `UI_MESSAGE` event and are rendered by `UISys
 
 ## Behavior
 
-- Queue: Messages are queued and displayed sequentially to avoid stacking overlaps ("rolodex" feel).
+- Console line (default): Messages mirror into the tiny readout at `#tutorialHint` (bottom‑left). This area fades in/out and is used instead of the old “WEAPONS OFFLINE/ONLINE” banners, which are now suppressed.
+- Toasts (disabled by default): The floating top notifications are disabled to reduce noise. Re‑enable temporarily via `window.UI_TOASTS = true` for QA.
+- Queue (when toasts enabled): Messages are queued and displayed sequentially to avoid stacking overlaps ("rolodex" feel).
 - Timing: Each message displays for its specified duration (default ~2000ms) and then fades out before the next shows (small inter‑message gap ~120ms).
 - Types: `info`, `success`, `error` (styled via border‑left accent).
 
@@ -16,11 +18,14 @@ Notifications are surfaced via the `UI_MESSAGE` event and are rendered by `UISys
 
 ## Styling
 
-- Base class `.game-notification` with slide‑in; fades out via `.fade-out` class.
-- Fixed position below tutorial hint; responsive enough for multiple quick messages, but queue prevents overlap.
+- Console line: `#tutorialHint.visible` uses an opacity transition for smooth fade.
+- Toasts: `.game-notification` slides/fades in via `@keyframes notificationSlide` and fades out via `.fade-out`.
 
 ## Guidance
 
-- Keep messages concise; avoid competing messages in the same second where possible.
-- For repeated system status (e.g., auto saves), prefer silent or infrequent messages to reduce noise.
+- Keep console messages concise; prefer one‑liners like “ORE +1” or “CARGO FULL — §+10”.
+- For repeated system status (e.g., auto saves), keep toasts OFF and use console line sparingly.
 
+## Toggles (QA)
+
+- `window.UI_TOASTS = true` — re‑enable floating toasts (default OFF).

@@ -1,5 +1,7 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { GameConstants } from '../utils/Constants.js';
+import { MathUtils } from '../utils/MathUtils.js';
 
 /**
  * PhysicsSystem - Handles all physics simulation
@@ -13,7 +15,8 @@ export class PhysicsSystem {
         // Physics constants
         this.SPACE_FRICTION = 1.0;  // No friction in space!
         this.BRAKE_FRICTION = 0.95;
-        this.WORLD_BOUNDS = { min: -2000, max: 2000 };
+        const worldHalf = Math.floor(((GameConstants?.WORLD?.ASTEROID_WORLD_SIZE ?? 4000) / 2));
+        this.WORLD_BOUNDS = { min: -worldHalf, max: worldHalf };
         
         // Movement state tracking
         this.thrustActive = false;
@@ -134,7 +137,7 @@ export class PhysicsSystem {
         
         // Handle rotation
         if (this.turnDirection !== 0) {
-            const turnSpeed = 0.025; // radians per frame
+            const turnSpeed = (GameConstants?.PHYSICS?.TURN_SPEED ?? 0.025); // radians per frame
             ship.angle += turnSpeed * this.turnDirection;
             
             // Normalize angle to 0-2π
@@ -161,10 +164,24 @@ export class PhysicsSystem {
             });
         }
         
-        // Handle braking
-        if (this.brakeActive) {
-            ship.vx *= this.BRAKE_FRICTION;
-            ship.vy *= this.BRAKE_FRICTION;
+        // Handle braking (retro-thrust opposite current velocity; consumes fuel)
+        if (this.brakeActive && ship.fuel > 0.01) {
+            const vx0 = ship.vx || 0, vy0 = ship.vy || 0;
+            const speed = Math.hypot(vx0, vy0);
+            if (speed > 0.0005) {
+                const baseThrust = ship.thrust || 0.012;
+                const mult = (GameConstants?.SHIP?.BRAKE_THRUST_MULT ?? 1.0);
+                const brakePower = baseThrust * mult;
+                const ax = -(vx0 / speed) * brakePower;
+                const ay = -(vy0 / speed) * brakePower;
+                ship.vx += ax;
+                ship.vy += ay;
+                // Prevent overshoot reversal: if velocity flipped past zero, clamp to 0
+                if ((vx0 * ship.vx + vy0 * ship.vy) < 0) { ship.vx = 0; ship.vy = 0; }
+                // Consume fuel for brake thrust
+                const cost = (GameConstants?.SHIP?.BRAKE_FUEL_COST ?? 0.1);
+                ship.fuel = Math.max(0, ship.fuel - cost);
+            }
         }
         
         // No friction in space! Ship maintains velocity (Newton's first law)
@@ -187,17 +204,20 @@ export class PhysicsSystem {
         
         // Regenerate fuel slowly
         if (ship.fuel < ship.maxFuel) {
-            ship.fuel = Math.min(ship.maxFuel, ship.fuel + 0.01);
+            const rate = (GameConstants?.SHIP?.FUEL_REGEN_RATE ?? 0.01);
+            ship.fuel = Math.min(ship.maxFuel, ship.fuel + rate);
         }
         
         // Regenerate shields slowly
         if (ship.shield < ship.maxShield) {
-            ship.shield = Math.min(ship.maxShield, ship.shield + 0.02);
+            const rate = (GameConstants?.SHIP?.SHIELD_REGEN_RATE ?? 0.02);
+            ship.shield = Math.min(ship.maxShield, ship.shield + rate);
         }
         
         // Regenerate health when landed
         if (ship.isLanded && ship.health < ship.maxHealth) {
-            ship.health = Math.min(ship.maxHealth, ship.health + 0.1);
+            const rate = (GameConstants?.SHIP?.HEALTH_REGEN_RATE_LANDED ?? 0.1);
+            ship.health = Math.min(ship.maxHealth, ship.health + rate);
         }
         
         // Update weapon cooldown
@@ -212,11 +232,9 @@ export class PhysicsSystem {
         
         // Check if ship has moved away from landed planet
         if (ship.isLanded && ship.landedPlanet) {
-            const dx = ship.x - ship.landedPlanet.x;
-            const dy = ship.y - ship.landedPlanet.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const distance = MathUtils.distance(ship.x, ship.y, ship.landedPlanet.x, ship.landedPlanet.y);
             
-            if (distance > ship.landedPlanet.radius + 100) {
+            if (distance > ship.landedPlanet.radius + (GameConstants?.PHYSICS?.LANDING_CLEAR_DISTANCE ?? 100)) {
                 ship.isLanded = false;
                 ship.landedPlanet = null;
                 
@@ -371,7 +389,6 @@ export class PhysicsSystem {
                 // Calculate impact physics
                 const dx = ship.x - asteroid.x;
                 const dy = ship.y - asteroid.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
                 
                 // Relative velocity for damage
                 const relVx = ship.vx - asteroid.vx;
@@ -379,8 +396,10 @@ export class PhysicsSystem {
                 const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
                 
                 // Calculate damage - scales with speed and asteroid size
-                const baseDamage = Math.floor(relSpeed * asteroid.radius * 3); // Increased multiplier
-                let damage = Math.max(5, baseDamage); // Minimum 5 damage
+                const dmgMult = (GameConstants?.PHYSICS?.ASTEROID_IMPACT_DAMAGE_MULT ?? 3);
+                const baseDamage = Math.floor(relSpeed * asteroid.radius * dmgMult);
+                const minDmg = (GameConstants?.PHYSICS?.MIN_COLLISION_DAMAGE ?? 5);
+                let damage = Math.max(minDmg, baseDamage);
                 if (this.stateManager.state.debug?.godMode) {
                     damage = 0; // God mode: no damage from impacts
                 }
@@ -414,8 +433,8 @@ export class PhysicsSystem {
                     
                     // Screen shake/damage flash
                     ship.screenShake = Math.min(20, damage * 0.5);
-                    ship.screenShakeDecay = 0.8;
-                    ship.damageFlash = 1.0;
+                    ship.screenShakeDecay = (GameConstants?.PHYSICS?.SCREEN_SHAKE_DECAY ?? 0.8);
+                    ship.damageFlash = (GameConstants?.PHYSICS?.DAMAGE_FLASH_INITIAL ?? 1.0);
                     
                     // Emit damage event
                     this.eventBus.emit(GameEvents.SHIP_DAMAGE, {
@@ -425,7 +444,7 @@ export class PhysicsSystem {
                     });
                     
                     // Show warning for heavy damage
-                    if (damage > 30) {
+                    if (damage > (GameConstants?.PHYSICS?.HEAVY_COLLISION_DAMAGE_WARN ?? 30)) {
                         this.eventBus.emit(GameEvents.UI_MESSAGE, {
                             message: `⚠ HULL DAMAGE: -${damage} HP`,
                             type: 'error',
@@ -437,7 +456,9 @@ export class PhysicsSystem {
                 
                 // Bounce physics - more dramatic
                 const angle = Math.atan2(dy, dx);
-                const force = 0.5 + relSpeed * 0.3; // Variable force
+                const fBase = (GameConstants?.PHYSICS?.BOUNCE_FORCE_BASE ?? 0.5);
+                const fMul = (GameConstants?.PHYSICS?.BOUNCE_FORCE_SPEED_MULT ?? 0.3);
+                const force = fBase + relSpeed * fMul; // Variable force
                 ship.vx += Math.cos(angle) * force;
                 ship.vy += Math.sin(angle) * force;
                 asteroid.vx -= Math.cos(angle) * force * 0.5;
@@ -489,9 +510,8 @@ export class PhysicsSystem {
             const pickup = pickups[i];
             const dx = ship.x - pickup.x;
             const dy = ship.y - pickup.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance < ship.size + 10) {
+            const r = (ship.size || 0) + 10; const r2 = r * r;
+            if ((dx*dx + dy*dy) < r2) {
                 // Emit pickup collected event
                 this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, {
                     ship,
@@ -578,25 +598,21 @@ export class PhysicsSystem {
      * Check collision between two circles
      */
     checkCircleCollision(entity1, entity2) {
-        const dx = entity1.x - entity2.x;
-        const dy = entity1.y - entity2.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const radius1 = entity1.size || entity1.radius || 10;
-        const radius2 = entity2.size || entity2.radius || 10;
-        
-        return distance < radius1 + radius2;
+        const r1 = entity1.size || entity1.radius || 10;
+        const r2 = entity2.size || entity2.radius || 10;
+        const sum = r1 + r2; const sum2 = sum * sum;
+        const d2 = MathUtils.distanceSquared(entity1.x, entity1.y, entity2.x, entity2.y);
+        return d2 < sum2;
     }
     
     /**
      * Check collision between a point and a circle
      */
     checkPointCircleCollision(point, circle) {
-        const dx = point.x - circle.x;
-        const dy = point.y - circle.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const radius = circle.size || circle.radius || 10;
-        
-        return distance < radius;
+        const r = circle.size || circle.radius || 10;
+        const r2 = r * r;
+        const d2 = MathUtils.distanceSquared(point.x, point.y, circle.x, circle.y);
+        return d2 < r2;
     }
     
     /**
@@ -619,9 +635,7 @@ export class PhysicsSystem {
      * Calculate distance between two entities
      */
     getDistance(entity1, entity2) {
-        const dx = entity1.x - entity2.x;
-        const dy = entity1.y - entity2.y;
-        return Math.sqrt(dx * dx + dy * dy);
+        return MathUtils.distance(entity1.x, entity1.y, entity2.x, entity2.y);
     }
     
     /**

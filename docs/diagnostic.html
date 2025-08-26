@@ -46,24 +46,7 @@
         console.log('[Diagnostic] Set isDiagnosticPage flag');
     </script>
     
-    <!-- Load old code first as modules -->
-    <script type="module">
-        // Import old code to ensure globals are set
-        import './js/main.js';
-        
-        // Hide save dialog if it appears
-        setTimeout(() => {
-            const saveDialog = document.getElementById('saveGameDialog');
-            if (saveDialog) {
-                saveDialog.style.display = 'none';
-            }
-            // Also hide landing overlay if it appears
-            const landingOverlay = document.getElementById('landingOverlay');
-            if (landingOverlay) {
-                landingOverlay.style.display = 'none';
-            }
-        }, 100);
-    </script>
+    <!-- Legacy path removed. No old-code import here. -->
     
     <!-- Then load new architecture -->
     <script type="module">

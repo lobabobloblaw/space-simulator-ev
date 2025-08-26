@@ -5,12 +5,14 @@ import ExplosionRenderer from './ExplosionRenderer.js';
 import ThrusterFXRenderer from './ThrusterFXRenderer.js';
 import HUDRenderer from './HUDRenderer.js';
 import { withWorld, withScreen, toWhiteMaskCanvas } from './RenderHelpers.js';
+import { MathUtils } from '../utils/MathUtils.js';
 import { resolveViewportSprite } from './SpriteResolver.js';
 import { getFrameCanvasFromState } from './AssetSystem.js';
 import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES } from './SpriteMappings.js';
 import ShipDesigns from './ShipDesigns.js';
 import TargetCamRenderer from './TargetCamRenderer.js';
 import FactionVisuals from './FactionVisuals.js';
+import { GameConstants } from '../utils/Constants.js';
 
 /**
  * RenderSystem - Handles all visual rendering for the game
@@ -19,7 +21,8 @@ import FactionVisuals from './FactionVisuals.js';
 export class RenderSystem {
     constructor(canvas) {
         this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
+        // Prefer low-latency, opaque canvas to reduce compositing cost
+        this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true }) || canvas.getContext('2d');
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
         
@@ -39,14 +42,16 @@ export class RenderSystem {
         
         // Minimap canvas (from existing setup)
         this.minimapCanvas = document.getElementById('minimapCanvas');
-        this.minimapCtx = this.minimapCanvas ? this.minimapCanvas.getContext('2d') : null;
+        // Allow CSS gradient behind the canvas to show through during clears
+        this.minimapCtx = this.minimapCanvas ? (this.minimapCanvas.getContext('2d', { alpha: true, desynchronized: true }) || this.minimapCanvas.getContext('2d')) : null;
         this.minimapScale = 0.018;
 
         // Target cam viewport (center viewport next to controls)
         this.targetCanvas = document.getElementById('centerViewportCanvas');
-        this.targetCtx = this.targetCanvas ? this.targetCanvas.getContext('2d') : null;
+        // TargetCamRenderer manages its own ctx; keep alpha true to allow CSS gradient underlay
+        this.targetCtx = this.targetCanvas ? (this.targetCanvas.getContext('2d', { alpha: true, desynchronized: true }) || this.targetCanvas.getContext('2d')) : null;
         this.targetCam = new TargetCamRenderer(this.eventBus, this.stateManager, this.targetCanvas);
-        // Static overlay buffer for target cam
+        // Static overlay buffer (used for minimap/targetcam transitional effects)
         this.staticNoise = {
             canvas: (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 64; return c; })(),
             ctx: null,
@@ -112,7 +117,63 @@ export class RenderSystem {
         // enable via: window.RENDER_OTHER_GUARD = true
         this._otherGuard = { frames: 0 };
 
+        // Boot ramp: start at medium quality for a short window to avoid early composite spikes
+        try {
+            const now = (performance.now ? performance.now() : Date.now());
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            const ms = Number(g.BOOT_QUALITY_MS) || 3000;
+            this._bootUntil = now + Math.max(0, ms);
+        } catch(_) { this._bootUntil = 0; }
+
+        // Canvas 2D quality hints
+        try { this.ctx.imageSmoothingEnabled = false; } catch(_) {}
+        try { if (this.minimapCtx) this.minimapCtx.imageSmoothingEnabled = false; } catch(_) {}
+        try { if (this.targetCtx) this.targetCtx.imageSmoothingEnabled = false; } catch(_) {}
+
+        // Background caches
+        this._bgGrad = { canvas: null, h: 0 };
+        this._starTick = 0;
+        this._starBootSkip = 0;
+        try { const g = (typeof window !== 'undefined') ? window : globalThis; if (Number(g.STAR_BOOT_SKIP)) this._starBootSkip = Math.max(0, Number(g.STAR_BOOT_SKIP)|0); } catch(_) {}
+
         console.log('[RenderSystem] Created');
+    }
+
+    // Lightweight static tile update (shared by minimap transitional effect)
+    _updateStaticTile() {
+        try {
+            const sn = this.staticNoise;
+            const now = Date.now();
+            if (now - sn.lastTime > 80) {
+                const nctx = sn.ctx;
+                const img = nctx.createImageData(sn.canvas.width, sn.canvas.height);
+                for (let i = 0; i < img.data.length; i += 4) {
+                    const v = Math.random() * 255;
+                    img.data[i] = v; img.data[i+1] = v; img.data[i+2] = v; img.data[i+3] = 255;
+                }
+                nctx.putImageData(img, 0, 0);
+                sn.lastTime = now; sn.phase = (sn.phase + 1) % 1000;
+            }
+        } catch (_) {}
+    }
+
+    // Draw a faint static + scanline overlay (minimap only)
+    _drawMinimapStatic(w, h, noiseAlpha = 0.08, lineAlpha = 0.05) {
+        if (!this.minimapCtx) return;
+        this._updateStaticTile();
+        const ctx = this.minimapCtx;
+        try {
+            ctx.save();
+            ctx.setTransform(1,0,0,1,0,0);
+            ctx.imageSmoothingEnabled = false;
+            // Noise tile
+            ctx.globalAlpha = Math.max(0, Math.min(0.4, noiseAlpha));
+            ctx.drawImage(this.staticNoise.canvas, 0, 0, w, h);
+            // Scanlines
+            ctx.globalAlpha = Math.max(0, Math.min(0.2, lineAlpha));
+            ctx.fillStyle = '#000';
+            for (let y = 0; y < h; y += 2) ctx.fillRect(0, y, w, 1);
+        } finally { ctx.restore(); }
     }
 
     // Draw src tinted to white (#e8f6ff). Prefers offscreen mask; falls back to in-place source-in.
@@ -311,9 +372,8 @@ export class RenderSystem {
                 .then(mod => {
                     if (mod.planets && mod.planets.length) {
                         state.planets = mod.planets;
-                        // Initialize renderer cache now that planets exist
-                        this.planetRenderer.initializePlanets(state.planets);
-                        console.log('[RenderSystem] Loaded', state.planets.length, 'planets from data');
+                        // Defer planet texture generation to render path (lazy, on-demand)
+                        console.log('[RenderSystem] Planets available:', state.planets.length);
                     }
                 })
                 .catch(e => console.error('[RenderSystem] Failed to load planets data:', e));
@@ -457,7 +517,8 @@ export class RenderSystem {
     render(state, deltaTime) {
         // Optional: auto quality scaling based on frame time (off by default; enable via window.RENDER_AUTO_QUALITY = true)
         try {
-            const wantAuto = !!(typeof window !== 'undefined' && window.RENDER_AUTO_QUALITY);
+            // Default auto quality ON unless explicitly set false
+            const wantAuto = (typeof window !== 'undefined') ? (('RENDER_AUTO_QUALITY' in window) ? !!window.RENDER_AUTO_QUALITY : true) : true;
             this._autoQuality.enabled = wantAuto;
             const now = performance.now ? performance.now() : Date.now();
             if (!this._autoQuality.lastTs) this._autoQuality.lastTs = now;
@@ -469,6 +530,8 @@ export class RenderSystem {
                 // Respect manual setting when auto is disabled
                 this.quality = this._manualQuality;
             }
+            // Enforce boot ramp quality briefly
+            if (now < (this._bootUntil || 0)) this.quality = 'medium';
             // Expose for profiler overlay/log
             if (typeof window !== 'undefined') window.__lastFrameMs = frameMs;
             // Auto-arm one-shot profile capture on spike without user toggles (disable via window.RENDER_PROF_AUTO_DISABLED = true)
@@ -500,7 +563,7 @@ export class RenderSystem {
         if (state.ship.screenShake && state.ship.screenShake > 0) {
             shakeX = (Math.random() - 0.5) * state.ship.screenShake;
             shakeY = (Math.random() - 0.5) * state.ship.screenShake;
-            state.ship.screenShake *= state.ship.screenShakeDecay || 0.8;
+            state.ship.screenShake *= state.ship.screenShakeDecay || (GameConstants?.PHYSICS?.SCREEN_SHAKE_DECAY ?? 0.8);
             if (state.ship.screenShake < 0.5) state.ship.screenShake = 0;
         }
 
@@ -536,10 +599,12 @@ export class RenderSystem {
         // Draw damage flash overlay (screen space)
         if (state.ship.damageFlash && state.ship.damageFlash > 0) {
             withScreen(this.ctx, () => {
-                this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * 0.3})`;
+                const mult = (GameConstants?.PHYSICS?.DAMAGE_FLASH_ALPHA_MULT ?? 0.3);
+                this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * mult})`;
                 this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
             });
-            state.ship.damageFlash -= 0.05;
+            const decay = (GameConstants?.PHYSICS?.DAMAGE_FLASH_DECAY ?? 0.05);
+            state.ship.damageFlash -= decay;
             if (state.ship.damageFlash < 0) state.ship.damageFlash = 0;
         }
         
@@ -551,11 +616,15 @@ export class RenderSystem {
         const guardOn = !!(typeof window !== 'undefined' && window.RENDER_OTHER_GUARD);
         const guardActive = guardOn && this._otherGuard && this._otherGuard.frames > 0;
         let __appliedOtherGuard = false;
-        if (!guardActive) {
+        const now2 = performance.now ? performance.now() : Date.now();
+        const inBootRamp = now2 < (this._bootUntil || 0);
+        if (!guardActive && !inBootRamp) {
             this.renderMinimap(state);
             if (doProf) pmark('minimap', pnow()-t0);
         } else {
-            __appliedOtherGuard = true; // skip minimap this frame
+            // Draw a lightweight backdrop + static during boot ramp or guard frames
+            try { this.renderMinimapBackgroundOnly(); } catch(_) {}
+            __appliedOtherGuard = true; // skip minimap activity this frame
         }
         // TODO(Session 55): TargetCam strict buffer-blit
         // - TargetCamRenderer should maintain a persistent offscreen silhouette buffer
@@ -565,7 +634,7 @@ export class RenderSystem {
 
         // Screen-space HUD overlays
         try {
-            if (!guardActive) {
+            if (!guardActive && !inBootRamp) {
                 this.hud.updateContext(this.ctx, this.camera, this.screenCenter);
                 this.hud.drawPlayerHealth(state);
                 // Optional QA build tag (top-right); gated by window.HUD_SHOW_BUILD_TAG
@@ -749,7 +818,8 @@ export class RenderSystem {
                 const r = d.size || 6;
                 this.ctx.fillStyle = d.color || '#777';
                 this.ctx.strokeStyle = '#444';
-                this.ctx.lineWidth = 0.8;
+                // Scale stroke with size to avoid heavy outlines on small chunks
+                this.ctx.lineWidth = Math.max(0.4, Math.min(1.0, r * 0.08));
                 this.ctx.beginPath();
                 for (let i = 0; i < d.points.length; i++) {
                     const a = (Math.PI * 2 / d.points.length) * i;
@@ -761,6 +831,23 @@ export class RenderSystem {
                 this.ctx.closePath();
                 this.ctx.fill();
                 this.ctx.stroke();
+            } else if (d.shape === 'sliver') {
+                // Thin molten shard: 2x1 aspect, subtle warm fade
+                const w = (d.w || Math.max(2, (d.size || 3) * 2)) | 0;
+                const h = (d.h || Math.max(1, (d.size || 3))) | 0;
+                // Optional polish toggle; default color fallback when off
+                const polish = (typeof window !== 'undefined') && !!window.VFX_DEBRIS_POLISH;
+                if (polish) {
+                    // Start brighter (orange) and fade toward red/dim as t→1
+                    const warm = Math.max(0, 1 - t);
+                    const r = Math.floor(255);
+                    const g = Math.floor(140 * warm + 60 * (1 - warm));
+                    const b = Math.floor(50 * warm + 40 * (1 - warm));
+                    this.ctx.fillStyle = `rgba(${r},${g},${b},${Math.min(1, 0.9 * (1 - t*0.5))})`;
+                } else {
+                    this.ctx.fillStyle = d.color || '#aa8888';
+                }
+                this.ctx.fillRect(-w/2, -h/2, w, h);
             } else {
                 // shard: tiny triangle
                 const s = d.size || 3;
@@ -1239,6 +1326,23 @@ export class RenderSystem {
      * Clear canvas with background gradient
      */
     clearCanvas() {
+        // Cache a 1xH vertical gradient and scale blit it to avoid reconstructing every frame
+        try {
+            if (!this._bgGrad.canvas || this._bgGrad.h !== this.canvas.height) {
+                const gc = document.createElement('canvas');
+                gc.width = 1; gc.height = this.canvas.height;
+                const gctx = gc.getContext('2d');
+                const grad = gctx.createLinearGradient(0, 0, 0, gc.height);
+                grad.addColorStop(0, '#000011');
+                grad.addColorStop(1, '#000000');
+                gctx.fillStyle = grad;
+                gctx.fillRect(0, 0, 1, gc.height);
+                this._bgGrad.canvas = gc; this._bgGrad.h = this.canvas.height;
+            }
+            this.ctx.drawImage(this._bgGrad.canvas, 0, 0, 1, this._bgGrad.h, 0, 0, this.canvas.width, this.canvas.height);
+            return;
+        } catch(_) {}
+        // Fallback if offscreen fails
         const gradient = this.ctx.createLinearGradient(0, 0, 0, this.canvas.height);
         gradient.addColorStop(0, '#000011');
         gradient.addColorStop(1, '#000000');
@@ -1330,7 +1434,8 @@ export class RenderSystem {
      * Render nebula background
      */
     renderNebula() {
-        if (this.quality === 'low') return;
+        // Only draw nebula on high quality; it uses large radial gradients
+        if (this.quality !== 'high') return;
         
         this.ctx.globalAlpha = 0.03;
         
@@ -1365,9 +1470,11 @@ export class RenderSystem {
     renderStars() {
         const state = this.stateManager.state;
         if (!state.stars) return;
-        
+        if (this._starBootSkip > 0) { this._starBootSkip -= 1; return; }
+        const tick = (this._starTick = (this._starTick + 1) & 1);
+        const q = this.quality;
         // Far stars (minimal parallax)
-        for (let star of state.stars.far || []) {
+        if (q !== 'low') for (let star of state.stars.far || []) {
             const screenX = star.x - this.camera.x * 0.05;
             const screenY = star.y - this.camera.y * 0.05;
             
@@ -1378,7 +1485,7 @@ export class RenderSystem {
             this.ctx.globalAlpha = star.brightness;
             this.ctx.fillStyle = star.color || '#ffffff';
             
-            if (star.size > 2 && this.quality === 'high') {
+            if (star.size > 2 && q === 'high') {
                 this.ctx.shadowColor = star.color || '#ffffff';
                 this.ctx.shadowBlur = star.size;
                 this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
@@ -1388,8 +1495,8 @@ export class RenderSystem {
             }
         }
         
-        // Mid stars with twinkling
-        for (let star of state.stars.mid || []) {
+        // Mid stars with twinkling — draw every frame for consistency across quality (except low)
+        if (q !== 'low') for (let star of state.stars.mid || []) {
             const screenX = star.x - this.camera.x * 0.2;
             const screenY = star.y - this.camera.y * 0.2;
             
@@ -1405,8 +1512,8 @@ export class RenderSystem {
             this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
         }
         
-        // Near stars
-        for (let star of state.stars.near || []) {
+        // Near stars — draw every frame for consistency across quality (except low)
+        if (q !== 'low') for (let star of state.stars.near || []) {
             const screenX = star.x - this.camera.x * 0.4;
             const screenY = star.y - this.camera.y * 0.4;
             
@@ -1416,7 +1523,7 @@ export class RenderSystem {
             this.ctx.globalAlpha = star.brightness;
             this.ctx.fillStyle = star.color || '#ffffff';
             
-            if (star.size > 1 && this.quality === 'high') {
+            if (star.size > 1 && q === 'high') {
                 this.ctx.shadowColor = '#ffffff';
                 this.ctx.shadowBlur = 2;
                 this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
@@ -1435,8 +1542,19 @@ export class RenderSystem {
     renderPlanets(state) {
         // Get planets from state
         const planets = state.planets || [];
+        const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+        // View frustum for simple culling
+        const vx0 = this.camera.x - this.screenCenter.x - 200;
+        const vy0 = this.camera.y - this.screenCenter.y - 200;
+        const vx1 = this.camera.x + this.screenCenter.x + 200;
+        const vy1 = this.camera.y + this.screenCenter.y + 200;
         
         for (let planet of planets) {
+            // Cull planets far off-screen (with generous margin)
+            const pad = (planet.radius || 60) * 1.2;
+            if ((planet.x + pad) < vx0 || (planet.x - pad) > vx1 || (planet.y + pad) < vy0 || (planet.y - pad) > vy1) {
+                continue;
+            }
             // Use procedural planet renderer
             // If not initialized, defer heavy generation off the render thread to avoid spikes
             if (!this.planetRenderer.planetCache.has(planet.name)) {
@@ -1451,26 +1569,37 @@ export class RenderSystem {
             }
             this.planetRenderer.renderPlanet(this.ctx, planet, Date.now());
             
-            // Planet name
+            // Planet name (skip in boot ramp; skip on heavy frames; avoid blur unless high quality)
             this.ctx.save();
-            this.ctx.shadowColor = planet.color;
-            this.ctx.shadowBlur = 15;
+            const now = performance.now ? performance.now() : Date.now();
+            if (now >= (this._bootUntil || 0) && !heavy && this.quality === 'high') {
+                this.ctx.shadowColor = planet.color;
+                this.ctx.shadowBlur = (GameConstants?.UI?.PLANET_NAME_SHADOW_BLUR ?? 8);
+            } else {
+                this.ctx.shadowBlur = 0;
+            }
             this.ctx.fillStyle = '#ffffff';
             this.ctx.font = `bold ${Math.max(12, planet.radius / 8)}px 'Orbitron', monospace`;
             this.ctx.textAlign = 'center';
-            this.ctx.fillText(planet.name.toUpperCase(), planet.x, planet.y - planet.radius - 25);
+            if (now >= (this._bootUntil || 0)) {
+                const off = (GameConstants?.UI?.PLANET_NAME_OFFSET ?? 25);
+                this.ctx.fillText(planet.name.toUpperCase(), planet.x, planet.y - planet.radius - off);
+            }
             
             // Distance indicator when nearby
             const dx = state.ship.x - planet.x;
             const dy = state.ship.y - planet.y;
-            const distToPlanet = Math.sqrt(dx * dx + dy * dy);
+            const distToPlanet = MathUtils.distance(state.ship.x, state.ship.y, planet.x, planet.y);
             
-            if (distToPlanet < planet.radius * 3 && distToPlanet > planet.radius + 50) {
-                this.ctx.shadowBlur = 5;
-                this.ctx.font = '10px "JetBrains Mono", monospace';
-                this.ctx.fillStyle = planet.color;
-                const displayDist = Math.round(distToPlanet - planet.radius);
-                this.ctx.fillText(`[ ${displayDist} ]`, planet.x, planet.y - planet.radius - 10);
+            if (now >= (this._bootUntil || 0) && !heavy && this.quality !== 'low') {
+                if (distToPlanet < planet.radius * 3 && distToPlanet > planet.radius + (GameConstants?.SHIP?.LANDING_DISTANCE ?? 50)) {
+                    this.ctx.shadowBlur = 0;
+                    this.ctx.font = '10px "JetBrains Mono", monospace';
+                    this.ctx.fillStyle = planet.color;
+                    const displayDist = Math.round(distToPlanet - planet.radius);
+                    const doff = (GameConstants?.UI?.PLANET_DISTANCE_OFFSET ?? 10);
+                    this.ctx.fillText(`[ ${displayDist} ]`, planet.x, planet.y - planet.radius - doff);
+                }
             }
             
             this.ctx.restore();
@@ -1537,25 +1666,30 @@ export class RenderSystem {
         const viewTop = this.camera.y - this.screenCenter.y - 50;
         const viewRight = this.camera.x + this.screenCenter.x + 50;
         const viewBottom = this.camera.y + this.screenCenter.y + 50;
+        const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
 
         for (let pickup of pickups) {
             if (pickup.x < viewLeft || pickup.x > viewRight || pickup.y < viewTop || pickup.y > viewBottom) continue;
-            const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
-            if (this.quality === 'low') {
-                // Simple core only for low quality
+            const tnow = Date.now();
+            const pulse = Math.sin(tnow * 0.008) * 0.3 + 0.7;
+            const twinkle = 0.5 + 0.5 * Math.sin((pickup._twk || 0) + tnow * 0.02 + (pickup.x + pickup.y) * 0.01);
+            // Lazily seed sparkle phase to avoid sync
+            if (pickup._twk === undefined) pickup._twk = Math.random() * Math.PI * 2;
+            if (this.quality === 'low' || heavy) {
+                // Simple core only for low quality (smaller size)
                 this.ctx.globalAlpha = 1;
-                this.ctx.fillStyle = pickup.type === 'ore' ? '#aaa' : '#ffd700';
+                this.ctx.fillStyle = pickup.type === 'ore' ? '#bbbbbb' : '#ffd700';
                 this.ctx.beginPath();
-                this.ctx.arc(pickup.x, pickup.y, 4, 0, Math.PI * 2);
+                this.ctx.arc(pickup.x, pickup.y, 2, 0, Math.PI * 2);
                 this.ctx.fill();
             } else {
-                // Glow effect
+                // Glow effect — reduced size (≈1/3), plus subtle glitter
                 const glowGradient = this.ctx.createRadialGradient(
                     pickup.x, pickup.y, 0,
-                    pickup.x, pickup.y, 15
+                    pickup.x, pickup.y, 5
                 );
                 if (pickup.type === 'ore') {
-                    glowGradient.addColorStop(0, 'rgba(136, 136, 136, 0.8)');
+                    glowGradient.addColorStop(0, 'rgba(200, 200, 200, 0.8)');
                     glowGradient.addColorStop(1, 'transparent');
                 } else {
                     glowGradient.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
@@ -1564,14 +1698,28 @@ export class RenderSystem {
                 this.ctx.globalAlpha = pulse;
                 this.ctx.fillStyle = glowGradient;
                 this.ctx.beginPath();
-                this.ctx.arc(pickup.x, pickup.y, 15, 0, Math.PI * 2);
+                this.ctx.arc(pickup.x, pickup.y, 5, 0, Math.PI * 2);
                 this.ctx.fill();
                 // Core
                 this.ctx.globalAlpha = 1;
-                this.ctx.fillStyle = pickup.type === 'ore' ? '#888' : '#ffd700';
+                this.ctx.fillStyle = pickup.type === 'ore' ? '#dddddd' : '#ffd700';
                 this.ctx.beginPath();
-                this.ctx.arc(pickup.x, pickup.y, 5, 0, Math.PI * 2);
+                this.ctx.arc(pickup.x, pickup.y, 2, 0, Math.PI * 2);
                 this.ctx.fill();
+                // Glitter cross (tiny star) — alpha varies with twinkle
+                if (pickup.type === 'ore') {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = 0.6 * twinkle;
+                    this.ctx.strokeStyle = '#ffffff';
+                    this.ctx.lineWidth = 0.8;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(pickup.x - 3, pickup.y);
+                    this.ctx.lineTo(pickup.x + 3, pickup.y);
+                    this.ctx.moveTo(pickup.x, pickup.y - 3);
+                    this.ctx.lineTo(pickup.x, pickup.y + 3);
+                    this.ctx.stroke();
+                    this.ctx.restore();
+                }
             }
         }
     }
@@ -1603,26 +1751,31 @@ export class RenderSystem {
                 // Apply outer scale only for vector path; sprite path sizes by pixels
                 if (!canUseSprites) this.ctx.scale(npcScale * this.sizeMultiplier, npcScale * this.sizeMultiplier);
 
-            // Engine thrust effect
-            if (this.showEffects && npc.thrusting) {
+            // Engine thrust effect (suppressed during death sequence)
+            if (this.showEffects && npc.thrusting && !npc.deathSeq) {
                 const isActive = !!npc.thrusting;
-                const flicker = Math.random();
-                // Compute an effective visual scale independent of sprite/vector context scaling
+                const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
                 const typeScale = (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
-                const len = Math.max(12, npc.size * (isActive ? 1.8 : 1.2)) * typeScale; // longer when thrusting
+                const len = Math.max(12, npc.size * (isActive ? 1.8 : 1.2)) * typeScale; // length
                 const halfW = Math.max(1.5, (isActive ? 3 : 2)) * typeScale; // width
-                const g = this.ctx.createLinearGradient(-len, 0, 0, 0);
-                g.addColorStop(0, 'transparent');
-                if (!isActive) {
-                    const spd = Math.hypot(npc.vx || 0, npc.vy || 0);
-                    const idle = Math.max(0.08, Math.min(0.35, (spd * 0.6))); // ensure a faint baseline
-                    g.addColorStop(0.6, `rgba(255, 120, 40, ${0.18 * idle})`);
-                    g.addColorStop(1, `rgba(255, 200, 80, ${0.35 * idle})`);
+                if (!heavy && this.quality === 'high') {
+                    const flicker = Math.random();
+                    const g = this.ctx.createLinearGradient(-len, 0, 0, 0);
+                    g.addColorStop(0, 'transparent');
+                    if (!isActive) {
+                        const spd = Math.hypot(npc.vx || 0, npc.vy || 0);
+                        const idle = Math.max(0.08, Math.min(0.35, (spd * 0.6)));
+                        g.addColorStop(0.6, `rgba(255, 120, 40, ${0.18 * idle})`);
+                        g.addColorStop(1, `rgba(255, 200, 80, ${0.35 * idle})`);
+                    } else {
+                        g.addColorStop(0.55, `rgba(255, 120, 40, ${0.45 * flicker + 0.35})`);
+                        g.addColorStop(1, `rgba(255, 220, 100, ${0.8 * flicker + 0.2})`);
+                    }
+                    this.ctx.fillStyle = g;
                 } else {
-                    g.addColorStop(0.55, `rgba(255, 120, 40, ${0.45 * flicker + 0.35})`);
-                    g.addColorStop(1, `rgba(255, 220, 100, ${0.8 * flicker + 0.2})`);
+                    // Solid, cheaper fallback
+                    this.ctx.fillStyle = isActive ? 'rgba(255,180,90,0.6)' : 'rgba(255,160,80,0.35)';
                 }
-                this.ctx.fillStyle = g;
                 this.ctx.beginPath();
                 this.ctx.moveTo(-len, 0);
                 this.ctx.lineTo(0, -halfW);
@@ -1722,11 +1875,11 @@ export class RenderSystem {
                 if (img.complete && (img.naturalWidth || img.width)) {
                     const sw = sprite.w || img.naturalWidth || img.width;
                     const sh = sprite.h || img.naturalHeight || img.height;
-                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
                     // Match silhouette scale: include type scale and global multiplier
                     const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
                     const npcScale = scaleMap[npc.type] || 1.4;
-                    const target = Math.max(12, npc.size * 2.0 * npcScale) * qScale * this.sizeMultiplier;
+                    // Keep sprite physical size independent of quality to avoid pop after boot ramp
+                    const target = Math.max(12, npc.size * 2.0 * npcScale) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
@@ -1758,10 +1911,9 @@ export class RenderSystem {
                 }
                 if (atlas && frame && atlas.image && (atlas.image.complete || atlas.image.naturalWidth || atlas.image.width)) {
                     const sw = frame.w, sh = frame.h;
-                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
                     const scaleMap2 = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
                     const npcScale2 = scaleMap2[npc.type] || 1.4;
-                    const target = Math.max(12, npc.size * 2.0 * npcScale2) * qScale * this.sizeMultiplier;
+                    const target = Math.max(12, npc.size * 2.0 * npcScale2) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
@@ -1781,10 +1933,9 @@ export class RenderSystem {
                 if (direct && direct.complete && (direct.naturalWidth || direct.width)) {
                     const sw = direct.naturalWidth || direct.width;
                     const sh = direct.naturalHeight || direct.height;
-                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
                     const scaleMap3 = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
                     const npcScale3 = scaleMap3[npc.type] || 1.4;
-                    const target = Math.max(12, npc.size * 2.0 * npcScale3) * qScale * this.sizeMultiplier;
+                    const target = Math.max(12, npc.size * 2.0 * npcScale3) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
@@ -2052,7 +2203,8 @@ export class RenderSystem {
             // Silently fail if there's an issue with key checking
         }
         
-        if (isThrusting) {
+        // Suppress thrust FX during player death sequence
+        if (isThrusting && !state.ship.deathSeq) {
             if (this.showEffects) {
                 const flicker = Math.random();
                 const thrustGradient = this.ctx.createLinearGradient(
@@ -2110,9 +2262,8 @@ export class RenderSystem {
                 if (img.complete && (img.naturalWidth || img.width)) {
                     const sw = sprite.w || img.naturalWidth || img.width;
                     const sh = sprite.h || img.naturalHeight || img.height;
-                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
                     const playerOuterScaleEffective = 1.6; // match silhouette base
-                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective) * qScale * this.sizeMultiplier;
+                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
@@ -2143,9 +2294,8 @@ export class RenderSystem {
                 }
                 if (atlas && frame && atlas.image && (atlas.image.complete || atlas.image.naturalWidth || atlas.image.width)) {
                     const sw = frame.w, sh = frame.h;
-                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
                     const playerOuterScaleEffective2 = 1.6;
-                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective2) * qScale * this.sizeMultiplier;
+                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective2) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
@@ -2164,9 +2314,8 @@ export class RenderSystem {
                 const direct = this.getOrLoadSprite(spriteId);
                 if (direct && direct.complete && (direct.naturalWidth || direct.width)) {
                     const sw = direct.naturalWidth || direct.width, sh = direct.naturalHeight || direct.height;
-                    const qScale = this.quality === 'low' ? 0.9 : (this.quality === 'high' ? 1.1 : 1.0);
                     const playerOuterScaleEffective3 = 1.6;
-                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective3) * qScale * this.sizeMultiplier;
+                    const target = Math.max(12, ship.size * 2.0 * playerOuterScaleEffective3) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
                     this.ctx.save();
@@ -2227,8 +2376,8 @@ export class RenderSystem {
             if (spritesActive) this.ctx.restore();
         }
         
-        // Optional sprite-based flame overlay if effects atlas is available (opt-in) — draw after body
-        if (isThrusting) {
+        // Optional sprite-based flame overlay (skip during death sequence)
+        if (isThrusting && !state.ship.deathSeq) {
             const _rs = this.stateManager.state.renderSettings;
             if (_rs && _rs.useEffectsSprites) {
                 try {
@@ -2473,6 +2622,7 @@ export class RenderSystem {
      */
     renderMinimap(state) {
         if (!this.minimapCtx) return;
+        try { const now = performance.now ? performance.now() : Date.now(); if (now < (this._bootUntil||0)) return; } catch(_) {}
         try {
             const now = performance.now ? performance.now() : Date.now();
             if (!this._minimapLastTs) this._minimapLastTs = 0;
@@ -2485,8 +2635,13 @@ export class RenderSystem {
         const centerY = 50;
         const maxRadius = 45;
         
-        // Clear to transparent so CSS background shows through
-        this.minimapCtx.clearRect(0, 0, 100, 100);
+        // Clear to transparent so CSS gradient shows through
+        try {
+            const w = this.minimapCanvas.width || 100;
+            const h = this.minimapCanvas.height || 100;
+            this.minimapCtx.setTransform(1,0,0,1,0,0);
+            this.minimapCtx.clearRect(0, 0, w, h);
+        } catch(_) {}
         
         // Range circles gated by radar level (featureless at level 0)
         const radarLevel = state.ship?.radarLevel || 0;
@@ -2567,6 +2722,30 @@ export class RenderSystem {
         this.minimapCtx.closePath();
         this.minimapCtx.fill();
         this.minimapCtx.restore();
+    }
+
+    // Draw only the minimap background (used during boot ramp or guard frames)
+    renderMinimapBackgroundOnly() {
+        if (!this.minimapCtx) return;
+        try {
+            const w = this.minimapCanvas.width || 100;
+            const h = this.minimapCanvas.height || 100;
+            this.minimapCtx.setTransform(1,0,0,1,0,0);
+            // Clear to transparent to reveal CSS gradient underlay, then overlay static
+            this.minimapCtx.clearRect(0, 0, w, h);
+            // Faint range ring so panel looks active during ramp
+            try {
+                const cx = w * 0.5, cy = h * 0.5; const r = Math.min(w,h) * 0.45;
+                this.minimapCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+                this.minimapCtx.lineWidth = 1;
+                this.minimapCtx.beginPath(); this.minimapCtx.arc(cx, cy, r, 0, Math.PI*2); this.minimapCtx.stroke();
+            } catch(_) {}
+            // Optional static overlay (can be disabled via window.MINIMAP_STATIC=false or UI_PANEL_STATIC=false)
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (!(g.MINIMAP_STATIC === false || g.UI_PANEL_STATIC === false)) {
+                this._drawMinimapStatic(w, h, 0.08, 0.05);
+            }
+        } catch(_) {}
     }
     
     /**

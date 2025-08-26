@@ -21,13 +21,16 @@
             messages.push('❌ gameData.js failed: ' + e.message);
         }
         
-        // Test 2: Can we load allSystems.js?
+        // Test 2: allSystems.js (legacy) — removed
         try {
-            const module2 = await import('./js/systems/allSystems.js');
-            messages.push('✅ allSystems.js loaded');
-            messages.push(`  - Has AudioSystem: ${module2.AudioSystem ? 'Yes' : 'No'}`);
+            const useLegacy = /(?:^|[?&])legacy=1(?:&|$)/.test(window.location.search || '');
+            if (useLegacy) {
+                messages.push('⛔ Legacy bundle removed: allSystems.js');
+            } else {
+                messages.push('⏭ Legacy bundle removed; no import attempted');
+            }
         } catch(e) {
-            messages.push('❌ allSystems.js failed: ' + e.message);
+            messages.push('Info: legacy check error: ' + e.message);
         }
         
         // Test 3: Can we load proceduralPlanetRenderer.js?

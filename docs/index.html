@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/main.css">
 </head>
-<body>
+<body class="ui-light">
     <!-- Tutorial/Hint System -->
     <div id="tutorialHint"></div>
     
@@ -166,5 +166,7 @@
 
     <!-- Pure EventBus Architecture - Zero Window Globals -->
     <script type="module" src="./js/main_eventbus_pure.js"></script>
+    <!-- QA helpers (non-intrusive; exposes window.QA utilities) -->
+    <script type="module" src="./js/qaToggles.js"></script>
 </body>
 </html>

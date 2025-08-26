@@ -15,16 +15,15 @@
         try {
             messages.push('Starting module imports...');
             
-            // Import main.js
-            await import('./js/main.js');
+            // Import modular entry
+            await import('./js/main_eventbus_pure.js');
             
-            messages.push('✅ main.js loaded successfully!');
-            messages.push(`Ship exists: ${typeof window.ship !== 'undefined'}`);
-            messages.push(`Game exists: ${typeof window.game !== 'undefined'}`);
-            messages.push(`Planets: ${window.planets ? window.planets.length : 0}`);
+            messages.push('✅ main_eventbus_pure.js loaded successfully!');
+            messages.push(`eventBus present: ${!!window.refactorDebug?.eventBus}`);
+            messages.push(`stateManager present: ${!!window.refactorDebug?.stateManager}`);
             
         } catch (error) {
-            messages.push('❌ Error loading main.js:');
+            messages.push('❌ Error loading main_eventbus_pure.js:');
             messages.push(error.message);
             messages.push('Stack trace:');
             messages.push(error.stack);

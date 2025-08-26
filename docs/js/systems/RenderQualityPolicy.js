@@ -11,8 +11,9 @@ export function ringCountFor(quality, isTiny) {
 }
 
 export function sparkCountFor(quality, isTiny) {
-  if (isTiny) return 2;
-  if (quality === 'low') return 3;
-  return 8; // medium/high
+  // Higher density for a fuller debris feel
+  if (isTiny) return 5;
+  if (quality === 'low') return 8;
+  if (quality === 'medium') return 16;
+  return 24; // high
 }
-
