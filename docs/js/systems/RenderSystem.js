@@ -111,7 +111,7 @@ export class RenderSystem {
         // Preload target-cam sprite images (direct paths) to ensure availability
         this._targetCamSprites = {};
         try {
-            const ids = ['ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0'];
+            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/shuttle_1'];
             ids.forEach(id => { this._targetCamSprites[id] = this._ensureDirectSpriteImage(id); });
         } catch(_) {}
 
@@ -2293,7 +2293,7 @@ export class RenderSystem {
         const assets = this.stateManager.state.assets;
         if (rs && rs.useSprites && assets && assets.ready) {
             // Map ship class to sprite id
-            const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_0', trader:'ships/trader_0', patrol:'ships/patrol_0', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
+            const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_0', trader:'ships/trader_0', patrol:'ships/patrol_1', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
             const spriteId = state.ship.spriteId || classMap[state.ship.class] || 'ships/trader_0';
             const has = !!(assets.sprites && assets.sprites[spriteId]);
             this._dbgLog('player-try', '[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
@@ -2673,16 +2673,27 @@ export class RenderSystem {
             this._minimapLastTs = now;
         } catch(_) {}
         
-        const centerX = 50;
-        const centerY = 50;
-        const maxRadius = 45;
+        // Switch to CSS pixel coordinates and compute dynamic center/radius
+        const dpr = (this.minimapCanvas && this.minimapCanvas.__dpr) ? this.minimapCanvas.__dpr : 1;
+        const wDev = this.minimapCanvas.width || 100;
+        const hDev = this.minimapCanvas.height || 100;
+        const w = wDev / dpr;
+        const h = hDev / dpr;
+        // Ensure drawing happens in CSS pixels
+        try { this.minimapCtx.setTransform(dpr,0,0,dpr,0,0); } catch(_) {}
+        const centerX = w * 0.5;
+        const centerY = h * 0.5;
+        const maxRadius = Math.min(w, h) * 0.45;
         
         // Clear to transparent so CSS gradient shows through
         try {
-            const w = this.minimapCanvas.width || 100;
-            const h = this.minimapCanvas.height || 100;
+            const dpr = (this.minimapCanvas && this.minimapCanvas.__dpr) ? this.minimapCanvas.__dpr : 1;
+            const wDev = this.minimapCanvas.width || 100;
+            const hDev = this.minimapCanvas.height || 100;
             this.minimapCtx.setTransform(1,0,0,1,0,0);
-            this.minimapCtx.clearRect(0, 0, w, h);
+            this.minimapCtx.clearRect(0, 0, wDev, hDev);
+            // Switch to CSS pixel coordinates for drawing
+            this.minimapCtx.setTransform(dpr,0,0,dpr,0,0);
         } catch(_) {}
         
         // Range circles gated by radar level (featureless at level 0)
@@ -2690,7 +2701,7 @@ export class RenderSystem {
         if (radarLevel >= 1) {
             this.minimapCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
             this.minimapCtx.lineWidth = 1;
-            for (let r = 15; r <= 45; r += 15) {
+            for (let r = Math.min(15, maxRadius/3); r <= maxRadius; r += Math.max(15, maxRadius/3)) {
                 this.minimapCtx.beginPath();
                 this.minimapCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
                 this.minimapCtx.stroke();
@@ -2770,11 +2781,16 @@ export class RenderSystem {
     renderMinimapBackgroundOnly() {
         if (!this.minimapCtx) return;
         try {
-            const w = this.minimapCanvas.width || 100;
-            const h = this.minimapCanvas.height || 100;
+            const dpr = (this.minimapCanvas && this.minimapCanvas.__dpr) ? this.minimapCanvas.__dpr : 1;
+            const wDev = this.minimapCanvas.width || 100;
+            const hDev = this.minimapCanvas.height || 100;
+            const w = wDev / dpr;
+            const h = hDev / dpr;
             this.minimapCtx.setTransform(1,0,0,1,0,0);
-            // Clear to transparent to reveal CSS gradient underlay, then overlay static
-            this.minimapCtx.clearRect(0, 0, w, h);
+            // Clear to transparent in device pixels, then overlay static
+            this.minimapCtx.clearRect(0, 0, wDev, hDev);
+            // Switch to CSS pixel coordinates for overlay shapes
+            this.minimapCtx.setTransform(dpr,0,0,dpr,0,0);
             // Faint range ring so panel looks active during ramp
             try {
                 const cx = w * 0.5, cy = h * 0.5; const r = Math.min(w,h) * 0.45;
@@ -2785,7 +2801,7 @@ export class RenderSystem {
             // Optional static overlay (can be disabled via window.MINIMAP_STATIC=false or UI_PANEL_STATIC=false)
             const g = (typeof window !== 'undefined') ? window : globalThis;
             if (!(g.MINIMAP_STATIC === false || g.UI_PANEL_STATIC === false)) {
-                this._drawMinimapStatic(w, h, 0.08, 0.05);
+                this._drawMinimapStatic(wDev, hDev, 0.08, 0.05);
             }
         } catch(_) {}
     }
@@ -2794,25 +2810,64 @@ export class RenderSystem {
      * Handle canvas resize
      */
     handleCanvasResize(data) {
-        this.screenCenter.x = data.width / 2;
-        this.screenCenter.y = data.height / 2;
+        // Always drive through resizeCanvas to maintain DPR-correct backing stores
+        try { this.resizeCanvas(); } catch(_) {
+            // Fallback: derive CSS half-sizes if provided
+            if (data && typeof data.width === 'number' && typeof data.height === 'number') {
+                this.screenCenter.x = data.width / 2;
+                this.screenCenter.y = data.height / 2;
+            }
+        }
     }
     
     /**
      * Resize canvas
      */
     resizeCanvas() {
-        this.canvas.width = window.innerWidth;
+        // Compute DPR once, clamp to a sane range
+        const dpr = Math.max(1, Math.min((window.devicePixelRatio || 1), 3));
+        this.dpr = dpr;
+
+        // Compute CSS pixel size for main canvas
+        const cssW = Math.floor(window.innerWidth);
+        let cssH;
         try {
             const root = document.documentElement;
             const reserveStr = getComputedStyle(root).getPropertyValue('--hud-reserve').trim();
             const reserve = parseInt(reserveStr || '150', 10) || 150;
-            this.canvas.height = window.innerHeight - reserve; // Account for HUD via CSS var
+            cssH = Math.max(1, Math.floor(window.innerHeight - reserve));
         } catch (_) {
-            this.canvas.height = window.innerHeight - 150; // Fallback
+            cssH = Math.max(1, Math.floor(window.innerHeight - 150));
         }
-        this.screenCenter.x = this.canvas.width / 2;
-        this.screenCenter.y = this.canvas.height / 2;
+
+        // Set CSS size and backing store size
+        if (this.canvas) {
+            this.canvas.style.width = cssW + 'px';
+            this.canvas.style.height = cssH + 'px';
+            this.canvas.width = Math.max(1, Math.floor(cssW * dpr));
+            this.canvas.height = Math.max(1, Math.floor(cssH * dpr));
+            this.canvas.__dpr = dpr;
+            if (this.ctx) this.ctx.__dpr = dpr;
+        }
+
+        // Resize minimap and target-cam panels against their CSS sizes
+        const resizePanel = (canvas, ctx) => {
+            if (!canvas || !ctx) return;
+            const rect = canvas.getBoundingClientRect();
+            const w = Math.max(1, Math.floor(rect.width || canvas.clientWidth || canvas.width));
+            const h = Math.max(1, Math.floor(rect.height || canvas.clientHeight || canvas.height));
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            canvas.width = Math.max(1, Math.floor(w * dpr));
+            canvas.height = Math.max(1, Math.floor(h * dpr));
+            canvas.__dpr = dpr; ctx.__dpr = dpr;
+        };
+        try { resizePanel(this.minimapCanvas, this.minimapCtx); } catch(_) {}
+        try { resizePanel(this.targetCanvas, this.targetCtx); } catch(_) {}
+
+        // Screen center remains in CSS pixels
+        this.screenCenter.x = cssW / 2;
+        this.screenCenter.y = cssH / 2;
     }
     
     /**

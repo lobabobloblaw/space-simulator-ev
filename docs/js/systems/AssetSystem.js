@@ -1,5 +1,6 @@
 import { getEventBus } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { GameConstants } from '../utils/Constants.js';
 
 export default class AssetSystem {
     constructor() {
@@ -22,6 +23,8 @@ export default class AssetSystem {
             this.scheduleExplosionFlipbookLoad();
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
+            // Optional: preload planet sprites manifest (graceful fallback)
+            await this.loadPlanetSpritesManifest();
             // Prime known ship sprites so TargetCam can upgrade silhouettes quickly
             await this.loadKnownShipSprites();
             state.assets.ready = true;
@@ -61,6 +64,56 @@ export default class AssetSystem {
                 }
             });
         }
+    }
+
+    async loadPlanetSpritesManifest() {
+        try {
+            // Only attempt if sprites mode is requested via toggle or constants; always safe to no-op
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            const forcedSprites = (typeof g.USE_PLANET_SPRITES === 'boolean') ? g.USE_PLANET_SPRITES : null;
+            const mode = forcedSprites === null ? (GameConstants?.UI?.PLANETS?.MODE || 'procedural') : (forcedSprites ? 'sprites' : 'procedural');
+            if (mode !== 'sprites') return; // default procedural; preloading optional
+            const urlStr = GameConstants?.UI?.PLANETS?.SPRITES?.MANIFEST_URL || './assets/planets.json';
+            // Resolve relative to docs/ root
+            const root = new URL('../../', import.meta.url);
+            const href = new URL(urlStr.replace(/^\.\//, ''), root).href;
+            const res = await fetch(href, { cache: 'no-cache' });
+            if (!res.ok) return; // manifest optional
+            const manifest = await res.json();
+            const state = this.stateManager.state;
+            state.assets = state.assets || {};
+            state.assets.planets = state.assets.planets || {};
+            const preloadOne = async (slug, srcOverride) => {
+                const key = String(slug || '').toLowerCase().replace(/\s+/g, '_');
+                if (state.assets.planets[key] && (state.assets.planets[key].complete || state.assets.planets[key].naturalWidth)) return;
+                const img = new Image(); img.crossOrigin='anonymous'; img.decoding='async';
+                try {
+                    const src = srcOverride ? srcOverride : new URL(`assets/planets/${key}.png`, root).href;
+                    img.src = src; state.assets.planets[key] = img;
+                } catch(_) { /* ignore */ }
+            };
+            if (Array.isArray(manifest)) {
+                await Promise.allSettled(manifest.map(entry => {
+                    if (!entry) return Promise.resolve();
+                    if (typeof entry === 'string') return preloadOne(entry, null);
+                    if (typeof entry === 'object' && entry.name) return preloadOne(entry.name, entry.src||null);
+                    return Promise.resolve();
+                }));
+            } else if (manifest && typeof manifest === 'object') {
+                // { name: src } map or { planets: [...] }
+                if (Array.isArray(manifest.planets)) {
+                    await Promise.allSettled(manifest.planets.map(e => {
+                        if (!e) return Promise.resolve();
+                        if (typeof e === 'string') return preloadOne(e, null);
+                        if (typeof e === 'object' && e.name) return preloadOne(e.name, e.src||null);
+                        return Promise.resolve();
+                    }));
+                } else {
+                    const entries = Object.entries(manifest);
+                    await Promise.allSettled(entries.map(([name, src]) => preloadOne(name, src)));
+                }
+            }
+        } catch(_) { /* optional */ }
     }
 
     async loadSpritesManifest() {
@@ -175,7 +228,7 @@ export default class AssetSystem {
 
     async loadKnownShipSprites() {
         try {
-            const ids = ['ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0'];
+            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/shuttle_1'];
             const state = this.stateManager.state;
             state.assets = state.assets || {};
             const sprites = state.assets.sprites || (state.assets.sprites = {});

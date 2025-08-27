@@ -131,6 +131,8 @@ function initShip(state, shipData) {
         pirateKills: shipData?.pirateKills ?? 0
     };
     state.ship.faction = state.ship.faction || 'civilian';
+    // Player-only sprite override (keeps NPC mappings unchanged). Respects saved spriteId.
+    try { if (!state.ship.spriteId) state.ship.spriteId = 'ships/shuttle_1'; } catch(_) {}
     state.camera = { x: 0, y: 0 };
     state.paused = false;
     state.gameTime = 0;
@@ -912,11 +914,12 @@ async function initGame() {
 window.addEventListener('resize', () => {
     const canvas = document.getElementById('gameCanvas');
     if (canvas) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight - 150;
+        // Emit CSS pixel dimensions; RenderSystem will size backing stores by DPR
+        let reserve = 150;
+        try { const root = document.documentElement; const rs = getComputedStyle(root).getPropertyValue('--hud-reserve').trim(); reserve = parseInt(rs || '150', 10) || 150; } catch(_) {}
         eventBus.emit('canvas.resize', {
-            width: canvas.width,
-            height: canvas.height
+            width: window.innerWidth,
+            height: window.innerHeight - reserve
         });
     }
 });

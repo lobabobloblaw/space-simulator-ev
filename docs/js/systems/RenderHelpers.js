@@ -3,7 +3,8 @@
 export function withScreen(ctx, fn) {
   ctx.save();
   try {
-    if (ctx.setTransform) ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const dpr = (ctx && ctx.canvas && ctx.canvas.__dpr) ? ctx.canvas.__dpr : 1;
+    if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     fn();
   } finally {
     ctx.restore();
@@ -13,6 +14,8 @@ export function withScreen(ctx, fn) {
 export function withWorld(ctx, camera, screenCenter, fn, shakeX = 0, shakeY = 0) {
   ctx.save();
   try {
+    const dpr = (ctx && ctx.canvas && ctx.canvas.__dpr) ? ctx.canvas.__dpr : 1;
+    if (ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const tx = screenCenter.x - camera.x + shakeX;
     const ty = screenCenter.y - camera.y + shakeY;
     ctx.translate(tx, ty);

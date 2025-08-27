@@ -119,7 +119,7 @@ export default class TargetCamRenderer {
 
     // Prewarm direct PNGs to make auto path prefer correct orientation quickly
     try {
-      const ids = ['ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0'];
+      const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/shuttle_1'];
       ids.forEach(id => { try { this.getOrLoadSprite(id); } catch(_) {} });
     } catch(_) {}
 
@@ -142,14 +142,17 @@ export default class TargetCamRenderer {
       if (nowTs - (this._lastRenderTs||0) < throttle) return;
       this._lastRenderTs = nowTs;
     } catch(_) {}
-    const w = this.canvas.width || 100;
-    const h = this.canvas.height || 100;
+    const dpr = (this.canvas && this.canvas.__dpr) ? this.canvas.__dpr : 1;
+    const wDev = this.canvas.width || 100;
+    const hDev = this.canvas.height || 100;
+    const wCss = wDev / dpr;
+    const hCss = hDev / dpr;
     try { this.ctx.setTransform(1,0,0,1,0,0); } catch(_) {}
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
     this.ctx.imageSmoothingEnabled = false;
-    // Clear to transparent so CSS gradient underlay shows
-    this.ctx.clearRect(0,0,w,h);
+    // Clear to transparent so CSS gradient underlay shows (device pixels)
+    this.ctx.clearRect(0,0,wDev,hDev);
 
     // Target resolve + transition
     let targetId = state.targeting?.selectedId || null;
@@ -189,12 +192,14 @@ export default class TargetCamRenderer {
     const ctx = this.ctx;
     ctx.save();
     try {
-      const cx = w/2, cy = h/2;
+      // Switch to CSS pixel coordinates for drawing
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      const cx = wCss/2, cy = hCss/2;
       ctx.translate(cx, cy);
       // Direction ring/wedge
       let ang = 0;
       if (npc) { const dx = npc.x - state.ship.x, dy = npc.y - state.ship.y; ang = Math.atan2(dy, dx); }
-      const radius = Math.min(w,h) * 0.5 - 4;
+      const radius = Math.min(wCss,hCss) * 0.5 - 4;
       ctx.save();
       let ringAlpha = 0.25;
       if (this.targetCamTransition) {
@@ -280,7 +285,7 @@ export default class TargetCamRenderer {
       }
 
       if (shipDead) {
-        ctx.save(); try { ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=0.65; ctx.fillStyle='#9cc'; ctx.font='10px VT323, monospace'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('OFFLINE', w/2, h/2); } finally { ctx.restore(); }
+        ctx.save(); try { ctx.setTransform(1,0,0,1,0,0); ctx.globalAlpha=0.65; ctx.fillStyle='#9cc'; ctx.font='10px VT323, monospace'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('OFFLINE', wDev/2, hDev/2); } finally { ctx.restore(); }
       }
 
       // Transitional static when offline (no target) or silhouette suppressed (warm-up/hold)
@@ -294,12 +299,12 @@ export default class TargetCamRenderer {
         const g = (typeof window !== 'undefined') ? window : globalThis;
         const staticOn = !(g.TC_STATIC === false || g.UI_PANEL_STATIC === false);
         if (needStatic && staticOn) {
-          this.drawStaticNoise(w, h, 0.08);
-          this.drawScanlines(w, h, 0.05);
-        }
-      } catch(_) {}
+          this.drawStaticNoise(wDev, hDev, 0.08);
+          this.drawScanlines(wDev, hDev, 0.05);
+      }
+    } catch(_) {}
 
-      if (fxEnabled && fxActive) { this.drawStaticNoise(w,h,0.05,true); this.drawRollingBand(w,h,0.06); }
+      if (fxEnabled && fxActive) { this.drawStaticNoise(wDev,hDev,0.05,true); this.drawRollingBand(wDev,hDev,0.06); }
       // Optional path label
       if (!((typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24)) && window.TC_SHOW_PATH && this._lastPath) {
         try { const sctx = this.ctx; sctx.save(); sctx.setTransform(1,0,0,1,0,0); sctx.globalAlpha=0.85; sctx.fillStyle='#9cf'; sctx.font='10px VT323, monospace'; sctx.fillText(String(this._lastPath).toUpperCase(), 6, 12); sctx.restore(); } catch(_) {}

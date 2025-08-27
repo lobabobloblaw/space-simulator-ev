@@ -1,6 +1,7 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
+import ShipCatalog from './ShipCatalog.js';
 
 /**
  * SpawnSystem - Handles spawning of NPCs, asteroids, and pickups
@@ -68,6 +69,18 @@ export class SpawnSystem {
             }
         };
         
+        // Annotate templates with standardized metadata (no feel changes)
+        try {
+            for (const [t, tpl] of Object.entries(this.npcTypes)) {
+                const meta = ShipCatalog.get(t);
+                if (tpl && meta) {
+                    if (!tpl.class) tpl.class = meta.class;
+                    if (typeof tpl.nominalSize === 'undefined') tpl.nominalSize = meta.nominalSize;
+                    if (typeof tpl.spriteScale === 'undefined') tpl.spriteScale = meta.spriteScale;
+                }
+            }
+        } catch(_) {}
+
         // Spawn weights
         this.spawnWeights = {
             freighter: 0.25,

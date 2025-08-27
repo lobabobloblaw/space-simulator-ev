@@ -4,7 +4,7 @@
 export const typeToSpriteId = {
   pirate: 'ships/pirate_0',
   trader: 'ships/trader_0',
-  patrol: 'ships/patrol_0',
+  patrol: 'ships/patrol_1',
   freighter: 'ships/freighter_0',
   interceptor: 'ships/interceptor_0',
   shuttle: 'ships/shuttle_0',

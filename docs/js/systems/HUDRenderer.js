@@ -22,7 +22,8 @@ export default class HUDRenderer {
     try {
       if (!(typeof window !== 'undefined' && window.HUD_SHOW_BUILD_TAG)) return;
       const ctx = this.ctx;
-      const w = (ctx && ctx.canvas && ctx.canvas.width) ? ctx.canvas.width : 0;
+      const dpr = (ctx && ctx.canvas && ctx.canvas.__dpr) ? ctx.canvas.__dpr : 1;
+      const w = (ctx && ctx.canvas && ctx.canvas.width) ? (ctx.canvas.width / dpr) : 0;
       const margin = 6;
       let tag = (typeof window.HUD_BUILD_TAG === 'string' && window.HUD_BUILD_TAG.length)
         ? window.HUD_BUILD_TAG

@@ -393,9 +393,10 @@ export class InputSystem {
         const canvas = document.getElementById('gameCanvas');
         if (!canvas) return null;
         
-        // Normalize to 0-1 range
-        const nx = x / canvas.width;
-        const ny = y / canvas.height;
+        // Normalize to 0-1 range in CSS pixels (account for DPR)
+        const dpr = (canvas && canvas.__dpr) ? canvas.__dpr : 1;
+        const nx = x / (canvas.width / dpr);
+        const ny = y / (canvas.height / dpr);
         
         // Check each zone
         for (const [name, zone] of Object.entries(this.touchZones)) {
