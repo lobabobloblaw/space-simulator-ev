@@ -42,3 +42,24 @@ This document covers NPC spawn/despawn behavior, post‑death damping, and warp 
   - Adds `ore` to cargo if space; otherwise grants small credits (§+10).
 - Helpers in `SpawnSystem`: `_emitOreDrops`, `_emitAsteroidShards`, `_emitAsteroidChunks`, `_emitSliverDebris`, `_getAsteroidTier`, `_spawnChildAsteroids`.
 - Optional VFX polish (OFF by default): `window.VFX_DEBRIS_POLISH = true` adds occasional thin molten sliver debris.
+
+## Constants (Session 64 consolidation)
+
+- Tier thresholds and yields are centralized in `GameConstants.WORLD.ASTEROIDS`:
+  - `THRESHOLDS.{LARGE_MIN_RADIUS, MEDIUM_MIN_RADIUS}`
+  - `CHILD_COUNTS.{large, medium, small}`
+  - `FRAGMENT_SHRINK`
+  - `ORE_YIELDS.{large, medium, small}`
+- Pickup lifetimes and visuals:
+  - `GameConstants.EFFECTS.PICKUP_LIFETIME`
+  - `GameConstants.EFFECTS.PICKUPS` (sizes, glitter cadence; used by RenderSystem)
+
+### Debris tuning
+
+- `GameConstants.EFFECTS.DEBRIS` centralizes asteroid breakup debris defaults:
+  - `SHARDS` — count, speed range, size range, rotation range, lifetime range.
+  - `CHUNKS` — count, speed range, size range, rotation range, polygon sides, lifetime range.
+  - `SLIVERS` — speed/lifetime ranges for optional molten slivers.
+  - `POLISH` — warm color ramp parameters (applied only when `window.VFX_DEBRIS_POLISH===true`).
+
+When `VFX_DEBRIS_POLISH` is enabled, the warm molten fade/color ramp also applies to regular shards (not just slivers). Defaults match prior visuals when the toggle is OFF.

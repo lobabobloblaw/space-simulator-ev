@@ -58,7 +58,27 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 
 - ExplosionRenderer: Uses flipbook if available, otherwise synthesized puffs.
 - ThrusterFXRenderer: Optional flame overlay from effects atlas; controlled by `render.useEffectsSprites`.
-- Ore pickups (Session 63): smaller core/glow (~1/3 previous size) with a subtle glitter cross. Low‑quality path draws only a tiny core. These are screen‑space HUD draws in `renderPickups()`.
+- Ore pickups (Session 63/64): visuals are driven by `GameConstants.EFFECTS.PICKUPS` (core/glow radii, glitter size/alpha/line width) and `PICKUP_PULSE_SPEED`. Low‑quality path draws only a tiny core. These are drawn in world space inside `withWorld()` by `renderPickups()`.
+
+## Planets
+
+- Renderer selection is gated via `GameConstants.UI.PLANETS.MODE` (default `'procedural'`).
+- Modes:
+  - `procedural`: uses `ProceduralPlanetRenderer` (noise‑based with caching).
+  - `sprites`: uses `PlanetSpriteRenderer` (draws preloaded images; falls back to a shaded disc if not ready).
+- QA override: `window.USE_PLANET_SPRITES = true|false` forces mode at runtime.
+- Asset path convention for sprites: `assets/planets/<slug>.png` (slug = lowercased planet name with spaces → `_`).
+
+## HiDPI/Retina Notes
+
+- Current state: canvases are initialized at CSS pixel resolution. On HiDPI (e.g., macOS Retina), this can produce slight blur because the canvas backing store is not scaled by `devicePixelRatio`.
+- Planned update (safe, minimal):
+  - On init and resize, set canvas.width/height to `clientSize * dpr`; keep CSS size unchanged.
+  - Apply a global `ctx.scale(dpr, dpr)` inside `withScreen` and `withWorld` before other transforms, so all world/screen math remains in CSS pixels.
+  - Keep the “no scaling for pixel sprites” rule for asset sizing logic; the DPR scale is a physical backing‑store scale, not a per‑sprite transform.
+  - Ensure `imageSmoothingEnabled=false` for pixel art layers to preserve crisp edges.
+  - Extend to sub‑canvases (minimap, TargetCam) similarly.
+  - Verify HUD text sizes still look correct (CSS pixels remain the logical units).
 
 ## Quality & Boot Ramp (Session 59/62)
 

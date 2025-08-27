@@ -7,7 +7,7 @@ Notifications are surfaced via the `UI_MESSAGE` event and are rendered by `UISys
 - Console line (default): Messages mirror into the tiny readout at `#tutorialHint` (bottom‑left). This area fades in/out and is used instead of the old “WEAPONS OFFLINE/ONLINE” banners, which are now suppressed.
 - Toasts (disabled by default): The floating top notifications are disabled to reduce noise. Re‑enable temporarily via `window.UI_TOASTS = true` for QA.
 - Queue (when toasts enabled): Messages are queued and displayed sequentially to avoid stacking overlaps ("rolodex" feel).
-- Timing: Each message displays for its specified duration (default ~2000ms) and then fades out before the next shows (small inter‑message gap ~120ms).
+- Timing: Each message displays for its specified duration (default ~2000ms) and then fades out before the next shows (small inter‑message gap ~120ms). The tiny console readout duration is governed by `GameConstants.UI.CONSOLE_MESSAGE_MS` (default ~1200ms) and is used for concise player feedback like pickups.
 - Types: `info`, `success`, `error` (styled via border‑left accent).
 
 ## Usage

@@ -210,7 +210,7 @@ export class SpawnSystem {
                     type: Math.random() < 0.5 ? 'credits' : 'ore',
                     value: Math.random() < 0.5 ? 10 : 25,
                     lifetime: 0,
-                    maxLifetime: 600
+                    maxLifetime: (GameConstants?.EFFECTS?.PICKUP_LIFETIME ?? 600)
                 };
                 
                 state.pickups.push(pickup);
@@ -257,12 +257,9 @@ export class SpawnSystem {
     _emitOreDrops(state, asteroid) {
         try {
             if (!state.pickups) state.pickups = [];
-            const oreDrops = (() => {
-                const tier = this._getAsteroidTier(asteroid);
-                if (tier === 'large') return 2;   // largest yield more slivers
-                if (tier === 'medium') return 1;  // smaller release
-                return 1;                          // smallest always 1
-            })();
+            const tier = this._getAsteroidTier(asteroid);
+            const yields = (GameConstants?.WORLD?.ASTEROIDS?.ORE_YIELDS) || { large: 2, medium: 1, small: 1 };
+            const oreDrops = tier === 'large' ? (yields.large||2) : tier === 'medium' ? (yields.medium||1) : (yields.small||1);
             for (let j = 0; j < oreDrops; j++) {
                 const angle = (Math.PI * 2 / oreDrops) * j;
                 const pickup = {
@@ -272,7 +269,7 @@ export class SpawnSystem {
                     vy: Math.sin(angle) * 0.5 + asteroid.vy * 0.5,
                     type: 'ore',
                     lifetime: 0,
-                    maxLifetime: 600
+                    maxLifetime: (GameConstants?.EFFECTS?.PICKUP_LIFETIME ?? 600)
                 };
                 state.pickups.push(pickup);
             }
@@ -280,42 +277,50 @@ export class SpawnSystem {
     }
 
     _emitAsteroidShards(state, asteroid) {
-        const shardCount = 6 + Math.floor(Math.random() * 6); // 6–11 shards
+        const DC = (GameConstants?.EFFECTS?.DEBRIS?.SHARDS) || {};
+        const cmin = DC.COUNT_MIN ?? 6;
+        const cmax = DC.COUNT_MAX ?? 11;
+        const shardCount = Math.max(cmin, Math.min(cmax, cmin + Math.floor(Math.random() * ((cmax - cmin + 1) || 1))));
         for (let i = 0; i < shardCount; i++) {
             const d = state.pools.debris.pop() || {};
             d.x = asteroid.x; d.y = asteroid.y;
             const ang = Math.random() * Math.PI * 2;
-            const spd = 0.6 + Math.random() * 1.2;
+            const spd = (DC.SPEED_MIN ?? 0.6) + Math.random() * ((DC.SPEED_MAX ?? 1.8) - (DC.SPEED_MIN ?? 0.6));
             d.vx = Math.cos(ang) * spd + asteroid.vx * 0.3;
             d.vy = Math.sin(ang) * spd + asteroid.vy * 0.3;
             d.angle = Math.random() * Math.PI * 2;
-            d.va = (Math.random()-0.5) * 0.15;
-            d.size = 2 + Math.random()*3;
+            d.va = (Math.random()-0.5) * (DC.ROT_SPEED_RANGE ?? 0.15);
+            d.size = (DC.SIZE_MIN ?? 2) + Math.random() * (((DC.SIZE_MAX ?? 5) - (DC.SIZE_MIN ?? 2)));
             d.color = ['#999','#aaa','#888','#777'][Math.floor(Math.random()*4)];
             d.lifetime = 0;
-            d.maxLifetime = 50 + Math.floor(Math.random()*30);
+            d.maxLifetime = (DC.LIFETIME_MIN ?? 50) + Math.floor(Math.random() * (DC.LIFETIME_RANGE ?? 30));
             d.shape = 'shard';
             state.debris.push(d);
         }
     }
 
     _emitAsteroidChunks(state, asteroid) {
-        const chunkCount = 3 + Math.floor(Math.random() * 4); // 3–6 small rock chunks
+        const DC = (GameConstants?.EFFECTS?.DEBRIS?.CHUNKS) || {};
+        const cmin = DC.COUNT_MIN ?? 3;
+        const cmax = DC.COUNT_MAX ?? 6;
+        const chunkCount = Math.max(cmin, Math.min(cmax, cmin + Math.floor(Math.random() * ((cmax - cmin + 1) || 1))));
         for (let i = 0; i < chunkCount; i++) {
             const d = state.pools.debris.pop() || {};
             d.x = asteroid.x; d.y = asteroid.y;
             const ang = Math.random() * Math.PI * 2;
-            const spd = 0.4 + Math.random() * 1.0;
+            const spd = (DC.SPEED_MIN ?? 0.4) + Math.random() * ((DC.SPEED_MAX ?? 1.4) - (DC.SPEED_MIN ?? 0.4));
             d.vx = Math.cos(ang) * spd + asteroid.vx * 0.25;
             d.vy = Math.sin(ang) * spd + asteroid.vy * 0.25;
             d.angle = Math.random() * Math.PI * 2;
-            d.va = (Math.random()-0.5) * 0.12;
-            d.size = 3 + Math.random() * 4;
+            d.va = (Math.random()-0.5) * (DC.ROT_SPEED_RANGE ?? 0.12);
+            d.size = (DC.SIZE_MIN ?? 3) + Math.random() * (((DC.SIZE_MAX ?? 7) - (DC.SIZE_MIN ?? 3)));
             d.color = ['#888','#777','#666'][Math.floor(Math.random()*3)];
             d.lifetime = 0;
-            d.maxLifetime = 80 + Math.floor(Math.random()*40);
+            d.maxLifetime = (DC.LIFETIME_MIN ?? 80) + Math.floor(Math.random() * (DC.LIFETIME_RANGE ?? 40));
             d.shape = 'poly';
-            const sides = 5 + Math.floor(Math.random()*3);
+            const smin = DC.SIDES_MIN ?? 5;
+            const srange = DC.SIDES_RANGE ?? 3;
+            const sides = smin + Math.floor(Math.random() * srange);
             d.points = [];
             for (let j=0;j<sides;j++){ d.points.push(0.6 + Math.random()*0.6); }
             state.debris.push(d);
@@ -323,10 +328,11 @@ export class SpawnSystem {
     }
 
     _emitSliverDebris(state, asteroid) {
+        const DC = (GameConstants?.EFFECTS?.DEBRIS?.SLIVERS) || {};
         const d = state.pools.debris.pop() || {};
         d.x = asteroid.x; d.y = asteroid.y;
         const ang = Math.random() * Math.PI * 2;
-        const spd = 0.8 + Math.random() * 1.4; // slightly faster ejecta
+        const spd = (DC.SPEED_MIN ?? 0.8) + Math.random() * ((DC.SPEED_MAX ?? 2.2) - (DC.SPEED_MIN ?? 0.8));
         d.vx = Math.cos(ang) * spd + asteroid.vx * 0.25;
         d.vy = Math.sin(ang) * spd + asteroid.vy * 0.25;
         d.angle = Math.random() * Math.PI * 2;
@@ -337,23 +343,25 @@ export class SpawnSystem {
         d.h = Math.max(1, Math.round(base));
         d.color = '#cc8855';
         d.lifetime = 0;
-        d.maxLifetime = 45 + Math.floor(Math.random() * 25);
+        d.maxLifetime = (DC.LIFETIME_MIN ?? 45) + Math.floor(Math.random() * (DC.LIFETIME_RANGE ?? 25));
         d.shape = 'sliver';
         state.debris.push(d);
     }
 
     _getAsteroidTier(asteroid) {
         const r = Math.max(0, asteroid?.radius || 0);
-        if (r >= 8) return 'large';
-        if (r >= 5) return 'medium';
+        const th = (GameConstants?.WORLD?.ASTEROIDS?.THRESHOLDS) || { LARGE_MIN_RADIUS: 8, MEDIUM_MIN_RADIUS: 5 };
+        if (r >= th.LARGE_MIN_RADIUS) return 'large';
+        if (r >= th.MEDIUM_MIN_RADIUS) return 'medium';
         return 'small';
     }
 
     _spawnChildAsteroids(state, asteroid) {
         const tier = this._getAsteroidTier(asteroid);
         if (tier === 'small') return; // terminal tier
-        const count = (tier === 'large') ? 3 : 2;
-        const shrink = 0.55;
+        const cc = (GameConstants?.WORLD?.ASTEROIDS?.CHILD_COUNTS) || { large: 3, medium: 2, small: 0 };
+        const count = (tier === 'large') ? (cc.large||3) : (cc.medium||2);
+        const shrink = (GameConstants?.WORLD?.ASTEROIDS?.FRAGMENT_SHRINK ?? 0.55);
         for (let j = 0; j < count; j++) {
             const angle = Math.random() * Math.PI * 2;
             // Generate unique shape for fragment
@@ -408,15 +416,27 @@ export class SpawnSystem {
             const hasSpace = Array.isArray(ship.cargo) && ship.cargo.length < (ship.cargoCapacity || 10);
             if (hasSpace) {
                 ship.cargo.push({ type: 'ore' });
-                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Ore +1 (cargo)', type: 'success', duration: 1200 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                    message: 'ORE +1',
+                    type: 'success',
+                    duration: (GameConstants?.UI?.CONSOLE_MESSAGE_MS ?? 1200)
+                });
             } else {
                 // Minimal fallback credit; keep small to avoid balance shifts
                 ship.credits = (ship.credits || 0) + 10;
-                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Cargo full — §+10', type: 'info', duration: 1200 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                    message: 'CARGO FULL — §+10',
+                    type: 'info',
+                    duration: (GameConstants?.UI?.CONSOLE_MESSAGE_MS ?? 1200)
+                });
             }
         } else if (pickup.type === 'credits') {
             ship.credits = (ship.credits || 0) + (pickup.value || 10);
-            this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `§+${pickup.value||10}`, type: 'success', duration: 1200 });
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `§+${pickup.value||10}`,
+                type: 'success',
+                duration: (GameConstants?.UI?.CONSOLE_MESSAGE_MS ?? 1200)
+            });
         }
     }
     
@@ -800,7 +820,33 @@ export class SpawnSystem {
             spawnEffect = 'arrive';
         }
         
-        // Create warp effect at spawn location if appropriate (with pooling)
+        // Create NPC (ensure collection exists first)
+        const state2 = this.stateManager.state;
+        if (!state2.npcShips) state2.npcShips = [];
+        state2.nextEntityId = state2.nextEntityId || 1;
+        const npc = {
+            id: state2.nextEntityId++,
+            x: spawnX,
+            y: spawnY,
+            vx: initialVx,
+            vy: initialVy,
+            angle: (() => { const a = Math.atan2(initialVy || 0.0001, initialVx || 0.0001); return Number.isFinite(a) ? a : 0; })(),
+            type: type,
+            ...template,
+            targetPlanet: (type === 'trader' || type === 'freighter') ? 
+                state.planets[Math.floor(Math.random() * state.planets.length)] : null,
+            weaponCooldown: 0,
+            lifetime: 0,
+            thrusting: false
+        };
+        
+        // Add to state
+        state.npcShips.push(npc);
+        
+        // Emit spawn event
+        this.eventBus.emit(GameEvents.NPC_SPAWN, { npc, type });
+        
+        // Create warp effect at spawn location (after NPC exists)
         if (state.warpEffects && spawnEffect) {
             if (!state.pools) state.pools = {};
             if (!state.pools.warpEffects) state.pools.warpEffects = [];
@@ -817,31 +863,6 @@ export class SpawnSystem {
             }
             state.warpEffects.push(effect);
         }
-        
-        // Create NPC
-        const state2 = this.stateManager.state;
-        state2.nextEntityId = state2.nextEntityId || 1;
-        const npc = {
-            id: state2.nextEntityId++,
-            x: spawnX,
-            y: spawnY,
-            vx: initialVx,
-            vy: initialVy,
-            angle: Math.atan2(initialVy, initialVx),
-            type: type,
-            ...template,
-            targetPlanet: (type === 'trader' || type === 'freighter') ? 
-                state.planets[Math.floor(Math.random() * state.planets.length)] : null,
-            weaponCooldown: 0,
-            lifetime: 0,
-            thrusting: false
-        };
-        
-        // Add to state
-        state.npcShips.push(npc);
-        
-        // Emit spawn event
-        this.eventBus.emit(GameEvents.NPC_SPAWN, { npc, type });
         
         try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log(`[SpawnSystem] Spawned ${type} NPC`); } catch(_) {}
     }

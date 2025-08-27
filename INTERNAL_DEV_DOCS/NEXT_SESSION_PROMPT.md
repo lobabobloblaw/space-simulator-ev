@@ -1,71 +1,61 @@
-# Next Session Prompt — Constants Sweep + VFX Polish (Session 62)
+# Next Session Prompt — HiDPI + Planet Sprites + Ship Standardization (Session 65)
 
 Use this prompt verbatim (or trim) to kick off the next session. It’s aligned with our internal playbook and cadence.
 
 ---
 
-Architecture
-- EventBus‑only communication; all mutable state in `StateManager.state`.
-- Rendering hygiene: world via `withWorld`; HUD/overlays via `withScreen`; strict save/restore; reset transforms; no context scaling for pixel sprites.
-- TargetCam: `TargetCamRenderer.js` is the single owner. Deterministic, upgrade‑only path (direct → preloaded → standalone → atlas → baseline). Warm‑up (~450ms; `TC_WARM_MS`) suppresses atlas/baseline; strict buffer‑blit.
-- Assets: `AssetSystem` owns atlases and standalone sprite preloads. Systems consume via helpers.
-- Diagnostics: OFF by default. Use briefly for QA only.
+Context
+- Architecture: EventBus-only comms; state in `StateManager.state`. Render hygiene: world via `withWorld`, HUD via `withScreen`, strict save/restore.
+- TargetCam: deterministic, upgrade-only path (direct → preloaded → standalone → atlas → baseline); warm-up gate (~450ms; `TC_WARM_MS`); strict buffer‑blit.
+- Assets: `AssetSystem` owns atlases and sprite preloads. Helpers: `getFrameCanvasFromState`, `getPlanetSpriteFromState`.
+- Diagnostics: OFF by default; keep QA toggles opt-in.
 
-What’s Landed (Latest)
-- Legacy: Removed monolithic `allSystems.js` path; demo/backup pages load modular entry.
-- Initialization: `initializeGameState()` split into helpers; behavior unchanged.
-- TargetCam: Warm‑up + deterministic source; consumes `getFrameCanvasFromState`; buffer‑blit maintained.
-- Thrusters: Suppressed FX during `deathSeq` (player/NPC) to remove linger.
-- Explosions: Smaller 1x1 sparks with stable angles; warmer color; density via `sparkCountFor()` (tiny 5, low 8, med 16, high 24).
-- NPC: Patrol warning/forgiveness durations pulled from `GameConstants.NPC`.
-- Constants Sweep: Centralized TargetCam/NPC/Spawn/UI/Weapons/Physics tunables (defaults unchanged).
-- Rendering stability: Removed quality-based sprite size scaling; starfield cadence consistent across medium/high (no boot pop).
-- Perf hygiene: Weapon logs gated; debug damage numbers only when overlay wants them.
+What’s Landed (Session 64)
+- Constants: Added `WORLD.ASTEROIDS`, `EFFECTS.PICKUPS`, `EFFECTS.DEBRIS`, `UI.CONSOLE_MESSAGE_MS`.
+- Debris: molten fade extended to shards when `VFX_DEBRIS_POLISH` is ON.
+- Spawn fix: create NPC before warp effect; added guards.
+- Exhaust FX: removed early-session plume pop (gradient on medium/high).
+- Planet sprites scaffolding: `PlanetSpriteRenderer` with mode switch in `UI.PLANETS.MODE` (default procedural), QA override `window.USE_PLANET_SPRITES`.
+- Ship scales: centralized `SHIP.TYPE_SPRITE_SCALE`; scaffolding for `SHIP.CLASSES`.
 
 Primary Goals (This Session)
-- Constants sweep (no behavior changes):
-  - TargetCam timings (warm‑up, frame throttle, build gating, transitions).
-  - NPC engage distances + message cooldowns; replace literals with `GameConstants.NPC`.
-  - Spawn cooldowns (same‑type, pirate suppress) and small death pauses.
-  - UI radio timings and speed readout cadence; landscape fetch timeout.
-  - Weapon recoil bloom and projectile lifetimes; muzzle‑flash lifetimes/soft‑cap.
-  - Physics: world bounds alias + heavy collision warning threshold; landing clear distance.
-- Optional VFX polish:
-  - Tune asteroid‑break shard sizes/density to align with new debris feel.
-  - Consider occasional 2x1 “sliver” shards or fade‑to‑red for molten debris.
-- Optional helper:
-  - Thin wrapper for TargetCam to consume `AssetSystem.getFrameCanvasFromState` (future use), keeping behavior identical.
+1) HiDPI crispness:
+   - Implement DPR-aware canvases (main/minimap/TargetCam): size backing store by `devicePixelRatio`; integrate a global scale into `withWorld`/`withScreen`.
+   - Verify no change to gameplay units; maintain “no per-sprite context scale”.
+   - Keep pixel sprites unsmoothed; allow smoothing where appropriate (planets).
+2) Planet sprite pipeline:
+   - Optional manifest preloading for planets; robust fallback handling; doc asset naming/radius guidance.
+3) Ship standardization:
+   - Introduce `ShipCatalog` (optional) mapping type→class→nominal sizes + default scales.
+   - Wire `SpawnSystem` templates to read from catalog (behind defaults; no feel change).
+4) QA + docs:
+   - Verify crispness on Retina; document asset sizing guidelines; update handoff and internal docs.
 
-Constraints / Guidelines
-- Keep changes surgical; no behavior changes when centralizing constants.
-- Keep diagnostics OFF by default; do not alter default toggles.
-- Do not refactor unrelated systems; only replace literals with constants where clearly intended.
+Constraints
+- Keep changes surgical; no feel changes.
+- Diagnostics OFF by default.
+- Follow existing rendering hygiene; only adapt where necessary (DPR).
 
 Acceptance Criteria
-- All selected literals replaced with `GameConstants.*` entries; defaults match current values.
-- Game behavior unchanged (QA spot check: TargetCam, spawn damping, UI radio, weapon lifetimes). No ship size or star brightness pop at boot.
-- Build runs without warnings; docs updated to reflect new constants.
+- Retina displays render crisp: no soft blur from DPR mismatch; HUD sizes remain correct.
+- Planet sprites draw via mode switch with graceful fallback; procedural unchanged by default.
+- Ship size/scale references centralized; existing maps and values preserved.
 
-Verification Steps
-1) Serve locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
-2) Clear QA toggles: `await import('./js/qaToggles.js'); QA.reset(); QA.canvas2d();`.
-3) Sanity passes:
-   - TargetCam: cycle with `X` (warm‑up honored; label via `QA.tcInspect(6)` briefly).
-   - Spawn: kill varied NPCs; observe damping; pirates not replacing instantly.
-   - UI: radio scan/lock feels unchanged; speed readout cadence ~3 Hz.
-   - Weapons: projectile lifetimes unchanged by feel (rapid/plasma/mining); muzzle flash still brief.
-4) Grep for remaining literals (durations/distances) after sweep and log follow‑ups.
+Toggles
+- `window.USE_PLANET_SPRITES = true|false` — force planet mode (default procedural).
+- `window.VFX_DEBRIS_POLISH = true` — shard/sliver molten fade (default OFF).
+- `window.UI_TOASTS = true` — enable floating toasts (default OFF).
 
-Plan (Suggested)
-1) Add constants keys (no usage yet) in `Constants.js`.
-2) Replace in small batches: TargetCam → NPC → Spawn → UI → Weapons → Physics.
-3) QA spot checks after each batch; leave toggles OFF.
-4) Update handoff and decisions; list any remaining candidates for next time.
+Asset Authoring Guidance
+- Ships: provide ~2x target draw sizes for crispness after DPR fix.
+  - Freighter ~140–160 px, Patrol ~100 px, Trader ~90 px, Pirate ~70 px (target draw sizes; PNG nose-up; TargetCam applies +90°).
+- Planets: 1024–2048 px square, centered; sprite slug matches planet name (e.g., `terra_nova.png`).
 
-Context / Links
-- Internal docs: `INTERNAL_DEV_DOCS/RENDERING.md`, `INTERNAL_DEV_DOCS/PROFILING.md`, `INTERNAL_DEV_DOCS/SPAWN_AND_FX.md`, `INTERNAL_DEV_DOCS/UI_NOTIFICATIONS.md`, `INTERNAL_DEV_DOCS/DEVELOPER_GUIDE.md`, `SESSION_CADENCE.md`
-- Latest handoff: `SESSION_62_HANDOFF.md`
-- Key files: `docs/js/utils/Constants.js`, `docs/js/systems/TargetCamRenderer.js`, `docs/js/systems/NPCSystem.js`, `docs/js/systems/SpawnSystem.js`, `docs/js/systems/UISystem.js`, `docs/js/systems/WeaponSystem.js`, `docs/js/systems/PhysicsSystem.js`
-- Fixture: `docs/test/targetcam-spec.html`
+Key Files
+- `docs/js/utils/Constants.js`
+- `docs/js/systems/RenderSystem.js`, `RenderHelpers.js`
+- `docs/js/systems/AssetSystem.js`, `PlanetSpriteRenderer.js`
+- `docs/js/systems/SpawnSystem.js`, `TargetCamRenderer.js`
+- Internal docs: `INTERNAL_DEV_DOCS/*`, latest `SESSION_*_HANDOFF.md`
 
 ---

@@ -17,8 +17,12 @@ Spawn QA
 - `window.SPAWN_TYPE_COOLDOWN_MS` — same-type suppression duration (ms)
 - `window.SPAWN_PIRATE_SUPPRESS_MS` — pirate suppression after any death (ms)
 
+VFX (Asteroids)
+- `window.VFX_DEBRIS_POLISH = true` — enable molten warm fade on slivers and regular shards (OFF by default)
+
 UI/Images
 - `window.UI_LANDSCAPE_PROVIDER = 'unsplash'|'lexica'|'auto'|'none'` — 'none' to suppress external fetches
+- `window.UI_TOASTS = true` — re‑enable floating toasts (default OFF; console readout remains primary)
 - `window.RADIO_STATIC = false` — disable faint static inside the radio dial
 
 Renderer Spike (optional)
@@ -27,6 +31,7 @@ Renderer Spike (optional)
 
 Reset All (examples)
 - `delete window.TC_SHOW_PATH; delete window.TC_DEBUG; delete window.RENDER_PROF_OVERLAY; delete window.RENDER_PROF_LOG; delete window.UPDATE_PROF_OVERLAY; delete window.UPDATE_PROF_LOG; delete window.TC_STATIC; delete window.RADIO_STATIC; delete window.MINIMAP_STATIC`
+ - `delete window.USE_PLANET_SPRITES; delete window.VFX_DEBRIS_POLISH; delete window.UI_TOASTS`
 
 Minimap
 - `window.MINIMAP_STATIC = false` — disable minimap ramp static overlay

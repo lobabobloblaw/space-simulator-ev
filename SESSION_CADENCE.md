@@ -10,6 +10,7 @@ This repo uses short, consistent cadences to keep sessions aligned and efficient
 - Environment sanity:
   - Run local server: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
   - Open console; clear stale toggles: `delete window.TC_FORCE; delete window.TC_FORCE_ENABLED; delete window.TC_DEBUG; delete window.TC_SHOW_PATH;`.
+  - Also clear QA visuals/UI toggles: `delete window.VFX_DEBRIS_POLISH; delete window.UI_TOASTS;`.
   - Confirm TargetCam build tag logs once on init: `[TargetCam] init { build: ..., warmMs: ... }`.
 - Quick verifications (TargetCam):
   - Fixture: `docs/test/targetcam-spec.html`.
@@ -25,6 +26,7 @@ This repo uses short, consistent cadences to keep sessions aligned and efficient
 - Acceptance pass:
   - Re-run fixture and main game checks; confirm acceptance criteria for the session.
   - Turn off all toggles; no console spam besides favicon.ico.
+  - Verify constants parity where applicable (e.g., `WORLD.ASTEROIDS`, `EFFECTS.PICKUPS`, `EFFECTS.DEBRIS`, `UI.CONSOLE_MESSAGE_MS`).
 - Handoff update:
   - Update `SESSION_*_HANDOFF.md` with:
     - Summary of changes (files; behavior; toggles)
@@ -43,3 +45,5 @@ This repo uses short, consistent cadences to keep sessions aligned and efficient
 - `window.TC_WARM_MS = 450` — delay before allowing atlas/baseline in auto.
 - `window.DEBUG_SPRITES = 'errors'` — minimal sprite diagnostics.
 - `window.TC_FX = true` — enable static/scanlines during transitions.
+- `window.VFX_DEBRIS_POLISH = true` — molten warm fade on asteroid shards/slivers.
+- `window.UI_TOASTS = true` — enable floating toasts (console line remains primary).

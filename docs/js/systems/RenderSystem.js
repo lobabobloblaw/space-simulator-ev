@@ -1,6 +1,7 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { ProceduralPlanetRenderer } from './proceduralPlanetRenderer.js';
+import PlanetSpriteRenderer from './PlanetSpriteRenderer.js';
 import ExplosionRenderer from './ExplosionRenderer.js';
 import ThrusterFXRenderer from './ThrusterFXRenderer.js';
 import HUDRenderer from './HUDRenderer.js';
@@ -64,8 +65,13 @@ export class RenderSystem {
         // Target cam transition (adds a small visual gap & fade-in)
         this.targetCamTransition = null; // { fromId, toId, start, duration, hold }
         
-        // Initialize procedural planet renderer
-        this.planetRenderer = new ProceduralPlanetRenderer();
+        // Initialize planet renderer based on constants/toggle
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            const modeOverride = (typeof g.USE_PLANET_SPRITES === 'boolean') ? (g.USE_PLANET_SPRITES ? 'sprites' : 'procedural') : null;
+            const mode = modeOverride || (GameConstants?.UI?.PLANETS?.MODE || 'procedural');
+            this.planetRenderer = (mode === 'sprites') ? new PlanetSpriteRenderer(this.stateManager) : new ProceduralPlanetRenderer();
+        } catch(_) { this.planetRenderer = new ProceduralPlanetRenderer(); }
         
         // Don't generate stars here - we'll use the ones from state
         
@@ -137,6 +143,13 @@ export class RenderSystem {
         try { const g = (typeof window !== 'undefined') ? window : globalThis; if (Number(g.STAR_BOOT_SKIP)) this._starBootSkip = Math.max(0, Number(g.STAR_BOOT_SKIP)|0); } catch(_) {}
 
         console.log('[RenderSystem] Created');
+    }
+
+    getTypeScale(type) {
+        try {
+            const map = GameConstants?.SHIP?.TYPE_SPRITE_SCALE || {};
+            return map[type] || 1.4;
+        } catch (_) { return 1.4; }
     }
 
     // Lightweight static tile update (shared by minimap transitional effect)
@@ -851,7 +864,19 @@ export class RenderSystem {
             } else {
                 // shard: tiny triangle
                 const s = d.size || 3;
-                this.ctx.fillStyle = d.color || '#aaa';
+                const polish = (typeof window !== 'undefined') && !!window.VFX_DEBRIS_POLISH;
+                if (polish) {
+                    // Warm molten fade similar to slivers
+                    const warm = Math.max(0, 1 - t);
+                    const P = (GameConstants?.EFFECTS?.DEBRIS?.POLISH) || {};
+                    const r = (P.WARM_R ?? 255);
+                    const g = Math.floor((P.WARM_G?.hi ?? 140) * warm + (P.WARM_G?.lo ?? 60) * (1 - warm));
+                    const b = Math.floor((P.WARM_B?.hi ?? 50) * warm + (P.WARM_B?.lo ?? 40) * (1 - warm));
+                    const a = Math.min(1, (P.FADE_ALPHA_MAX ?? 0.9) * (1 - t * 0.5));
+                    this.ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+                } else {
+                    this.ctx.fillStyle = d.color || '#aaa';
+                }
                 this.ctx.beginPath();
                 this.ctx.moveTo(s, 0);
                 this.ctx.lineTo(-s*0.6, -s*0.5);
@@ -1555,14 +1580,21 @@ export class RenderSystem {
             if ((planet.x + pad) < vx0 || (planet.x - pad) > vx1 || (planet.y + pad) < vy0 || (planet.y - pad) > vy1) {
                 continue;
             }
-            // Use procedural planet renderer
-            // If not initialized, defer heavy generation off the render thread to avoid spikes
-            if (!this.planetRenderer.planetCache.has(planet.name)) {
+            // Renderer-agnostic readiness and async prep
+            const ready = (typeof this.planetRenderer.isReady === 'function')
+                ? this.planetRenderer.isReady(planet)
+                : (this.planetRenderer.planetCache?.has(planet.name) || false);
+            if (!ready) {
                 if (!this._pendingPlanets.has(planet.name)) {
                     this._pendingPlanets.add(planet.name);
                     setTimeout(() => {
-                        try { this.planetRenderer.generateProceduralPlanet(planet); }
-                        finally { this._pendingPlanets.delete(planet.name); }
+                        try {
+                            if (typeof this.planetRenderer.prepareAsync === 'function') {
+                                this.planetRenderer.prepareAsync(planet);
+                            } else {
+                                this.planetRenderer.generateProceduralPlanet(planet);
+                            }
+                        } finally { this._pendingPlanets.delete(planet.name); }
                     }, 0);
                 }
                 continue; // skip drawing until ready
@@ -1667,12 +1699,17 @@ export class RenderSystem {
         const viewRight = this.camera.x + this.screenCenter.x + 50;
         const viewBottom = this.camera.y + this.screenCenter.y + 50;
         const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+        const PC = (GameConstants?.EFFECTS?.PICKUPS) || {};
+        const ORE = PC.ORE || { CORE_RADIUS: 2, GLOW_RADIUS: 5, GLITTER_HALF: 3, GLITTER_ALPHA: 0.6, GLITTER_LINE_WIDTH: 0.8 };
+        const CRED = PC.CREDITS || { CORE_RADIUS: 2, GLOW_RADIUS: 5 };
+        const TWINKLE_SPD = (PC.TWINKLE_SPEED ?? 0.02);
+        const TWINKLE_POS = (PC.TWINKLE_POS_MIX ?? 0.01);
 
         for (let pickup of pickups) {
             if (pickup.x < viewLeft || pickup.x > viewRight || pickup.y < viewTop || pickup.y > viewBottom) continue;
             const tnow = Date.now();
-            const pulse = Math.sin(tnow * 0.008) * 0.3 + 0.7;
-            const twinkle = 0.5 + 0.5 * Math.sin((pickup._twk || 0) + tnow * 0.02 + (pickup.x + pickup.y) * 0.01);
+            const pulse = Math.sin(tnow * (GameConstants?.EFFECTS?.PICKUP_PULSE_SPEED ?? 0.008)) * 0.3 + 0.7;
+            const twinkle = 0.5 + 0.5 * Math.sin((pickup._twk || 0) + tnow * TWINKLE_SPD + (pickup.x + pickup.y) * TWINKLE_POS);
             // Lazily seed sparkle phase to avoid sync
             if (pickup._twk === undefined) pickup._twk = Math.random() * Math.PI * 2;
             if (this.quality === 'low' || heavy) {
@@ -1680,13 +1717,14 @@ export class RenderSystem {
                 this.ctx.globalAlpha = 1;
                 this.ctx.fillStyle = pickup.type === 'ore' ? '#bbbbbb' : '#ffd700';
                 this.ctx.beginPath();
-                this.ctx.arc(pickup.x, pickup.y, 2, 0, Math.PI * 2);
+                const coreR = pickup.type === 'ore' ? (ORE.CORE_RADIUS||2) : (CRED.CORE_RADIUS||2);
+                this.ctx.arc(pickup.x, pickup.y, coreR, 0, Math.PI * 2);
                 this.ctx.fill();
             } else {
                 // Glow effect — reduced size (≈1/3), plus subtle glitter
                 const glowGradient = this.ctx.createRadialGradient(
                     pickup.x, pickup.y, 0,
-                    pickup.x, pickup.y, 5
+                    pickup.x, pickup.y, (pickup.type === 'ore' ? (ORE.GLOW_RADIUS||5) : (CRED.GLOW_RADIUS||5))
                 );
                 if (pickup.type === 'ore') {
                     glowGradient.addColorStop(0, 'rgba(200, 200, 200, 0.8)');
@@ -1698,25 +1736,28 @@ export class RenderSystem {
                 this.ctx.globalAlpha = pulse;
                 this.ctx.fillStyle = glowGradient;
                 this.ctx.beginPath();
-                this.ctx.arc(pickup.x, pickup.y, 5, 0, Math.PI * 2);
+                const glowR = pickup.type === 'ore' ? (ORE.GLOW_RADIUS||5) : (CRED.GLOW_RADIUS||5);
+                this.ctx.arc(pickup.x, pickup.y, glowR, 0, Math.PI * 2);
                 this.ctx.fill();
                 // Core
                 this.ctx.globalAlpha = 1;
                 this.ctx.fillStyle = pickup.type === 'ore' ? '#dddddd' : '#ffd700';
                 this.ctx.beginPath();
-                this.ctx.arc(pickup.x, pickup.y, 2, 0, Math.PI * 2);
+                const coreR2 = pickup.type === 'ore' ? (ORE.CORE_RADIUS||2) : (CRED.CORE_RADIUS||2);
+                this.ctx.arc(pickup.x, pickup.y, coreR2, 0, Math.PI * 2);
                 this.ctx.fill();
                 // Glitter cross (tiny star) — alpha varies with twinkle
                 if (pickup.type === 'ore') {
                     this.ctx.save();
-                    this.ctx.globalAlpha = 0.6 * twinkle;
+                    this.ctx.globalAlpha = (ORE.GLITTER_ALPHA ?? 0.6) * twinkle;
                     this.ctx.strokeStyle = '#ffffff';
-                    this.ctx.lineWidth = 0.8;
+                    this.ctx.lineWidth = (ORE.GLITTER_LINE_WIDTH ?? 0.8);
                     this.ctx.beginPath();
-                    this.ctx.moveTo(pickup.x - 3, pickup.y);
-                    this.ctx.lineTo(pickup.x + 3, pickup.y);
-                    this.ctx.moveTo(pickup.x, pickup.y - 3);
-                    this.ctx.lineTo(pickup.x, pickup.y + 3);
+                    const h = (ORE.GLITTER_HALF ?? 3);
+                    this.ctx.moveTo(pickup.x - h, pickup.y);
+                    this.ctx.lineTo(pickup.x + h, pickup.y);
+                    this.ctx.moveTo(pickup.x, pickup.y - h);
+                    this.ctx.lineTo(pickup.x, pickup.y + h);
                     this.ctx.stroke();
                     this.ctx.restore();
                 }
@@ -1738,8 +1779,7 @@ export class RenderSystem {
         const viewRight = this.camera.x + this.screenCenter.x + margin;
         const viewBottom = this.camera.y + this.screenCenter.y + margin;
         for (let npc of npcShips) {
-            const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
-            const visScale = (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
+            const visScale = (this.getTypeScale(npc.type) || 1.4) * this.sizeMultiplier;
             const pad = (npc.size || 10) * visScale * 1.8;
             if (enableCulling && (npc.x + pad < viewLeft || npc.x - pad > viewRight || npc.y + pad < viewTop || npc.y - pad > viewBottom)) continue;
             this.ctx.save();
@@ -1747,7 +1787,7 @@ export class RenderSystem {
                 this.ctx.translate(npc.x, npc.y);
                 this.ctx.rotate(npc.angle);
                 // Upscale NPCs based on type for clearer silhouettes
-                const npcScale = scaleMap[npc.type] || 1.4;
+                const npcScale = this.getTypeScale(npc.type) || 1.4;
                 // Apply outer scale only for vector path; sprite path sizes by pixels
                 if (!canUseSprites) this.ctx.scale(npcScale * this.sizeMultiplier, npcScale * this.sizeMultiplier);
 
@@ -1755,10 +1795,16 @@ export class RenderSystem {
             if (this.showEffects && npc.thrusting && !npc.deathSeq) {
                 const isActive = !!npc.thrusting;
                 const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
-                const typeScale = (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
-                const len = Math.max(12, npc.size * (isActive ? 1.8 : 1.2)) * typeScale; // length
-                const halfW = Math.max(1.5, (isActive ? 3 : 2)) * typeScale; // width
-                if (!heavy && this.quality === 'high') {
+                            const typeScale = (this.getTypeScale(npc.type) || 1.4) * this.sizeMultiplier;
+                // Keep physical exhaust size consistent across sprite/vector paths:
+                // - Vector path: context is scaled already -> don't multiply lengths again.
+                // - Sprite path: no outer scale -> apply typeScale.
+                const outerScaleApplied = !canUseSprites; // true when vector path is active
+                const scaleComp = outerScaleApplied ? 1 : typeScale;
+                const len = Math.max(12, npc.size * (isActive ? 1.8 : 1.2)) * scaleComp; // length
+                const halfW = Math.max(1.5, (isActive ? 3 : 2)) * scaleComp; // width
+                // Use gradient on high and medium to avoid early-session pop
+                if (!heavy && this.quality !== 'low') {
                     const flicker = Math.random();
                     const g = this.ctx.createLinearGradient(-len, 0, 0, 0);
                     g.addColorStop(0, 'transparent');
@@ -1788,7 +1834,7 @@ export class RenderSystem {
                         const effects = state.assets?.atlases?.effects;
                         if (effects?.image) {
                             const baseTarget = Math.max(10, npc.size * 1.2) * this.sizeMultiplier;
-                            const typeScale = scaleMap[npc.type] || 1.4;
+                            const typeScale = this.getTypeScale(npc.type) || 1.4;
                             const outerComp = canUseSprites ? 1 : (typeScale * this.sizeMultiplier);
                             this.thrusterFX.draw(this.ctx, effects, this.quality, {
                                 offsetX: -npc.size,
@@ -1816,7 +1862,7 @@ export class RenderSystem {
                     this.ctx.restore();
                 }
                 // Overheat glow
-                const glowR = npc.size * (1.2 + t * 1.8) * (scaleMap[npc.type] || 1.4) * this.sizeMultiplier;
+                const glowR = npc.size * (1.2 + t * 1.8) * (this.getTypeScale(npc.type) || 1.4) * this.sizeMultiplier;
                 const gg = this.ctx.createRadialGradient(0, 0, glowR * 0.1, 0, 0, glowR);
                 gg.addColorStop(0, `rgba(255,255,255,${0.5 * (1 - t)})`);
                 gg.addColorStop(0.3, `rgba(255,200,80,${0.35 * (1 - t)})`);
@@ -1836,7 +1882,7 @@ export class RenderSystem {
             const isTargeted = selectedId && npc.id === selectedId;
             if (isTargeted) {
                 const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
-                this.hud.drawFactionBracket(npc, (scaleMap[npc.type] || 1.4) * this.sizeMultiplier, true, palette.accent || '#ff4444');
+                this.hud.drawFactionBracket(npc, (this.getTypeScale(npc.type) || 1.4) * this.sizeMultiplier, true, palette.accent || '#ff4444');
             }
             
             // State indicator icon
@@ -1876,8 +1922,7 @@ export class RenderSystem {
                     const sw = sprite.w || img.naturalWidth || img.width;
                     const sh = sprite.h || img.naturalHeight || img.height;
                     // Match silhouette scale: include type scale and global multiplier
-                    const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
-                    const npcScale = scaleMap[npc.type] || 1.4;
+                    const npcScale = this.getTypeScale(npc.type) || 1.4;
                     // Keep sprite physical size independent of quality to avoid pop after boot ramp
                     const target = Math.max(12, npc.size * 2.0 * npcScale) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
@@ -1911,8 +1956,7 @@ export class RenderSystem {
                 }
                 if (atlas && frame && atlas.image && (atlas.image.complete || atlas.image.naturalWidth || atlas.image.width)) {
                     const sw = frame.w, sh = frame.h;
-                    const scaleMap2 = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
-                    const npcScale2 = scaleMap2[npc.type] || 1.4;
+                    const npcScale2 = this.getTypeScale(npc.type) || 1.4;
                     const target = Math.max(12, npc.size * 2.0 * npcScale2) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
@@ -1933,8 +1977,7 @@ export class RenderSystem {
                 if (direct && direct.complete && (direct.naturalWidth || direct.width)) {
                     const sw = direct.naturalWidth || direct.width;
                     const sh = direct.naturalHeight || direct.height;
-                    const scaleMap3 = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
-                    const npcScale3 = scaleMap3[npc.type] || 1.4;
+                    const npcScale3 = this.getTypeScale(npc.type) || 1.4;
                     const target = Math.max(12, npc.size * 2.0 * npcScale3) * this.sizeMultiplier;
                     const scale = target / Math.max(sw, sh);
                     const dw = sw * scale, dh = sh * scale;
@@ -1958,8 +2001,7 @@ export class RenderSystem {
         const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
         // If sprites are active but did not draw, apply local scale for consistent size
         const spritesActive = !!(this.stateManager.state.renderSettings && this.stateManager.state.renderSettings.useSprites && this.stateManager.state.assets && this.stateManager.state.assets.ready);
-        const scaleMap = { freighter: 1.6, trader: 1.5, patrol: 1.4, pirate: 1.35, interceptor: 1.4 };
-        const npcScale = scaleMap[npc.type] || 1.4;
+        const npcScale = this.getTypeScale(npc.type) || 1.4;
         if (spritesActive) this.ctx.save(), this.ctx.scale(npcScale, npcScale);
         ShipDesigns.draw(this.ctx, design, npc.size, palette);
         FactionVisuals.drawDecals(this.ctx, npc.faction || 'civilian', npc.size);

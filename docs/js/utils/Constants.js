@@ -67,6 +67,26 @@ export const GameConstants = {
         // Thrust/brake tuning
         BRAKE_THRUST_MULT: 1.0,    // Retro-thrust relative to ship.thrust while braking
         BRAKE_FUEL_COST: 0.1       // Fuel consumed per frame while braking
+        ,
+        // Visual scale multipliers for NPC ship types (sprites and vectors)
+        TYPE_SPRITE_SCALE: {
+            freighter: 1.6,
+            trader: 1.5,
+            patrol: 1.4,
+            pirate: 1.35,
+            interceptor: 1.4
+        },
+        // Optional standardized classes and nominal sizes (scaffolding)
+        CLASSES: {
+            SIZES: { XS: 8, S: 10, M: 12, L: 14, XL: 18 },
+            TYPE_CLASS: {
+                freighter: 'XL',
+                trader: 'M',
+                patrol: 'L',
+                pirate: 'S',
+                interceptor: 'L'
+            }
+        }
     },
 
     // Weapon system
@@ -215,6 +235,29 @@ export const GameConstants = {
         ASTEROID_ORE_CONTENT_MAX: 3,
         ASTEROID_WORLD_SIZE: 4000,     // World boundaries for asteroids
         
+        // Asteroid tiers, fragmentation, and ore yields
+        ASTEROIDS: {
+            // Tier thresholds by radius
+            THRESHOLDS: {
+                LARGE_MIN_RADIUS: 8,
+                MEDIUM_MIN_RADIUS: 5
+            },
+            // Number of children spawned when breaking by tier
+            CHILD_COUNTS: {
+                large: 3,
+                medium: 2,
+                small: 0
+            },
+            // Size shrink factor applied to child fragments
+            FRAGMENT_SHRINK: 0.55,
+            // Ore yields per destruction by tier
+            ORE_YIELDS: {
+                large: 2,
+                medium: 1,
+                small: 1
+            }
+        },
+        
         // Star field
         STARS_FAR_COUNT: 3000,
         STARS_MID_COUNT: 1200,
@@ -244,7 +287,28 @@ export const GameConstants = {
         WARP_EFFECT_LIFETIME: 30,  // Frames
         
         PICKUP_LIFETIME: 600,      // Frames (10 seconds at 60fps)
-        PICKUP_PULSE_SPEED: 0.005, // Pulse animation speed
+        // Visual pulse speed for pickups (used in RenderSystem.renderPickups)
+        // Tuned to match current behavior
+        PICKUP_PULSE_SPEED: 0.008,
+        
+        // Pickup visual tuning (sizes, glitter cadence)
+        PICKUPS: {
+            // Shared twinkle cadence
+            TWINKLE_SPEED: 0.02,    // Multiplier for time-based glitter
+            TWINKLE_POS_MIX: 0.01,  // Position-based phase mix
+            // Per-type visuals
+            ORE: {
+                CORE_RADIUS: 2,
+                GLOW_RADIUS: 5,
+                GLITTER_HALF: 3,      // Half-length of glitter cross arms
+                GLITTER_ALPHA: 0.6,   // Base alpha scale for glitter
+                GLITTER_LINE_WIDTH: 0.8
+            },
+            CREDITS: {
+                CORE_RADIUS: 2,
+                GLOW_RADIUS: 5
+            }
+        },
         
         TRAIL_ALPHA: 0.7,
         GLOW_RADIUS: 15,
@@ -254,7 +318,49 @@ export const GameConstants = {
         FILM_GRAIN_ANIMATION_SPEED: 8, // seconds
         // Muzzle flashes
         MUZZLE_FLASH_MAX_LIFETIME_FRAMES: 6,
-        MUZZLE_FLASH_SOFT_CAP: 40
+        MUZZLE_FLASH_SOFT_CAP: 40,
+
+        // Debris tuning (asteroid break and impact debris)
+        DEBRIS: {
+            SHARDS: {
+                COUNT_MIN: 6,
+                COUNT_MAX: 11,          // inclusive
+                SPEED_MIN: 0.6,
+                SPEED_MAX: 1.8,
+                SIZE_MIN: 2,
+                SIZE_MAX: 5,
+                ROT_SPEED_RANGE: 0.15,  // ± range for angular velocity
+                LIFETIME_MIN: 50,
+                LIFETIME_RANGE: 30
+            },
+            CHUNKS: {
+                COUNT_MIN: 3,
+                COUNT_MAX: 6,           // inclusive
+                SPEED_MIN: 0.4,
+                SPEED_MAX: 1.4,
+                SIZE_MIN: 3,
+                SIZE_MAX: 7,
+                ROT_SPEED_RANGE: 0.12,
+                SIDES_MIN: 5,
+                SIDES_RANGE: 3,
+                LIFETIME_MIN: 80,
+                LIFETIME_RANGE: 40
+            },
+            SLIVERS: {
+                SPEED_MIN: 0.8,
+                SPEED_MAX: 2.2,
+                LIFETIME_MIN: 45,
+                LIFETIME_RANGE: 25
+            },
+            POLISH: {
+                // Applied only when window.VFX_DEBRIS_POLISH === true
+                ENABLED: false,
+                FADE_ALPHA_MAX: 0.9,
+                WARM_G: { hi: 140, lo: 60 },
+                WARM_B: { hi: 50, lo: 40 },
+                WARM_R: 255
+            }
+        }
     },
 
     // Audio settings
@@ -277,6 +383,8 @@ export const GameConstants = {
         NOTIF_SHIP_DESTROYED_MS: 5000, // Ship destroyed banner
         NOTIF_WEAPON_SWITCH_MS: 1000,  // Weapon switch popup
         NOTIF_REPUTATION_MS: 1200,     // Reputation change popup
+        // Tiny console readout default duration
+        CONSOLE_MESSAGE_MS: 1200,
         PLANET_NAME_OFFSET: 25,       // px above planet surface
         PLANET_DISTANCE_OFFSET: 10,   // px above planet surface for distance
         PLANET_NAME_SHADOW_BLUR: 8,   // blur radius when high quality
@@ -312,6 +420,13 @@ export const GameConstants = {
             DANGER: '#ff0040',
             SUCCESS: '#00ff88',
             WARNING: '#ffaa00'
+        },
+        // Planet rendering mode and sprite settings (scaffolding; default procedural)
+        PLANETS: {
+            MODE: 'procedural', // 'procedural' | 'sprites'
+            SPRITES: {
+                MANIFEST_URL: './assets/planets.json'
+            }
         }
     },
 

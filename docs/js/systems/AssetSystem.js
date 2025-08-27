@@ -350,3 +350,28 @@ export function getFrameCanvasFromState(state, id, atlasName = 'placeholder') {
         return c;
     } catch (_) { return null; }
 }
+
+// Planet sprite access — lazy per-name image creation
+export function getPlanetSpriteFromState(state, name) {
+    try {
+        if (!state) return null;
+        state.assets = state.assets || {};
+        const store = state.assets.planets || (state.assets.planets = {});
+        const key = String(name || '').toLowerCase().replace(/\s+/g, '_');
+        let img = store[key];
+        if (img && (img.naturalWidth || img.width || img.complete)) return img;
+        // Lazily create and begin loading. Default path convention: assets/planets/<slug>.png
+        img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        // Resolve relative to docs/ root (two levels up from systems/)
+        try {
+            const root = new URL('../../', import.meta.url);
+            img.src = new URL(`assets/planets/${key}.png`, root).href;
+        } catch (_) {
+            img.src = `./assets/planets/${key}.png`;
+        }
+        store[key] = img;
+        return img;
+    } catch (_) { return null; }
+}

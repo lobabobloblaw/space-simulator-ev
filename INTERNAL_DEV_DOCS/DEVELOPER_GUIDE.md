@@ -105,19 +105,25 @@ This guide orients new contributors to the project’s architecture and day‑to
   - `TARGET_CAM`: warm-up, throttle, transition timings, build gating.
   - `NPC`: engage distances and message cooldowns; distress ranges; stand-down/reset.
   - `SPAWN`: same-type cooldowns, pirate suppression, brief post-death pauses.
-  - `UI`: radio scan/lock timings, speed readout cadence, landscape fetch timeouts.
+  - `UI`: radio scan/lock timings, speed readout cadence, landscape fetch timeouts; `CONSOLE_MESSAGE_MS` (tiny console readout duration).
   - `WEAPONS`: per-type projectile lifetimes; recoil bloom max/decay/add; muzzle-flash caps (under `EFFECTS`).
   - `PHYSICS`: heavy collision warning threshold; landing clear distance; world bounds alias via `WORLD.ASTEROID_WORLD_SIZE`.
+  - `WORLD.ASTEROIDS`: tier thresholds (`THRESHOLDS`), child counts (`CHILD_COUNTS`), shrink (`FRAGMENT_SHRINK`), ore yields (`ORE_YIELDS`).
+  - `EFFECTS.PICKUPS`: ore/credits pickup sizes and glitter cadence; `PICKUP_PULSE_SPEED` for pulse.
+  - `EFFECTS.DEBRIS`: shard/chunk/sliver tuning, and warm color ramp under `POLISH` (applies only when `VFX_DEBRIS_POLISH` is true).
+  - `SHIP.TYPE_SPRITE_SCALE`: per-type visual scale multipliers (centralizes prior in-code maps).
+  - `UI.PLANETS.MODE`: `'procedural'|'sprites'` planet renderer selection; QA override via `window.USE_PLANET_SPRITES`.
+  - `SHIP.CLASSES`: scaffolding for standardized classes and nominal sizes (`SIZES`, `TYPE_CLASS`) to ease adding new ship types.
 
 Defaults match current behavior; diagnostics stay OFF by default.
 
 ## Future Improvements (Backlog)
 
-- AssetSystem.getFrameCanvas(id) helper and TargetCam refactor to consume it.
+- AssetSystem.getFrameCanvas(id) helper and TargetCam consumption (in use via `getFrameCanvasFromState`).
 - Extract a dedicated `TargetCamRenderer` for isolation and testing.
 - Consolidate remaining alias maps in world/player sprite path to `SpriteMappings.js`.
 - Consider a first‑paint star stride to remove the last 50ms composite on certain platforms.
- - Centralize asteroid tier thresholds and ore yields in `GameConstants` for easy tuning.
+ - Review asteroid/debris constants for tuning safety windows; avoid over‑parameterizing.
 
 ## Legacy Systems
 
