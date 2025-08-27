@@ -1854,8 +1854,9 @@ export class RenderSystem {
                 const t = Math.min(1, (now - seq.start) / (seq.duration || 450));
                 // Pulsing white core and flicker before destruction
                 const pulse = 0.5 + 0.5 * Math.sin(now * 0.025);
-                // Hide sprite in the last part of the sequence
-                if (t < 0.6) {
+                // Hide sprite as soon as death event is emitted, or in the last part of the sequence
+                const hideNow = !!npc.deathEventEmitted;
+                if (t < 0.6 && !hideNow) {
                     this.ctx.save();
                     this.ctx.globalAlpha = 0.6 * (1 - t) + 0.4 * pulse;
                     this.renderNPCShip(npc);
