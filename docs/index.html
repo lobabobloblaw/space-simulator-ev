@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Galaxy Trader - Space Trading & Combat</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https:;">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,7 +16,13 @@
     <!-- Tutorial/Hint System -->
     <div id="tutorialHint"></div>
     
-    <canvas id="gameCanvas"></canvas>
+    <canvas id="gameCanvas" aria-label="Space trading simulator game viewport" role="application"></canvas>
+    <!-- Top-left logo overlay -->
+    <div id="logoOverlay" class="logo-overlay" aria-hidden="true">
+        <img id="logo-overlay-img" src="./assets/logo.png" alt="Galaxy Trader" />
+        <span id="gameVersion" class="version"></span>
+    </div>
+    <div id="gameAnnouncements" aria-live="assertive" aria-atomic="true" class="sr-only" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;"> </div>
     
     <!-- 90s Space Sim HUD -->
     <div id="gameHUD">
@@ -54,7 +61,7 @@
                     </div>
                     <div class="status-item">
                         <span class="status-label">WEAPON</span>
-                        <span class="status-value" id="weapon">NONE</span>
+                        <span class="status-value" id="weapon">EQUIP</span>
                     </div>
                 </div>
             </div>
@@ -68,15 +75,8 @@
                 <div id="radioDial" aria-hidden="true"></div>
             </div>
             
-            <!-- Center Panel: Cyberpunk Logo -->
-            <div class="hud-center">
-                <div id="logo-container">
-                    <img id="logo-img" src="./assets/logo.png" alt="Galaxy Trader Logo"
-                         onload="document.getElementById('logo-ascii').style.display='none'"
-                         onerror="this.style.display='none'" />
-                    <div id="logo-ascii">GALAXY<br>TRADER</div>
-                </div>
-            </div>
+            <!-- Center Panel: (logo relocated to overlay) -->
+            <div class="hud-center"></div>
             
             <!-- Right Panel: Controls & Radar -->
             <div class="hud-right">

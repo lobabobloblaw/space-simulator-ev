@@ -362,15 +362,37 @@ export default class AssetSystem {
             const src = atlas.canvas || (atlas.image && atlas.image.naturalWidth > 0 ? atlas.image : null);
             if (!fr || !src) return null;
             state.assets._frameCanvases = state.assets._frameCanvases || {};
+            state.assets._frameOrder = state.assets._frameOrder || [];
             const cacheKey = `${atlasName}:${id}`;
             let c = state.assets._frameCanvases[cacheKey];
-            if (c && c.width === fr.w && c.height === fr.h) return c;
+            if (c && c.width === fr.w && c.height === fr.h) {
+                // Touch LRU
+                try {
+                    const arr = state.assets._frameOrder;
+                    const idx = arr.indexOf(cacheKey);
+                    if (idx !== -1) arr.splice(idx, 1);
+                    arr.push(cacheKey);
+                } catch(_) {}
+                return c;
+            }
             c = document.createElement('canvas');
             c.width = fr.w; c.height = fr.h;
             const ctx = c.getContext('2d');
             try {
                 ctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
                 state.assets._frameCanvases[cacheKey] = c;
+                // Update LRU and cap size
+                try {
+                    const arr = state.assets._frameOrder;
+                    const idx = arr.indexOf(cacheKey);
+                    if (idx !== -1) arr.splice(idx, 1);
+                    arr.push(cacheKey);
+                    const cap = Number((typeof window !== 'undefined' && window.FRAME_CANVAS_CAP) || 128) || 128;
+                    while (arr.length > cap) {
+                        const oldKey = arr.shift();
+                        if (oldKey) delete state.assets._frameCanvases[oldKey];
+                    }
+                } catch(_) {}
                 return c;
             } catch (_) {
                 return null;
@@ -392,14 +414,34 @@ export function getFrameCanvasFromState(state, id, atlasName = 'placeholder') {
         const src = atlas.canvas || (atlas.image && atlas.image.naturalWidth > 0 ? atlas.image : null);
         if (!fr || !src) return null;
         state.assets._frameCanvases = state.assets._frameCanvases || {};
+        state.assets._frameOrder = state.assets._frameOrder || [];
         const cacheKey = `${atlasName}:${id}`;
         let c = state.assets._frameCanvases[cacheKey];
-        if (c && c.width === fr.w && c.height === fr.h) return c;
+        if (c && c.width === fr.w && c.height === fr.h) {
+            try {
+                const arr = state.assets._frameOrder;
+                const idx = arr.indexOf(cacheKey);
+                if (idx !== -1) arr.splice(idx, 1);
+                arr.push(cacheKey);
+            } catch(_) {}
+            return c;
+        }
         c = document.createElement('canvas');
         c.width = fr.w; c.height = fr.h;
         const ctx = c.getContext('2d');
         ctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
         state.assets._frameCanvases[cacheKey] = c;
+        try {
+            const arr = state.assets._frameOrder;
+            const idx = arr.indexOf(cacheKey);
+            if (idx !== -1) arr.splice(idx, 1);
+            arr.push(cacheKey);
+            const cap = Number((typeof window !== 'undefined' && window.FRAME_CANVAS_CAP) || 128) || 128;
+            while (arr.length > cap) {
+                const oldKey = arr.shift();
+                if (oldKey) delete state.assets._frameCanvases[oldKey];
+            }
+        } catch(_) {}
         return c;
     } catch (_) { return null; }
 }

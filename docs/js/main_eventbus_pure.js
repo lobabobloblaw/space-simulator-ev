@@ -640,6 +640,28 @@ async function initializeSystems() {
 async function initGame() {
     console.log('[EventBus] initGame() called - Initializing pure EventBus game...');
     window.eventBusInitStarted = true;
+    // Wire overlay logo + version (CSP-safe)
+    try {
+        const overlay = document.getElementById('logoOverlay');
+        const img = document.getElementById('logo-overlay-img');
+        const ver = document.getElementById('gameVersion');
+        if (ver) {
+            const v = (GameConstants?.META?.VERSION) || '';
+            ver.textContent = v ? `v${v}` : '';
+        }
+        if (overlay) overlay.style.display = 'flex'; // always show overlay so version text is visible
+        if (img) {
+            const setImgVis = () => {
+                try {
+                    if (img.naturalWidth > 0) { img.style.display = 'block'; }
+                    else { img.style.display = 'none'; }
+                } catch(_) {}
+            };
+            setImgVis();
+            img.addEventListener('load', setImgVis, { once: true });
+            img.addEventListener('error', () => { try { img.style.display = 'none'; } catch(_) {} }, { once: true });
+        }
+    } catch(_) {}
     
     // Import and verify game data
     const gameDataModule = await import('./data/gameData.js');

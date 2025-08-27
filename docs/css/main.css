@@ -45,6 +45,32 @@ body {
     height: 100vh;
 }
 
+/* Top-left logo overlay */
+.logo-overlay {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 200; /* above canvas and HUD chrome */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    pointer-events: none; /* never block gameplay interactions */
+}
+.logo-overlay img {
+    height: 108px; /* larger for better visibility */
+    width: auto;
+    display: block;
+    filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
+}
+.logo-overlay .version {
+    font-size: 10px;
+    color: var(--text-primary);
+    letter-spacing: 0.4px;
+    text-shadow: 0 0 3px rgba(0,0,0,0.6);
+    opacity: 0.9;
+}
+
 /* Ship destroyed: dim and desaturate HUD widgets, disable radio interaction */
 body.ship-destroyed #gameHUD {
     filter: grayscale(0.9) brightness(0.6);
@@ -66,6 +92,12 @@ body.ship-destroyed #shipRadio.offline #radioDial::after { display: none; }
     top: 0;
     left: 0;
 }
+
+/* Reduce mouse-focus outline but preserve keyboard accessibility */
+#gameCanvas:focus, #gameCanvas:focus-visible { outline: none !important; }
+
+/* Generic rule: hide focus outlines for mouse focus across the HUD controls */
+:focus:not(:focus-visible) { outline: none; box-shadow: none; }
 
 /* Main HUD - Cyberpunk Minimalist */
 #gameHUD {

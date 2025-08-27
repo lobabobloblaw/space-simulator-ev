@@ -4,6 +4,9 @@
  */
 
 export const GameConstants = {
+    META: {
+        VERSION: '0.65.0'
+    },
     // Display settings
     CANVAS: {
         HUD_HEIGHT: 150,           // Height reserved for HUD

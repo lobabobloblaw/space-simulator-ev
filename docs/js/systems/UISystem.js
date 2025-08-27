@@ -457,7 +457,7 @@ export class UISystem {
         const credStr = String(ship.credits || 0);
         if (this._hudCache.values.credits !== credStr) { this._hudCache.values.credits = credStr; updateElement('credits', credStr); }
         updateElement('weapon', ship.weapons && ship.weapons.length > 0 ? 
-            ship.weapons[ship.currentWeapon].type.toUpperCase() : 'UNARMED');
+            ship.weapons[ship.currentWeapon].type.toUpperCase() : 'EQUIP');
         // Kills and target readouts removed from HUD by design
     }
 
@@ -570,32 +570,48 @@ export class UISystem {
             const bestBuys = analyzed.slice().sort((a,b)=>a.ratio-b.ratio).slice(0,2);
             const bestSells = analyzed.slice().sort((a,b)=>b.ratio-a.ratio).slice(0,2);
 
-            const buyList = bestBuys.map(x => {
-                const c = commodities[x.key];
-                return `${c?.icon || ''} ${c?.name || x.key} — §${x.price}`;
-            }).join(' • ');
-            const sellList = bestSells.map(x => {
-                const c = commodities[x.key];
-                return `${c?.icon || ''} ${c?.name || x.key} — §${x.price} (base §${x.base})`;
-            }).join('<br>');
+            // Build safe DOM in place
+            details.textContent = '';
+            const mkDiv = (style) => { const d = document.createElement('div'); if (style) d.style.cssText = style; return d; };
+            const headerStyle = 'color:#888; text-transform:uppercase; letter-spacing:1px; font-size:10px; margin-bottom:4px;';
+            const market = mkDiv('margin-top:8px;');
+            const mh = mkDiv(headerStyle); mh.textContent = 'Market Highlights'; market.appendChild(mh);
+            const row = mkDiv('display:flex; gap:12px;');
+            const buys = mkDiv('flex:1');
+            const buysLbl = mkDiv('color:#aaa; font-size:10px; display:inline;'); buysLbl.textContent = 'Best Buys: ';
+            buys.appendChild(buysLbl);
+            const buysSpan = document.createElement('span');
+            if (bestBuys.length) {
+                buysSpan.textContent = bestBuys.map(x => {
+                    const c = commodities[x.key];
+                    const name = c?.name || x.key;
+                    return `${c?.icon || ''} ${name} — §${x.price}`;
+                }).join(' • ');
+            } else { buysSpan.textContent = '—'; }
+            buys.appendChild(buysSpan);
+            const sells = mkDiv('flex:1');
+            const sellsLbl = mkDiv('color:#aaa; font-size:10px; display:inline;'); sellsLbl.textContent = 'Best Sells: ';
+            sells.appendChild(sellsLbl);
+            const sellsSpan = document.createElement('span');
+            if (bestSells.length) {
+                sellsSpan.textContent = bestSells.map(x => {
+                    const c = commodities[x.key];
+                    const name = c?.name || x.key;
+                    return `${c?.icon || ''} ${name} — §${x.price} (base §${x.base})`;
+                }).join(' • ');
+            } else { sellsSpan.textContent = '—'; }
+            sells.appendChild(sellsSpan);
+            row.appendChild(buys); row.appendChild(sells);
+            market.appendChild(row);
+            details.appendChild(market);
 
-            // Outfitter list
-            const items = (planet.shopItems || []).map(id => shopInventory[id]).filter(Boolean);
-            const itemList = items.slice(0,3).map(i => `${i.name} — §${i.price}`).join(' • ');
-
-            details.innerHTML = `
-                <div style="margin-top: 8px;">
-                    <div style="color:#888; text-transform:uppercase; letter-spacing:1px; font-size:10px; margin-bottom:4px;">Market Highlights</div>
-                    <div style="display:flex; gap:12px;">
-                        <div style="flex:1"><span style="color:#aaa; font-size:10px;">Best Buys:</span> <span>${buyList || '—'}</span></div>
-                        <div style="flex:1"><span style="color:#aaa; font-size:10px;">Best Sells:</span> <span>${sellList || '—'}</span></div>
-                    </div>
-                </div>
-                <div style="margin-top: 12px;">
-                    <div style="color:#888; text-transform:uppercase; letter-spacing:1px; font-size:10px; margin-bottom:4px;">Outfitter Inventory</div>
-                    <div style="font-size:12px; line-height:1.4;">${itemList || 'Standard services only'}</div>
-                </div>
-            `;
+            const outf = mkDiv('margin-top:12px;');
+            const oh = mkDiv(headerStyle); oh.textContent = 'Outfitter Inventory'; outf.appendChild(oh);
+            const oBody = mkDiv('font-size:12px; line-height:1.4;');
+            const items = (planet.shopItems || []).map(id => shopInventory[id]).filter(Boolean).slice(0,3);
+            oBody.textContent = items.length ? items.map(i => `${i.name} — §${i.price}`).join(' • ') : 'Standard services only';
+            outf.appendChild(oBody);
+            details.appendChild(outf);
         } catch (e) {
             // Fallback: clear details if module load fails
             details.textContent = '';

@@ -91,50 +91,35 @@ export default class TradingSystem {
         document.getElementById('tradeCargo').textContent = 
             `${state.ship.cargo.length}/${state.ship.cargoCapacity}`;
 
-        // Build commodity list (header is now in HTML)
-        let html = '';
+        // Build commodity list (header is now in HTML) using safe DOM
+        const container = this.commodityList;
+        if (!container) return;
+        while (container.firstChild) container.removeChild(container.firstChild);
         
         // Show items in cargo (sell section)
         if (state.ship.cargo.length > 0) {
-            html += '<div class="commodity-section">YOUR CARGO</div>';
-            
-            // Group cargo by type
+            const sec = document.createElement('div'); sec.className = 'commodity-section'; sec.textContent = 'YOUR CARGO'; container.appendChild(sec);
             const cargoGroups = {};
-            state.ship.cargo.forEach(item => {
-                if (!cargoGroups[item.type]) {
-                    cargoGroups[item.type] = [];
-                }
-                cargoGroups[item.type].push(item);
-            });
-
+            state.ship.cargo.forEach(item => { (cargoGroups[item.type] ||= []).push(item); });
             for (const [type, items] of Object.entries(cargoGroups)) {
                 const commodity = commodities[type] || { name: type, icon: '📦' };
                 const sellPrice = planet.commodityPrices[type];
                 const canSellHere = Number.isFinite(sellPrice);
                 const adjustedSell = canSellHere ? Math.max(1, Math.round(sellPrice * repEff.sellMult)) : 0;
                 const profit = canSellHere ? (adjustedSell - items[0].buyPrice) : 0;
-                const profitClass = canSellHere ? (profit > 0 ? 'profit' : profit < 0 ? 'loss' : '') : '';
-                const modStr = repEff.effect !== 0 ? ` <span style="color:#8ac">${repEff.effect>0?'+':''}${Math.round(repEff.effect*100)}%</span>` : '';
-                const priceHtml = canSellHere
-                    ? `§${adjustedSell}${modStr} (${profit > 0 ? '+' : ''}${profit})`
-                    : '<span style="color:#888">Not accepted here</span>';
-
-                html += `
-                    <div class="commodity-item">
-                        <span class="commodity-icon">${commodity.icon}</span>
-                        <span class="commodity-name">${commodity.name} (${items.length})</span>
-                        <span class="commodity-price ${profitClass}">${priceHtml}</span>
-                        <button class="trade-btn sell-btn" ${!canSellHere ? 'disabled' : ''}
-                                data-action="sell" data-type="${type}">
-                            ${!canSellHere ? 'NO BUYERS' : 'SELL'}
-                        </button>
-                    </div>
-                `;
+                const row = document.createElement('div'); row.className = 'commodity-item';
+                const icon = document.createElement('span'); icon.className = 'commodity-icon'; icon.textContent = commodity.icon || '';
+                const name = document.createElement('span'); name.className = 'commodity-name'; name.textContent = `${commodity.name} (${items.length})`;
+                const price = document.createElement('span'); price.className = 'commodity-price'; if (canSellHere) { if (profit>0) price.classList.add('profit'); else if (profit<0) price.classList.add('loss'); }
+                price.textContent = canSellHere ? `§${adjustedSell} (${profit>0?'+':''}${profit})` : 'Not accepted here';
+                const btn = document.createElement('button'); btn.className = 'trade-btn sell-btn'; btn.textContent = canSellHere ? 'SELL' : 'NO BUYERS'; if (!canSellHere) btn.disabled = true; btn.setAttribute('data-action','sell'); btn.setAttribute('data-type', type);
+                row.appendChild(icon); row.appendChild(name); row.appendChild(price); row.appendChild(btn);
+                container.appendChild(row);
             }
         }
 
         // Show available items to buy
-        html += '<div class="commodity-section">AVAILABLE TO BUY</div>';
+        { const sec = document.createElement('div'); sec.className = 'commodity-section'; sec.textContent = 'AVAILABLE TO BUY'; container.appendChild(sec); }
         
         for (const [type, price] of Object.entries(planet.commodityPrices)) {
             const commodity = commodities[type];
@@ -142,22 +127,15 @@ export default class TradingSystem {
             const canAfford = state.ship.credits >= adjustedBuy;
             const hasSpace = state.ship.cargo.length < state.ship.cargoCapacity;
             const canBuy = canAfford && hasSpace;
-            const modStr = repEff.effect !== 0 ? ` <span style="color:#8ac">${repEff.effect>0?'-':'+'}${Math.abs(Math.round(repEff.effect*100))}%</span>` : '';
-            
-            html += `
-                <div class="commodity-item">
-                    <span class="commodity-icon">${commodity.icon}</span>
-                    <span class="commodity-name">${commodity.name}</span>
-                    <span class="commodity-price">§${adjustedBuy}${modStr}</span>
-                    <button class="trade-btn buy-btn" ${!canBuy ? 'disabled' : ''}
-                            data-action="buy" data-type="${type}" data-price="${price}">
-                        ${!hasSpace ? 'NO SPACE' : !canAfford ? 'NO FUNDS' : 'BUY'}
-                    </button>
-                </div>
-            `;
+            const row = document.createElement('div'); row.className = 'commodity-item';
+            const icon = document.createElement('span'); icon.className = 'commodity-icon'; icon.textContent = commodity.icon || '';
+            const name = document.createElement('span'); name.className = 'commodity-name'; name.textContent = commodity.name;
+            const priceEl = document.createElement('span'); priceEl.className = 'commodity-price'; priceEl.textContent = `§${adjustedBuy}`;
+            const btn = document.createElement('button'); btn.className = 'trade-btn buy-btn'; btn.textContent = !hasSpace ? 'NO SPACE' : !canAfford ? 'NO FUNDS' : 'BUY'; if (!canBuy) btn.disabled = true; btn.setAttribute('data-action','buy'); btn.setAttribute('data-type', type); btn.setAttribute('data-price', String(price));
+            row.appendChild(icon); row.appendChild(name); row.appendChild(priceEl); row.appendChild(btn);
+            container.appendChild(row);
         }
 
-        this.commodityList.innerHTML = html;
         this.attachDelegates();
     }
 
