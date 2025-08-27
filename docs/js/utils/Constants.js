@@ -5,7 +5,7 @@
 
 export const GameConstants = {
     META: {
-        VERSION: '0.65.0'
+        VERSION: 'c1e2bfd-dirty+2025-08-27'
     },
     // Display settings
     CANVAS: {
