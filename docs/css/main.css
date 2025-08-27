@@ -693,17 +693,21 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
 #centerViewport, #minimap {
     width: 80px;
     height: 80px;
-    background: radial-gradient(circle,
-        var(--accent-subtle) 0%,
-        transparent 40%,
-        var(--bg-black) 70%);
-    border: 1px solid var(--accent-border);
+    outline: 1px solid var(--accent-border);
     position: relative;
     overflow: hidden;
     contain: content;
 }
 
-#centerViewport::before, #minimap::before {
+/* Keep CSS crosshair + gradient only on minimap; TargetCam draws its own */
+#minimap {
+    background: radial-gradient(circle at center,
+        var(--accent-subtle) 0%,
+        transparent 40%,
+        var(--bg-black) 70%);
+}
+
+#minimap::before {
     content: '';
     position: absolute;
     top: 50%;
@@ -715,7 +719,7 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
     opacity: 0.3;
 }
 
-#centerViewport::after, #minimap::after {
+#minimap::after {
     content: '';
     position: absolute;
     top: 50%;
@@ -730,7 +734,9 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
 #minimapCanvas, #centerViewportCanvas {
     width: 100%;
     height: 100%;
-    position: relative;
+    position: absolute;
+    inset: 0;
+    display: block; /* avoid baseline spacing */
     z-index: 1;
 }
 

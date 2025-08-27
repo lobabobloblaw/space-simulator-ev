@@ -142,11 +142,26 @@ export default class TargetCamRenderer {
       if (nowTs - (this._lastRenderTs||0) < throttle) return;
       this._lastRenderTs = nowTs;
     } catch(_) {}
-    const dpr = (this.canvas && this.canvas.__dpr) ? this.canvas.__dpr : 1;
-    const wDev = this.canvas.width || 100;
-    const hDev = this.canvas.height || 100;
-    const wCss = wDev / dpr;
-    const hCss = hDev / dpr;
+    let dpr = (this.canvas && this.canvas.__dpr) ? this.canvas.__dpr : (window.devicePixelRatio || 1);
+    dpr = Math.max(1, Math.min(3, dpr));
+    let wDev = this.canvas.width || 100;
+    let hDev = this.canvas.height || 100;
+    // Measure actual CSS pixel size to avoid rounding drift at snap sizes
+    // Prefer measuring the panel (parent) CSS box to avoid subpixel drift
+    let wCss = wDev / dpr, hCss = hDev / dpr;
+    try {
+      const host = this.canvas.parentElement || this.canvas;
+      const r = host.getBoundingClientRect();
+      if (r && r.width && r.height) { wCss = r.width; hCss = r.height; }
+      const expW = Math.max(1, Math.round(wCss * dpr));
+      const expH = Math.max(1, Math.round(hCss * dpr));
+      if (wDev !== expW || hDev !== expH) {
+        this.canvas.width = expW; this.canvas.height = expH;
+        this.canvas.__dpr = dpr;
+        try { this.canvas.style.width = Math.round(wCss) + 'px'; this.canvas.style.height = Math.round(hCss) + 'px'; } catch(_) {}
+        wDev = expW; hDev = expH;
+      }
+    } catch(_) {}
     try { this.ctx.setTransform(1,0,0,1,0,0); } catch(_) {}
     this.ctx.globalAlpha = 1;
     this.ctx.globalCompositeOperation = 'source-over';
@@ -185,8 +200,8 @@ export default class TargetCamRenderer {
     const fxActive = inTransition || inBlip;
     const fxEnabled = !!window.TC_FX;
     if (fxEnabled && fxActive) {
-      this.drawStaticNoise(w,h,0.08);
-      this.drawScanlines(w,h,0.06);
+      this.drawStaticNoise(wDev,hDev,0.08);
+      this.drawScanlines(wDev,hDev,0.06);
     }
 
     const ctx = this.ctx;
@@ -194,12 +209,39 @@ export default class TargetCamRenderer {
     try {
       // Switch to CSS pixel coordinates for drawing
       ctx.setTransform(dpr,0,0,dpr,0,0);
-      const cx = wCss/2, cy = hCss/2;
+      // Use exact CSS center to match container pseudo-elements and gradient
+      // Compensate for any rounding mismatch between CSS size and backing store
+      const mismatchX = (wCss - (wDev / dpr));
+      const mismatchY = (hCss - (hDev / dpr));
+      const cx = (wCss * 0.5) + (mismatchX * 0.5);
+      const cy = (hCss * 0.5) + (mismatchY * 0.5);
       ctx.translate(cx, cy);
+      // Backdrop: subtle radial glow + crosshair lines (drawn in-canvas to ensure exact centering)
+      try {
+        const rBack = Math.min(wCss, hCss) * 0.5;
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rBack);
+        // Softer cyan center, fade to transparent mid, black perimeter
+        g.addColorStop(0.0, 'rgba(0, 180, 255, 0.14)');
+        g.addColorStop(0.35, 'rgba(0, 130, 255, 0.08)');
+        g.addColorStop(0.65, 'rgba(0, 0, 0, 0.00)');
+        g.addColorStop(1.0, 'rgba(0, 0, 0, 0.85)');
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = g;
+        // Fill the whole panel rect so we fully cover edge pixels
+        ctx.fillRect(-wCss/2, -hCss/2, wCss, hCss);
+        // Crosshair lines
+        ctx.strokeStyle = 'rgba(170, 238, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(-wCss/2, 0); ctx.lineTo(wCss/2, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -hCss/2); ctx.lineTo(0, hCss/2); ctx.stroke();
+        ctx.restore();
+      } catch(_) {}
+
       // Direction ring/wedge
       let ang = 0;
       if (npc) { const dx = npc.x - state.ship.x, dy = npc.y - state.ship.y; ang = Math.atan2(dy, dx); }
-      const radius = Math.min(wCss,hCss) * 0.5 - 4;
+      const radius = Math.min(wCss, hCss) * 0.5 - 4;
       ctx.save();
       let ringAlpha = 0.25;
       if (this.targetCamTransition) {
@@ -304,6 +346,8 @@ export default class TargetCamRenderer {
       }
     } catch(_) {}
 
+      // Always-on faint static for subtle persistence
+      try { this.drawStaticNoise(wDev, hDev, 0.03, false); } catch(_) {}
       if (fxEnabled && fxActive) { this.drawStaticNoise(wDev,hDev,0.05,true); this.drawRollingBand(wDev,hDev,0.06); }
       // Optional path label
       if (!((typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24)) && window.TC_SHOW_PATH && this._lastPath) {

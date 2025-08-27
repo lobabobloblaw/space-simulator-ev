@@ -254,6 +254,22 @@ export class RenderSystem {
         // Set initial canvas size
         this.resizeCanvas();
 
+        // Observe panel (minimap/targetCam) CSS size changes and resync backing stores
+        try {
+            if (typeof ResizeObserver !== 'undefined') {
+                const ro = new ResizeObserver(() => {
+                    try { this.resizeCanvas(); } catch(_) {}
+                });
+                if (this.minimapCanvas) ro.observe(this.minimapCanvas);
+                if (this.targetCanvas) ro.observe(this.targetCanvas);
+                this._panelRO = ro;
+            } else {
+                // Fallback: periodically verify sizes briefly after init
+                setTimeout(() => { try { this.resizeCanvas(); } catch(_) {} }, 0);
+                setTimeout(() => { try { this.resizeCanvas(); } catch(_) {} }, 150);
+            }
+        } catch(_) {}
+
         // Safety: ensure visual world data exists (stars/asteroids/planets)
         // In theory initializeGameState sets these, but if anything raced or failed,
         // we restore minimal visuals here to avoid an empty scene.
@@ -2855,12 +2871,14 @@ export class RenderSystem {
         const resizePanel = (canvas, ctx) => {
             if (!canvas || !ctx) return;
             const rect = canvas.getBoundingClientRect();
-            const w = Math.max(1, Math.floor(rect.width || canvas.clientWidth || canvas.width));
-            const h = Math.max(1, Math.floor(rect.height || canvas.clientHeight || canvas.height));
+            // Round CSS size to avoid subpixel mismatch with crosshair/gradients
+            const w = Math.max(1, Math.round(rect.width || canvas.clientWidth || canvas.width));
+            const h = Math.max(1, Math.round(rect.height || canvas.clientHeight || canvas.height));
             canvas.style.width = w + 'px';
             canvas.style.height = h + 'px';
-            canvas.width = Math.max(1, Math.floor(w * dpr));
-            canvas.height = Math.max(1, Math.floor(h * dpr));
+            // Match device-pixel backing store with rounded CSS size
+            canvas.width = Math.max(1, Math.round(w * dpr));
+            canvas.height = Math.max(1, Math.round(h * dpr));
             canvas.__dpr = dpr; ctx.__dpr = dpr;
         };
         try { resizePanel(this.minimapCanvas, this.minimapCtx); } catch(_) {}
@@ -2890,6 +2908,7 @@ export class RenderSystem {
         if (this.eventBus && this.handleShieldHit) {
             this.eventBus.off(GameEvents.SHIELD_HIT, this.handleShieldHit);
         }
+        try { if (this._panelRO && this._panelRO.disconnect) this._panelRO.disconnect(); } catch(_) {}
         // No persistent listeners kept for TARGET_SET/CLEAR here as system lifetime == app
         console.log('[RenderSystem] Destroyed');
     }

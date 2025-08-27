@@ -63,13 +63,18 @@ git push
 - Save/load system
 - Mission system
 - Cyberpunk UI with particle effects
+- HiDPI crispness: DPR-aware canvases and transforms
+- TargetCam: in-canvas gradient + crosshair; pixel-perfect at UI snap sizes
 
-## Latest Updates (Session 51)
+## Latest Updates (Session 65–66)
 
-- Rendering refactor: world vs screen passes enforced via helpers; extracted renderers (`ExplosionRenderer`, `ThrusterFXRenderer`, `HUDRenderer`). See `docs/RENDERING_NOTES.md`.
-- Explosions: flipbook is screen-space (reliable placement); rings/shockwaves world-space; quality policy in one place.
-- FX Thrusters: Player FX ON → cyan plume + short beam; vector thrust remains visible. NPC vector thrust always visible (idle glow while coasting, brighter on thrust).
-- Debug Lint: Debug overlay (TAB) → Lint/Trace/Reset to detect & auto-reset canvas state leaks during development.
+- HiDPI: Canvases sized by devicePixelRatio; `withWorld/withScreen` apply DPR transforms.
+- TargetCam: moved gradient + crosshair into canvas; pixel-snapped center; backing store resync on UI snaps (80/70/60px); faint static always on.
+- Security/A11y: Added CSP meta; ARIA live region; DOM safety (removed innerHTML in landing details + trading lists).
+- Assets: LRU cap for atlas frame canvases; player-only sprite override support.
+- UI: Top-left logo overlay with version tag.
+
+See `INTERNAL_DEV_DOCS/targetcam_alignment.md` and `INTERNAL_DEV_DOCS/dpr_hidpi_notes.md` for details.
 
 Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
 
