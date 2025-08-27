@@ -303,7 +303,7 @@ export class SpawnSystem {
             d.vy = Math.sin(ang) * spd + asteroid.vy * 0.3;
             d.angle = Math.random() * Math.PI * 2;
             d.va = (Math.random()-0.5) * (DC.ROT_SPEED_RANGE ?? 0.15);
-            d.size = (DC.SIZE_MIN ?? 2) + Math.random() * (((DC.SIZE_MAX ?? 5) - (DC.SIZE_MIN ?? 2)));
+            d.size = (DC.SIZE_MIN ?? 1) + Math.random() * (((DC.SIZE_MAX ?? 3) - (DC.SIZE_MIN ?? 1)));
             d.color = ['#999','#aaa','#888','#777'][Math.floor(Math.random()*4)];
             d.lifetime = 0;
             d.maxLifetime = (DC.LIFETIME_MIN ?? 50) + Math.floor(Math.random() * (DC.LIFETIME_RANGE ?? 30));
@@ -326,7 +326,7 @@ export class SpawnSystem {
             d.vy = Math.sin(ang) * spd + asteroid.vy * 0.25;
             d.angle = Math.random() * Math.PI * 2;
             d.va = (Math.random()-0.5) * (DC.ROT_SPEED_RANGE ?? 0.12);
-            d.size = (DC.SIZE_MIN ?? 3) + Math.random() * (((DC.SIZE_MAX ?? 7) - (DC.SIZE_MIN ?? 3)));
+            d.size = (DC.SIZE_MIN ?? 2) + Math.random() * (((DC.SIZE_MAX ?? 4) - (DC.SIZE_MIN ?? 2)));
             d.color = ['#888','#777','#666'][Math.floor(Math.random()*3)];
             d.lifetime = 0;
             d.maxLifetime = (DC.LIFETIME_MIN ?? 80) + Math.floor(Math.random() * (DC.LIFETIME_RANGE ?? 40));
@@ -472,7 +472,7 @@ export class SpawnSystem {
         const { projectile, target } = data;
         // Skip asteroids (they have their own shards already)
         if (data.isAsteroid) return;
-        const count = 2 + Math.floor(Math.random() * 3);
+        const count = 2 + Math.floor(Math.random() * 2);
         for (let i = 0; i < count; i++) {
             const d = state.pools.debris.pop() || {};
             d.x = projectile.x; d.y = projectile.y;
@@ -482,7 +482,7 @@ export class SpawnSystem {
             d.vy = Math.sin(ang) * spd + (target?.vy||0)*0.2;
             d.angle = Math.random() * Math.PI * 2;
             d.va = (Math.random()-0.5) * 0.2;
-            d.size = 2 + Math.random()*3;
+            d.size = 1 + Math.random()*1.5;
             d.color = target?.color || '#ccc';
             d.lifetime = 0;
             d.maxLifetime = 40 + Math.floor(Math.random()*20);
@@ -651,8 +651,8 @@ export class SpawnSystem {
                 d.vx = Math.cos(ang) * spd; d.vy = Math.sin(ang) * spd;
                 d.angle = Math.random() * Math.PI * 2;
                 d.va = (Math.random()-0.5) * 0.15;
-                // Make chunks ~50% smaller overall to reduce visual bulk
-                d.size = ((data.size === 'large' ? 8 : 5) + Math.random() * 6) * 0.5;
+                // Make chunks even smaller to reduce visual bulk further
+                d.size = ((data.size === 'large' ? 8 : 5) + Math.random() * 6) * 0.3;
                 d.color = '#777';
                 d.lifetime = 0;
                 d.maxLifetime = 90 + Math.floor(Math.random()*60);

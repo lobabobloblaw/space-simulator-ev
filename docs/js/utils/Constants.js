@@ -327,8 +327,8 @@ export const GameConstants = {
                 COUNT_MAX: 11,          // inclusive
                 SPEED_MIN: 0.6,
                 SPEED_MAX: 1.8,
-                SIZE_MIN: 2,
-                SIZE_MAX: 5,
+                SIZE_MIN: 1,
+                SIZE_MAX: 3,
                 ROT_SPEED_RANGE: 0.15,  // ± range for angular velocity
                 LIFETIME_MIN: 50,
                 LIFETIME_RANGE: 30
@@ -338,8 +338,8 @@ export const GameConstants = {
                 COUNT_MAX: 6,           // inclusive
                 SPEED_MIN: 0.4,
                 SPEED_MAX: 1.4,
-                SIZE_MIN: 3,
-                SIZE_MAX: 7,
+                SIZE_MIN: 2,
+                SIZE_MAX: 4,
                 ROT_SPEED_RANGE: 0.12,
                 SIDES_MIN: 5,
                 SIDES_RANGE: 3,

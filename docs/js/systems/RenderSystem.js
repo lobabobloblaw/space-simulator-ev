@@ -831,8 +831,8 @@ export class RenderSystem {
                 const r = d.size || 6;
                 this.ctx.fillStyle = d.color || '#777';
                 this.ctx.strokeStyle = '#444';
-                // Scale stroke with size to avoid heavy outlines on small chunks
-                this.ctx.lineWidth = Math.max(0.4, Math.min(1.0, r * 0.08));
+                // Scale stroke with size to avoid heavy outlines on small chunks (reduced min for smaller debris)
+                this.ctx.lineWidth = Math.max(0.3, Math.min(0.9, r * 0.08));
                 this.ctx.beginPath();
                 for (let i = 0; i < d.points.length; i++) {
                     const a = (Math.PI * 2 / d.points.length) * i;
