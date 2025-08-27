@@ -410,8 +410,16 @@ export function getPlanetSpriteFromState(state, name) {
         if (!state) return null;
         state.assets = state.assets || {};
         const store = state.assets.planets || (state.assets.planets = {});
-        const key = String(name || '').toLowerCase().replace(/\s+/g, '_');
-        let img = store[key];
+        const baseKey = String(name || '').toLowerCase().replace(/\s+/g, '_');
+        // Optional runtime overrides, e.g., window.PLANET_SPRITE_OVERRIDES = { terra_nova: 'terra_nova_1' }
+        let finalKey = baseKey;
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.PLANET_SPRITE_OVERRIDES && g.PLANET_SPRITE_OVERRIDES[baseKey]) {
+                finalKey = String(g.PLANET_SPRITE_OVERRIDES[baseKey]).toLowerCase().replace(/\s+/g, '_').replace(/\.png$/,'');
+            }
+        } catch(_) {}
+        let img = store[finalKey];
         if (img && (img.naturalWidth || img.width || img.complete)) return img;
         // Lazily create and begin loading. Default path convention: assets/planets/<slug>.png
         img = new Image();
@@ -420,11 +428,11 @@ export function getPlanetSpriteFromState(state, name) {
         // Resolve relative to docs/ root (two levels up from systems/)
         try {
             const root = new URL('../../', import.meta.url);
-            img.src = new URL(`assets/planets/${key}.png`, root).href;
+            img.src = new URL(`assets/planets/${finalKey}.png`, root).href;
         } catch (_) {
-            img.src = `./assets/planets/${key}.png`;
+            img.src = `./assets/planets/${finalKey}.png`;
         }
-        store[key] = img;
+        store[finalKey] = img;
         return img;
     } catch (_) { return null; }
 }

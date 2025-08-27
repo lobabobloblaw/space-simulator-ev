@@ -1,0 +1,7 @@
+[
+  { "name": "Terra Nova", "src": "./assets/planets/terra_nova.png" },
+  { "name": "Crimson Moon", "src": "./assets/planets/crimson_moon.png" },
+  { "name": "Ice World", "src": "./assets/planets/ice_world.png" },
+  { "name": "Mining Station", "src": "./assets/planets/mining_station.png" }
+]
+
