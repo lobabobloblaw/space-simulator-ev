@@ -24,7 +24,6 @@ export class UISystem {
         this.handleShipLanded = this.handleShipLanded.bind(this);
         this.handleShowPanel = this.handleShowPanel.bind(this);
         this.handleCloseOverlay = this.handleCloseOverlay.bind(this);
-        this.handleTrade = this.handleTrade.bind(this);
         this.handlePurchase = this.handlePurchase.bind(this);
         this.handleUIMessage = this.handleUIMessage.bind(this);
         this.handleTutorialUpdate = this.handleTutorialUpdate.bind(this);
@@ -133,7 +132,6 @@ export class UISystem {
         this.eventBus.on(GameEvents.MENU_CLOSE, this.handleCloseOverlay);
         
         // Trading events
-        this.eventBus.on(GameEvents.TRADE_COMPLETE, this.handleTrade);
         this.eventBus.on(GameEvents.SHIP_UPGRADE, this.handlePurchase);
         
         // UI messages
@@ -205,15 +203,6 @@ export class UISystem {
     }
     
     /**
-     * Handle trade event
-     */
-    handleTrade(data) {
-        if (this.currentPanel === 'trading' && data.ship) {
-            this.updateTradingPanel(data.ship, data.commodities);
-        }
-    }
-    
-    /**
      * Handle purchase event
      */
     handlePurchase(data) {
@@ -229,6 +218,11 @@ export class UISystem {
         if (!data || !data.message) return;
         // Enqueue and play sequentially to avoid stacked overlap
         this.enqueueNotification(data.message, data.type || 'info', data.duration || 2000);
+        // Mirror to the ARIA live region so screen readers hear game messages
+        try {
+            const live = document.getElementById('gameAnnouncements');
+            if (live) live.textContent = String(data.message);
+        } catch(_) {}
     }
     
     /**
@@ -944,117 +938,6 @@ export class UISystem {
         }
     }
     
-    /**
-     * Update trading panel
-     */
-    updateTradingPanel(ship, commodities) {
-        if (!ship || !ship.currentPlanet) return;
-        
-        // Update status
-        const creditsElement = document.getElementById('tradeCredits');
-        const cargoElement = document.getElementById('tradeCargo');
-        
-        if (creditsElement) creditsElement.textContent = ship.credits;
-        
-        const cargoUsed = Array.isArray(ship.cargo)
-            ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
-            : 0;
-        if (cargoElement) cargoElement.textContent = `${cargoUsed}/${ship.cargoCapacity}`;
-        
-        // Calculate total cargo value
-        let totalValue = 0;
-        if (Array.isArray(ship.cargo)) {
-            for (let item of ship.cargo) {
-                const qty = (item?.quantity ?? 1);
-                const price = ship.currentPlanet?.commodityPrices?.[item?.type];
-                if (Number.isFinite(price)) {
-                    totalValue += qty * price;
-                }
-            }
-        }
-        
-        // Build commodity list
-        const list = document.getElementById('commodityList');
-        if (!list) return;
-        
-        list.innerHTML = '';
-        
-        // Add sell all button if carrying cargo
-        if (cargoUsed > 0) {
-            const sellAllRow = document.createElement('div');
-            sellAllRow.className = 'commodity-row';
-            sellAllRow.style.borderBottom = '2px solid #333';
-            sellAllRow.innerHTML = `
-                <div class="commodity-info">
-                    <div class="commodity-name">💰 Sell All Cargo</div>
-                    <div>Total value: ${totalValue}</div>
-                </div>
-                <div class="buy-sell-buttons">
-                    <button class="trade-btn" data-action="sellAll">Sell All</button>
-                </div>
-            `;
-            list.appendChild(sellAllRow);
-        }
-        
-        // Add commodity rows
-        if (commodities) {
-            for (let key in commodities) {
-                const commodity = commodities[key];
-                const price = ship.currentPlanet.commodityPrices[key];
-                const basePrice = commodity.basePrice;
-                const owned = ship.cargo ? ship.cargo.find(c => c.type === key) : null;
-                const ownedQty = owned ? owned.quantity : 0;
-                
-                // Show price indicator
-                let priceIndicator = '';
-                if (price < basePrice * 0.7) {
-                    priceIndicator = ' 📉'; // Good buy price
-                } else if (price > basePrice * 1.3) {
-                    priceIndicator = ' 📈'; // Good sell price
-                }
-                
-                const row = document.createElement('div');
-                row.className = 'commodity-row';
-                row.innerHTML = `
-                    <div class="commodity-info">
-                        <div class="commodity-name">${commodity.icon} ${commodity.name}</div>
-                        <div>Owned: ${ownedQty}</div>
-                    </div>
-                    <div class="price">${price}${priceIndicator}</div>
-                    <div class="buy-sell-buttons">
-                        <button class="trade-btn" data-action="buy" data-type="${key}" data-price="${price}">Buy</button>
-                        <button class="trade-btn" data-action="sell" data-type="${key}" ${ownedQty === 0 ? 'disabled' : ''}>Sell</button>
-                    </div>
-                `;
-                list.appendChild(row);
-            }
-        }
-    }
-
-    /**
-     * Delegate trading actions to EventBus (no globals)
-     */
-    attachTradingDelegates() {
-        const list = document.getElementById('commodityList');
-        if (!list || this._tradeDelegatesAttached) return;
-        this._tradeDelegatesAttached = true;
-        list.addEventListener('click', (e) => {
-            const btn = e.target.closest('.trade-btn');
-            if (!btn || btn.disabled) return;
-            const action = btn.getAttribute('data-action');
-            if (!action) return;
-            if (action === 'buy') {
-                const type = btn.getAttribute('data-type');
-                const price = Number(btn.getAttribute('data-price'));
-                this.eventBus.emit(GameEvents.TRADE_BUY, { type, price });
-            } else if (action === 'sell') {
-                const type = btn.getAttribute('data-type');
-                this.eventBus.emit(GameEvents.TRADE_SELL, { type });
-            } else if (action === 'sellAll') {
-                this.eventBus.emit(GameEvents.TRADE_SELL_ALL, {});
-            }
-        });
-    }
     
     /**
      * Update shop panel
@@ -1101,24 +984,25 @@ export class UISystem {
                 
                 const shopItem = document.createElement('div');
                 shopItem.className = 'shop-item';
-                shopItem.innerHTML = `
-                    <div class="item-info">
-                        <div class="item-name">${item.name}</div>
-                        <div style="font-size: 10px; color: #999;">${item.description}</div>
-                    </div>
-                    <div class="price">${item.price}</div>
-                    <button class="shop-buy-button" 
-                            data-item-id="${itemId}" 
-                            ${alreadyOwned || ship.credits < item.price ? 'disabled' : ''}>
-                        ${alreadyOwned ? 'Owned' : 'Buy'}
-                    </button>
-                `;
+                const info = document.createElement('div'); info.className = 'item-info';
+                const name = document.createElement('div'); name.className = 'item-name'; name.textContent = item.name;
+                const desc = document.createElement('div'); desc.style.cssText = 'font-size: 10px; color: #999;'; desc.textContent = item.description;
+                info.appendChild(name); info.appendChild(desc);
+                const price = document.createElement('div'); price.className = 'price'; price.textContent = item.price;
+                const btn = document.createElement('button'); btn.className = 'shop-buy-button';
+                btn.setAttribute('data-item-id', itemId);
+                if (alreadyOwned || ship.credits < item.price) btn.disabled = true;
+                btn.textContent = alreadyOwned ? 'Owned' : 'Buy';
+                shopItem.appendChild(info); shopItem.appendChild(price); shopItem.appendChild(btn);
                 list.appendChild(shopItem);
             }
         }
-        
+
         if (itemsToShow.length === 0) {
-            list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No items available at this station</div>';
+            const empty = document.createElement('div');
+            empty.style.cssText = 'padding: 20px; text-align: center; color: #999;';
+            empty.textContent = 'No items available at this station';
+            list.appendChild(empty);
         }
     }
 
@@ -1518,7 +1402,6 @@ export class UISystem {
         this.eventBus.off(GameEvents.SHIP_LANDED, this.handleShipLanded);
         this.eventBus.off(GameEvents.MENU_OPEN, this.handleShowPanel);
         this.eventBus.off(GameEvents.MENU_CLOSE, this.handleCloseOverlay);
-        this.eventBus.off(GameEvents.TRADE_COMPLETE, this.handleTrade);
         this.eventBus.off(GameEvents.SHIP_UPGRADE, this.handlePurchase);
         this.eventBus.off(GameEvents.UI_MESSAGE, this.handleUIMessage);
         this.eventBus.off(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);

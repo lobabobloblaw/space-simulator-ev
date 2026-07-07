@@ -266,34 +266,6 @@ export class PhysicsSystem {
     }
     
     /**
-     * Update projectile physics
-     */
-    updateProjectilePhysics(state, deltaTime) {
-        // Access projectiles from state
-        const projectiles = state.projectiles;
-        if (!projectiles) return;
-        
-        for (let i = projectiles.length - 1; i >= 0; i--) {
-            const proj = projectiles[i];
-            
-            // Simple linear motion (no gravity in space)
-            proj.x += proj.vx;
-            proj.y += proj.vy;
-            
-            // Update lifetime
-            proj.lifetime++;
-            
-            // Remove old projectiles
-            if (proj.lifetime > 60) {
-                projectiles.splice(i, 1);
-                
-                // Emit projectile expired event
-                this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_EXPIRED, { projectile: proj });
-            }
-        }
-    }
-    
-    /**
      * Check all collisions
      */
     checkCollisions(state) {

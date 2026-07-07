@@ -60,19 +60,20 @@ const systems = {};
 
 // ---- initializeGameState() helper splits (no behavior changes) ----
 async function loadGameData() {
-    let planetsData = [], missionsData = [];
+    let planetsData = [], missionsData = [], npcTypesData = {};
     try {
         console.log('[EventBus] Attempting to import gameData.js...');
         const gameDataModule = await import('./data/gameData.js');
         planetsData = gameDataModule.planets || [];
         missionsData = gameDataModule.missions || [];
+        npcTypesData = gameDataModule.npcTypes || {};
         console.log('[EventBus] Game data imported. Planets:', planetsData.length, 'Missions:', missionsData.length);
         if (!planetsData.length) console.error('[EventBus] WARNING: No planets in imported data!');
     } catch (e) {
         console.error('[EventBus] Failed to import game data:', e);
         console.error('[EventBus] Using empty arrays as fallback');
     }
-    return { planetsData, missionsData };
+    return { planetsData, missionsData, npcTypesData };
 }
 
 function loadSaveOrDefaults(state) {
@@ -154,20 +155,18 @@ function initShip(state, shipData) {
     console.log('[EventBus] Ship initialized with credits:', state.ship.credits);
 }
 
-function seedNPCs(state, planetsData) {
+function seedNPCs(state, planetsData, npcTypesData) {
     state.npcShips = [];
     const initialNPCCount = 3 + Math.floor(Math.random() * 3);
     const npcTypes = ['trader', 'freighter', 'patrol', 'pirate'];
-    const npcTemplates = {
-        freighter: { size: 18, color: '#4488ff', maxSpeed: 0.25, thrust: 0.002, turnSpeed: 0.008, health: 80, maxHealth: 80, credits: 100, behavior: 'passive', weapon: { type: 'laser', damage: 5, cooldown: 30 } },
-        trader: { size: 12, color: '#44ff88', maxSpeed: 0.35, thrust: 0.003, turnSpeed: 0.01, health: 60, maxHealth: 60, credits: 75, behavior: 'passive', weapon: null },
-        patrol: { size: 14, color: '#8888ff', maxSpeed: 0.45, thrust: 0.004, turnSpeed: 0.012, health: 100, maxHealth: 100, credits: 50, behavior: 'lawful', weapon: { type: 'rapid', damage: 7, cooldown: 9 } },
-        pirate: { size: 10, color: '#ff4444', maxSpeed: 0.5, thrust: 0.005, turnSpeed: 0.015, health: 70, maxHealth: 70, credits: 150, behavior: 'aggressive', weapon: { type: 'plasma', damage: 15, cooldown: 26 } }
-    };
+    // Canonical stat table from gameData (shared with SpawnSystem/DebugSystem);
+    // deep-copy so per-NPC spreads can't mutate the shared module data
+    const npcTemplates = JSON.parse(JSON.stringify(npcTypesData || {}));
     state.nextEntityId = state.nextEntityId || 1;
     for (let i = 0; i < initialNPCCount; i++) {
         const type = npcTypes[Math.floor(Math.random() * npcTypes.length)];
         const template = npcTemplates[type];
+        if (!template) continue;
         const angle = Math.random() * Math.PI * 2;
         const distance = 300 + Math.random() * 700;
         const x = Math.cos(angle) * distance;
@@ -298,12 +297,12 @@ function initOtherState(state, reputationData) {
 async function initializeGameState() {
     const state = stateManager.state;
     console.log('[EventBus] initializeGameState called');
-    const { planetsData, missionsData } = await loadGameData();
+    const { planetsData, missionsData, npcTypesData } = await loadGameData();
     const { shipData, missionData, reputationData } = loadSaveOrDefaults(state);
     initShip(state, shipData);
     state.planets = planetsData;
     console.log('[EventBus] Assigned planets to state:', state.planets?.length);
-    seedNPCs(state, planetsData);
+    seedNPCs(state, planetsData, npcTypesData);
     initAsteroids(state);
     initStars(state);
     initMissions(state, missionsData, missionData);

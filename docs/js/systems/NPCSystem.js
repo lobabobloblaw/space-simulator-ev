@@ -293,28 +293,11 @@ export default class NPCSystem {
      * Handle NPC death
      */
     handleNPCDeath(npc, ship, state) {
-        // Credits, kills, and reputation are handled centrally in main_eventbus_pure NPC_DEATH handler
-        // Keep visuals/loot here only.
-        // Create explosion effect
-        this.eventBus.emit(GameEvents.EXPLOSION_CREATED, {
-            x: npc.x,
-            y: npc.y,
-            size: 'large'
-        });
-        
-        // Create multiple smaller explosions for dramatic effect
-        for (let j = 0; j < 4; j++) {
-            const angle = (Math.PI * 2 / 4) * j;
-            const dist = npc.size * 0.8;
-            this.eventBus.emit(GameEvents.EXPLOSION_CREATED, {
-                x: npc.x + Math.cos(angle) * dist,
-                y: npc.y + Math.sin(angle) * dist,
-                size: 'small'
-            });
-        }
-        
-        // Pirate loot drops are handled by SpawnSystem's NPC_DEATH handler;
-        // dropping here as well doubled the loot per kill.
+        // Credits, kills, and reputation are handled centrally in the
+        // main_eventbus_pure NPC_DEATH handler, which also spawns the death
+        // explosion. Pirate loot drops are handled by SpawnSystem's NPC_DEATH
+        // handler. (This method previously emitted EXPLOSION_CREATED events
+        // that had no subscriber, and rolled a duplicate loot drop.)
 
         // Emit death event
         this.eventBus.emit(GameEvents.NPC_DESTROYED, { npc });

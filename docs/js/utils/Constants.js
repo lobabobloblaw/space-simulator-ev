@@ -174,7 +174,6 @@ export const GameConstants = {
             trader: 300
         },
         
-        PURSUIT_TIMEOUT: 300,      // Frames before giving up pursuit
         FLEE_DISTANCE: 200,        // Distance to maintain when fleeing
         PATROL_RADIUS: 300,        // Radius of patrol patterns
         

@@ -1,13 +1,23 @@
 # Project Review — Galaxy Trader (July 2026)
 
-> **Status update:** the High-severity items in §1 (double-execution family, triple
-> death sequence, no-op pause, TargetCam idle-gate starvation) and §2 (persistence)
-> have been fixed in the commit following this review, along with the star-wrap
-> modulo, hostility angle seam, audio mute/volume bugs, debug-overlay escaping,
-> CSP `wasm-unsafe-eval`, and the tracked `server.pid`. All fixes were verified
-> end-to-end with a headless-browser test (11/11 checks). The remaining sections
-> (dead-code deletion, stat-table unification, listener-leak cleanup, CI) are
-> still open.
+> **Status update:** the review's action plan has been executed in the commits
+> following this document. Fixed and verified end-to-end with a headless-browser
+> smoke test (now committed as `tests/smoke.mjs` and run in CI):
+> §1 double-execution family, triple death sequence, no-op pause, TargetCam
+> idle-gate starvation; §2 persistence (schema drift, engine re-derivation,
+> manual-save misclassification, HUD crash guard); §4 dead code (~17k deleted
+> lines: 6 entry points, Game/MigrationBridge, 2 planet renderers, 3 dead save
+> systems, the legacy TargetCam pipeline, 26 published test/backup HTML pages,
+> raw assets and the duplicate chiptune-3 tree); §5 stat tables (gameData.npcTypes
+> is now the single NPC table consumed by SpawnSystem/seed/debug; WeaponSystem's
+> fallback reads GameConstants); §6 CSP `wasm-unsafe-eval`, shop/debug panels off
+> unsafe `innerHTML`, ARIA live region wired to UI messages; §7 GitHub Actions
+> smoke workflow; §8 star-wrap modulo and hostility-angle seam. Still open
+> (design decisions, not defects): mission checks vs. descriptions (kills vs.
+> pirateKills, credits-total vs. trading-profit), the +50cr free landing grant,
+> NPC firing path ignoring per-weapon speed/accuracy (`fireNPCProjectile` is the
+> better unused implementation), remaining renderer perf items (§4 hot spots,
+> renderer-mutates-sim), and StateManager's Proxy layer (§3).
 
 Scope: full review of the shipped build (`docs/` as served by GitHub Pages, entry
 `docs/js/main_eventbus_pure.js`) plus repo hygiene. Every finding below was verified

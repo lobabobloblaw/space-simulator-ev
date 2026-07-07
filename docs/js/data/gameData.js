@@ -2,58 +2,57 @@
  * All game data and configuration
  */
 
+// Canonical NPC stat table. SpawnSystem, the initial world seed, and the
+// debug spawner all read from here — values match live gameplay (this table
+// previously carried a stale older design that only DebugSystem still used).
 export const npcTypes = {
-    freighter: { 
-        color: "#8B7355", 
+    freighter: {
+        color: "#4488ff",
         behavior: "passive",
         maxSpeed: 0.25,
         thrust: 0.002,
-        turnSpeed: 0.006,
-        size: 22,
-        width: 28,
-        credits: 800,
-        health: 150,
-        maxHealth: 150,
-        weapon: { type: "laser", damage: 3, cooldown: 40 }
+        turnSpeed: 0.008,
+        size: 18,
+        credits: 100,
+        health: 80,
+        maxHealth: 80,
+        weapon: { type: "laser", damage: 5, cooldown: 30 }
     },
-    trader: { 
-        color: "#95A5A6", 
+    trader: {
+        color: "#44ff88",
         behavior: "passive",
+        maxSpeed: 0.35,
+        thrust: 0.003,
+        turnSpeed: 0.01,
+        size: 12,
+        credits: 75,
+        health: 60,
+        maxHealth: 60,
+        weapon: null
+    },
+    pirate: {
+        color: "#ff4444",
+        behavior: "aggressive",
+        maxSpeed: 0.5,
+        thrust: 0.005,
+        turnSpeed: 0.015,
+        size: 10,
+        credits: 150,
+        health: 70,
+        maxHealth: 70,
+        weapon: { type: "plasma", damage: 15, cooldown: 25 }
+    },
+    patrol: {
+        color: "#8888ff",
+        behavior: "lawful",
         maxSpeed: 0.45,
         thrust: 0.004,
         turnSpeed: 0.012,
-        size: 12,
-        width: 14,
-        credits: 200,
-        health: 50,
-        maxHealth: 50,
-        weapon: null
-    },
-    pirate: { 
-        color: "#E74C3C", 
-        behavior: "aggressive",
-        maxSpeed: 0.7,
-        thrust: 0.007,
-        turnSpeed: 0.02,
-        size: 11,
-        width: 12,
-        credits: 150,
-        health: 80,
-        maxHealth: 80,
-        weapon: { type: "laser", damage: 10, cooldown: 18 }
-    },
-    patrol: { 
-        color: "#1E3A5F",
-        behavior: "lawful",
-        maxSpeed: 1.2,
-        thrust: 0.015,
-        turnSpeed: 0.08,
-        size: 16,
-        width: 18,
-        credits: 100,
-        health: 150,
-        maxHealth: 150,
-        weapon: { type: "rapid", damage: 6, cooldown: 20 }
+        size: 14,
+        credits: 50,
+        health: 100,
+        maxHealth: 100,
+        weapon: { type: "rapid", damage: 7, cooldown: 8 }
     }
 };
 
