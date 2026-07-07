@@ -146,15 +146,16 @@ export class AudioSystem {
      */
     handleToggleSound() {
         // Toggle global audio (SFX + music)
-        const wasPlaying = this.music && this.music.enabled;
         this.enabled = !this.enabled;
         this.syncState();
         if (!this.enabled) {
-            // Mute: pause music and stop any synth nodes
+            // Mute: remember whether music was playing (pauseMusic clears
+            // music.enabled, so this must be captured before pausing)
+            this._musicWasPlayingBeforeMute = !!(this.music && this.music.enabled);
             try { this.pauseMusic(); } catch(_) {}
         } else {
-            // Unmute: resume music if it was previously on
-            if (wasPlaying) { try { this.playMusic(); } catch(_) {} }
+            // Unmute: resume music if it was playing when muted
+            if (this._musicWasPlayingBeforeMute) { try { this.playMusic(); } catch(_) {} }
         }
         // Notify UI
         this.eventBus.emit(GameEvents.AUDIO_STATE_CHANGED, { enabled: this.enabled });
@@ -312,7 +313,7 @@ export class AudioSystem {
         filter.connect(gain);
         gain.connect(this.context.destination);
         
-        gain.gain.setValueAtTime(small ? 0.2 : 0.4 * this.masterVolume, this.context.currentTime);
+        gain.gain.setValueAtTime((small ? 0.2 : 0.4) * this.masterVolume, this.context.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.3);
         
         noise.start();

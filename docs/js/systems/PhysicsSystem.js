@@ -112,14 +112,10 @@ export class PhysicsSystem {
         // Update NPC physics (when migrated)
         this.updateNPCPhysics(state, deltaTime);
         
-        // Projectiles are updated in WeaponSystem; avoid double-updating here
-        
-        // Update asteroid physics (when migrated)
-        this.updateAsteroidPhysics(state, deltaTime);
-        
-        // Update pickup physics (when migrated)
-        this.updatePickupPhysics(state, deltaTime);
-        
+        // Projectiles are updated in WeaponSystem; asteroids and pickups are
+        // integrated in SpawnSystem (which also owns their lifecycle/expiry).
+        // Avoid double-updating any of them here.
+
         // Check collisions
         this.checkCollisions(state);
         
@@ -220,11 +216,8 @@ export class PhysicsSystem {
             ship.health = Math.min(ship.maxHealth, ship.health + rate);
         }
         
-        // Update weapon cooldown
-        if (ship.weaponCooldown > 0) {
-            ship.weaponCooldown--;
-        }
-        
+        // Weapon cooldown is owned by WeaponSystem.processWeaponInput; do not decrement here
+
         // Update landing cooldown
         if (ship.landingCooldown > 0) {
             ship.landingCooldown--;
@@ -301,84 +294,14 @@ export class PhysicsSystem {
     }
     
     /**
-     * Update asteroid physics
-     */
-    updateAsteroidPhysics(state, deltaTime) {
-        // Access asteroids from state
-        const asteroids = state.asteroids;
-        if (!asteroids) return;
-        
-        for (let asteroid of asteroids) {
-            // Update position
-            asteroid.x += asteroid.vx;
-            asteroid.y += asteroid.vy;
-            
-            // Update rotation
-            if (asteroid.rotationSpeed) {
-                asteroid.rotation = (asteroid.rotation || 0) + asteroid.rotationSpeed;
-            }
-            
-            // Wrap around world boundaries
-            if (asteroid.x > this.WORLD_BOUNDS.max) asteroid.x = this.WORLD_BOUNDS.min;
-            if (asteroid.x < this.WORLD_BOUNDS.min) asteroid.x = this.WORLD_BOUNDS.max;
-            if (asteroid.y > this.WORLD_BOUNDS.max) asteroid.y = this.WORLD_BOUNDS.min;
-            if (asteroid.y < this.WORLD_BOUNDS.min) asteroid.y = this.WORLD_BOUNDS.max;
-            
-            // Slight random drift
-            if (Math.random() < 0.002) {
-                asteroid.vx += (Math.random() - 0.5) * 0.05;
-                asteroid.vy += (Math.random() - 0.5) * 0.05;
-                
-                // Clamp velocity
-                asteroid.vx = Math.max(-0.4, Math.min(0.4, asteroid.vx));
-                asteroid.vy = Math.max(-0.4, Math.min(0.4, asteroid.vy));
-            }
-        }
-    }
-    
-    /**
-     * Update pickup physics
-     */
-    updatePickupPhysics(state, deltaTime) {
-        // Access pickups from state
-        const pickups = state.pickups;
-        if (!pickups) return;
-        
-        for (let i = pickups.length - 1; i >= 0; i--) {
-            const pickup = pickups[i];
-            
-            // Float in space with momentum
-            pickup.x += pickup.vx;
-            pickup.y += pickup.vy;
-            
-            // Apply friction to slow down
-            pickup.vx *= 0.99;
-            pickup.vy *= 0.99;
-            
-            // Update lifetime
-            pickup.lifetime++;
-            
-            // Remove expired pickups
-            if (pickup.lifetime >= pickup.maxLifetime) {
-                pickups.splice(i, 1);
-                
-                // Emit pickup expired event
-                this.eventBus.emit(GameEvents.PHYSICS_PICKUP_EXPIRED, { pickup });
-            }
-        }
-    }
-    
-    /**
      * Check all collisions
      */
     checkCollisions(state) {
         const ship = state.ship;
         if (!ship || ship.isDestroyed) return;
         
-        const projectiles = state.projectiles || [];
         const asteroids = state.asteroids || [];
         const pickups = state.pickups || [];
-        const npcShips = state.npcShips || [];
         
         // Clear previous collisions
         state.physics.collisions = [];
@@ -527,71 +450,9 @@ export class PhysicsSystem {
             }
         }
         
-        // Projectile collisions (simplified for now)
-        for (let i = projectiles.length - 1; i >= 0; i--) {
-            const proj = projectiles[i];
-            
-            // Check collision with player (if not player's projectile)
-            if (!proj.isPlayer) {
-                if (this.checkPointCircleCollision(proj, ship)) {
-                    // Emit projectile hit event
-                    this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
-                        projectile: proj,
-                        target: ship,
-                        isPlayer: true,
-                        index: i
-                    });
-                    
-                    // Record collision
-                    state.physics.collisions.push({
-                        type: 'projectile-ship',
-                        timestamp: Date.now()
-                    });
-                }
-            }
-            
-            // Check collision with NPCs
-            for (let npc of npcShips) {
-                if (proj.shooter === npc) continue;
-                
-                if (this.checkPointCircleCollision(proj, npc)) {
-                    // Emit projectile hit event
-                    this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
-                        projectile: proj,
-                        target: npc,
-                        isPlayer: false,
-                        index: i
-                    });
-                    
-                    // Record collision
-                    state.physics.collisions.push({
-                        type: 'projectile-npc',
-                        timestamp: Date.now()
-                    });
-                    break;
-                }
-            }
-            
-            // Check collision with asteroids
-            for (let asteroid of asteroids) {
-                if (this.checkPointCircleCollision(proj, asteroid)) {
-                    // Emit projectile hit event
-                    this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
-                        projectile: proj,
-                        target: asteroid,
-                        isAsteroid: true,
-                        index: i
-                    });
-                    
-                    // Record collision
-                    state.physics.collisions.push({
-                        type: 'projectile-asteroid',
-                        timestamp: Date.now()
-                    });
-                    break;
-                }
-            }
-        }
+        // Projectile collisions are detected and resolved in WeaponSystem
+        // (damage, removal, effects, PHYSICS_PROJECTILE_HIT emission).
+        // Duplicating the sweep here caused double hit events per impact.
     }
     
     /**

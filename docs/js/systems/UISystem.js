@@ -456,8 +456,9 @@ export class UISystem {
         if (this._hudCache.values.location !== locStr) { this._hudCache.values.location = locStr; updateElement('location', locStr); }
         const credStr = String(ship.credits || 0);
         if (this._hudCache.values.credits !== credStr) { this._hudCache.values.credits = credStr; updateElement('credits', credStr); }
-        updateElement('weapon', ship.weapons && ship.weapons.length > 0 ? 
-            ship.weapons[ship.currentWeapon].type.toUpperCase() : 'EQUIP');
+        const curWeapon = ship.weapons && ship.weapons.length > 0
+            ? ship.weapons[ship.currentWeapon] || ship.weapons[0] : null;
+        updateElement('weapon', curWeapon ? String(curWeapon.type).toUpperCase() : 'EQUIP');
         // Kills and target readouts removed from HUD by design
     }
 
@@ -926,12 +927,10 @@ export class UISystem {
             }
         } else if (panel === 'trading') {
             if (tradingPanel) {
+                // TradingSystem owns the trading panel: it renders the
+                // commodity list and handles clicks. Rendering or attaching
+                // a second click delegate here doubled every buy/sell.
                 tradingPanel.style.display = 'flex';
-                if (ship && commodities) {
-                    this.updateTradingPanel(ship, commodities);
-                }
-                // Ensure delegated trading handlers are attached once
-                this.attachTradingDelegates();
             }
         } else if (panel === 'shop') {
             if (shopPanel) {

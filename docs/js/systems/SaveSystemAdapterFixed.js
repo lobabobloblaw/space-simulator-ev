@@ -18,7 +18,7 @@ export class SaveSystemAdapterFixed {
         this._saveDeferCount = 0;
         // Idle gating for autosave: require a streak of light frames before writing
         this._idleLightStreak = 0;
-        this._idleLightMs = 16;   // treat <16ms as light frame (stricter)
+        this._idleLightMs = 18;   // light-frame threshold; must exceed ~16.7ms vsync frames or the streak never completes on 60Hz displays
         this._idleLightNeed = 12; // require a longer streak of light frames
         this._idleRecheckMs = 180; // recheck cadence while waiting
         // Interaction gating: postpone autosave shortly after target cycling
@@ -43,7 +43,7 @@ export class SaveSystemAdapterFixed {
                 'x','y','vx','vy','angle',
                 'fuel','credits','health','shield','maxShield',
                 'cargo','weapons','currentWeapon',
-                'kills','engineLevel','weaponLevel','radarLevel',
+                'kills','pirateKills','engineLevel','weaponLevel','radarLevel',
                 'cargoCapacity','tutorialStage',
                 // optional UI/flags we might persist later
                 'isLanded','landedPlanet','landingCooldown','class'
@@ -117,7 +117,7 @@ export class SaveSystemAdapterFixed {
                 // Avoid saving on heavy frames to prevent visible hitches
                 try {
                     const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
-                    const isAuto = !data || data.reason === 'auto';
+                    const isAuto = !!(data && data.reason === 'auto');
                     if (isAuto && heavy && this._saveDeferCount < 20) { // extend defers to reduce visible hitches
                         this._saveDeferCount++;
                         setTimeout(run, 350);
@@ -126,7 +126,7 @@ export class SaveSystemAdapterFixed {
                 } catch(_) {}
                 // Interaction quiet window after target cycling
                 try {
-                    const isAuto = !data || data.reason === 'auto';
+                    const isAuto = !!(data && data.reason === 'auto');
                     if (isAuto) {
                         const now = performance.now ? performance.now() : Date.now();
                         if (now < (this._activeInteractUntil || 0)) {
@@ -137,7 +137,7 @@ export class SaveSystemAdapterFixed {
                 } catch(_) {}
                 // Skip autosave while profilers are active (to avoid test-induced "other" spikes)
                 try {
-                    const isAuto = !data || data.reason === 'auto';
+                    const isAuto = !!(data && data.reason === 'auto');
                     const diagOn = !!(typeof window !== 'undefined' && (window.RENDER_PROF_OVERLAY || window.RENDER_PROF_LOG || window.UPDATE_PROF_LOG || window.UPDATE_PROF_OVERLAY));
                     if (isAuto && diagOn) {
                         setTimeout(run, 1200);
@@ -146,7 +146,7 @@ export class SaveSystemAdapterFixed {
                 } catch(_) {}
                 // For autosave, also require a brief streak of light frames
                 try {
-                    const isAuto = !data || data.reason === 'auto';
+                    const isAuto = !!(data && data.reason === 'auto');
                     if (isAuto) {
                         const last = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
                         if (last > 0 && last <= this._idleLightMs) this._idleLightStreak += 1; else this._idleLightStreak = 0;
@@ -157,7 +157,7 @@ export class SaveSystemAdapterFixed {
                         this._idleLightStreak = 0;
                     }
                 } catch(_) {}
-                const light = (!data || data.reason === 'auto');
+                const light = !!(data && data.reason === 'auto');
                 const payload = this._buildSaveData(light);
                 // JSON + setItem can be a long task; do it here (idle/fallback timeout)
                 const json = JSON.stringify(payload);
@@ -216,6 +216,7 @@ export class SaveSystemAdapterFixed {
                 weapons: state.ship.weapons || [],
                 currentWeapon: state.ship.currentWeapon || 0,
                 kills: state.ship.kills || 0,
+                pirateKills: state.ship.pirateKills || 0,
                 engineLevel: state.ship.engineLevel || 1,
                 weaponLevel: state.ship.weaponLevel || 1,
                 radarLevel: state.ship.radarLevel || 0,
@@ -434,8 +435,9 @@ export class SaveSystemAdapterFixed {
             : 0;
         elements.cargo = cargoUsed + '/' + (ship.cargoCapacity || 10);
         elements.location = ship.isLanded && ship.landedPlanet ? ship.landedPlanet.name : 'SPACE';
-        elements.weapon = ship.weapons && ship.weapons.length > 0 ? 
-            ship.weapons[ship.currentWeapon].type.toUpperCase() : 'NONE';
+        const curWeapon = ship.weapons && ship.weapons.length > 0
+            ? ship.weapons[ship.currentWeapon] || ship.weapons[0] : null;
+        elements.weapon = curWeapon ? String(curWeapon.type).toUpperCase() : 'NONE';
         
         Object.keys(elements).forEach(id => {
             const el = document.getElementById(id);

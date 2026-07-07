@@ -1519,9 +1519,10 @@ export class RenderSystem {
             const screenX = star.x - this.camera.x * 0.05;
             const screenY = star.y - this.camera.y * 0.05;
             
-            // Wrap stars for infinite field
-            const wrappedX = ((screenX + 6000) % 12000) - 6000;
-            const wrappedY = ((screenY + 6000) % 12000) - 6000;
+            // Wrap stars for infinite field (double-mod keeps negative coords in range;
+            // JS % is sign-preserving, so a single mod left far-negative stars unwrapped)
+            const wrappedX = ((((screenX + 6000) % 12000) + 12000) % 12000) - 6000;
+            const wrappedY = ((((screenY + 6000) % 12000) + 12000) % 12000) - 6000;
             
             this.ctx.globalAlpha = star.brightness;
             this.ctx.fillStyle = star.color || '#ffffff';
@@ -1541,8 +1542,8 @@ export class RenderSystem {
             const screenX = star.x - this.camera.x * 0.2;
             const screenY = star.y - this.camera.y * 0.2;
             
-            const wrappedX = ((screenX + 4000) % 8000) - 4000;
-            const wrappedY = ((screenY + 4000) % 8000) - 4000;
+            const wrappedX = ((((screenX + 4000) % 8000) + 8000) % 8000) - 4000;
+            const wrappedY = ((((screenY + 4000) % 8000) + 8000) % 8000) - 4000;
             
             // Twinkling effect
             star.twinkle += star.twinkleSpeed || 0.02;
@@ -1558,8 +1559,8 @@ export class RenderSystem {
             const screenX = star.x - this.camera.x * 0.4;
             const screenY = star.y - this.camera.y * 0.4;
             
-            const wrappedX = ((screenX + 3000) % 6000) - 3000;
-            const wrappedY = ((screenY + 3000) % 6000) - 3000;
+            const wrappedX = ((((screenX + 3000) % 6000) + 6000) % 6000) - 3000;
+            const wrappedY = ((((screenY + 3000) % 6000) + 6000) % 6000) - 3000;
             
             this.ctx.globalAlpha = star.brightness;
             this.ctx.fillStyle = star.color || '#ffffff';

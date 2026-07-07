@@ -78,12 +78,15 @@ async function loadGameData() {
 function loadSaveOrDefaults(state) {
     const skipSave = /(?:^|[?&])(fresh|nosave)=1(?:&|$)/.test(window.location.search || '');
     const savedData = skipSave ? null : localStorage.getItem('galaxyTraderSave');
-    let shipData = null, missionData = null;
+    let shipData = null, missionData = null, reputationData = null;
     if (savedData) {
         try {
             const save = JSON.parse(savedData);
             shipData = save.ship || null;
-            missionData = save.missionSystem || null;
+            // SaveSystemAdapterFixed writes `mission: { activeId, completed }`;
+            // older saves used `missionSystem: { active, completed, available }`.
+            missionData = save.mission || save.missionSystem || null;
+            reputationData = save.reputation || null;
             console.log('[EventBus] Found save during init - loading credits:', shipData?.credits);
             state.__loadedFromSave = true;
         } catch (e) {
@@ -92,7 +95,7 @@ function loadSaveOrDefaults(state) {
     } else {
         console.log('[EventBus] No save found - using defaults');
     }
-    return { shipData, missionData };
+    return { shipData, missionData, reputationData };
 }
 
 function initShip(state, shipData) {
@@ -130,6 +133,18 @@ function initShip(state, shipData) {
         currentPlanet: null,
         pirateKills: shipData?.pirateKills ?? 0
     };
+    // Clamp weapon index against the restored weapons array; a drifted save
+    // (currentWeapon >= weapons.length) would otherwise crash every HUD update
+    if (!Array.isArray(state.ship.weapons) || state.ship.currentWeapon >= state.ship.weapons.length || state.ship.currentWeapon < 0) {
+        state.ship.currentWeapon = 0;
+    }
+    // Engine upgrades mutate maxSpeed/thrust at purchase time (ShopSystem) but
+    // only engineLevel is persisted, so re-derive them here or upgrades would
+    // silently lose their effect on every reload.
+    if (state.ship.engineLevel > 1 && shipData?.maxSpeed == null && shipData?.thrust == null) {
+        state.ship.maxSpeed = 0.8 + (state.ship.engineLevel - 1) * 0.2;
+        state.ship.thrust = 0.012 + (state.ship.engineLevel - 1) * 0.003;
+    }
     state.ship.faction = state.ship.faction || 'civilian';
     // Player-only sprite override (keeps NPC mappings unchanged). Respects saved spriteId.
     try { if (!state.ship.spriteId) state.ship.spriteId = 'ships/shuttle_1'; } catch(_) {}
@@ -254,15 +269,22 @@ function initStars(state) {
 }
 
 function initMissions(state, missionsData, missionData) {
+    const completed = missionData?.completed ?? [];
+    // Saved shape stores only the active mission's id; resolve it against the
+    // mission catalog. Legacy saves may carry the full `active` object instead.
+    let active = missionData?.active ?? null;
+    if (!active && missionData?.activeId) {
+        active = missionsData.find(m => m.id === missionData.activeId) || null;
+    }
     state.missionSystem = {
-        active: missionData?.active ?? null,
-        completed: missionData?.completed ?? [],
+        active,
+        completed,
         available: missionData?.available ?? missionsData
     };
 }
 
-function initOtherState(state) {
-    state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
+function initOtherState(state, reputationData) {
+    state.reputation = reputationData || state.reputation || { trader: 0, patrol: 0, pirate: 0 };
     state.npcSpawnState = { nextShipSpawn: Date.now() + Math.random() * 3000 + 2000 };
     state.audio = { enabled: false, masterVolume: 0.3, musicVolume: 0.6 };
     state.input = { keys: new Set(), mouse: { x: 0, y: 0, pressed: false }, touch: { x: 0, y: 0, active: false } };
@@ -277,7 +299,7 @@ async function initializeGameState() {
     const state = stateManager.state;
     console.log('[EventBus] initializeGameState called');
     const { planetsData, missionsData } = await loadGameData();
-    const { shipData, missionData } = loadSaveOrDefaults(state);
+    const { shipData, missionData, reputationData } = loadSaveOrDefaults(state);
     initShip(state, shipData);
     state.planets = planetsData;
     console.log('[EventBus] Assigned planets to state:', state.planets?.length);
@@ -285,7 +307,7 @@ async function initializeGameState() {
     initAsteroids(state);
     initStars(state);
     initMissions(state, missionsData, missionData);
-    initOtherState(state);
+    initOtherState(state, reputationData);
     console.log('[EventBus] Game state initialized in StateManager');
 }
 
@@ -296,17 +318,24 @@ function setupEventHandlers() {
     // Ship damage handling
     eventBus.on(GameEvents.SHIP_DAMAGE, (data) => {
         const state = stateManager.state;
-        if (state.ship.health <= 0) {
+        // Only emit death on the transition into 0 HP; StateManager also emits
+        // SHIP_DEATH on the health write, so the handler below must stay idempotent.
+        if (state.ship.health <= 0 && !state.ship.deathSeq && !state.ship.isDestroyed) {
             eventBus.emit(GameEvents.SHIP_DEATH);
         }
     });
-    
+
     // Ship death handling (add brief destruct sequence before explosion)
     eventBus.on(GameEvents.SHIP_DEATH, () => {
         const state = stateManager.state;
+        // Re-entry guard: SHIP_DEATH can arrive from multiple emitters for one
+        // kill (StateManager health-write hook, SHIP_DAMAGE handler, WeaponSystem).
+        // Run the destruct sequence exactly once.
+        if (state.ship.deathSeq || state.ship.isDestroyed) return;
         const now = performance.now ? performance.now() : Date.now();
         // Begin destruct sequence; delay final explosion a bit for drama
-        state.ship.deathSeq = { start: now, duration: (GameConstants?.SHIP?.DESTRUCT_SEQUENCE_MS ?? 600) };
+        const destructMs = (GameConstants?.SHIP?.DESTRUCT_SEQUENCE_MS ?? 600);
+        state.ship.deathSeq = { start: now, duration: destructMs };
         // Audio: subtle crackle during pre-explosion
         try { eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'crackle', intensity: 0.12 }); } catch(_) {}
         // Stop motion
@@ -326,9 +355,34 @@ function setupEventHandlers() {
                 type: 'error',
                 duration: (GameConstants?.UI?.NOTIF_SHIP_DESTROYED_MS ?? 5000)
             });
-        }, 600);
+        }, destructMs);
     });
     
+    // Pause / resume. These events previously had no subscriber in this build
+    // (only the unused legacy core/Game.js listened), so the world never paused.
+    // Note StateManager re-emits GAME_PAUSE/GAME_RESUME when `paused` changes,
+    // so these handlers must only write on an actual transition.
+    eventBus.on(GameEvents.GAME_PAUSE, () => {
+        const state = stateManager.state;
+        if (!state.paused) state.paused = true;
+    });
+    eventBus.on(GameEvents.GAME_RESUME, () => {
+        const state = stateManager.state;
+        if (state.paused) state.paused = false;
+    });
+    eventBus.on(GameEvents.GAME_PAUSE_TOGGLE, () => {
+        const state = stateManager.state;
+        state.paused = !state.paused;
+        // The landing overlay manages its own pause; only announce manual pauses in flight
+        if (!state.ship.isLanded) {
+            eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: state.paused ? 'PAUSED' : 'RESUMED',
+                type: 'info',
+                duration: 1500
+            });
+        }
+    });
+
     // Landing handling
     eventBus.on(GameEvents.INPUT_LAND, () => {
         const state = stateManager.state;
@@ -896,13 +950,21 @@ async function initGame() {
             ship: state.ship
         });
     }
-    if (state.missionSystem && state.missionSystem.available.length > 0) {
-        state.missionSystem.active = state.missionSystem.available[0];
-        eventBus.emit(GameEvents.UI_MESSAGE, {
-            message: `New Mission: ${state.missionSystem.active.title}`,
-            type: 'info',
-            duration: 3000
-        });
+    // Assign a starting mission only when none was restored from a save;
+    // unconditionally overwriting here clobbered the saved active mission
+    // and re-announced "New Mission" on every boot.
+    if (state.missionSystem && !state.missionSystem.active) {
+        const completed = state.missionSystem.completed || [];
+        const isCompleted = (m) => completed.some(c => (c && typeof c === 'object' ? c.id : c) === m.id);
+        const next = (state.missionSystem.available || []).find(m => !isCompleted(m));
+        if (next) {
+            state.missionSystem.active = next;
+            eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `New Mission: ${next.title}`,
+                type: 'info',
+                duration: 3000
+            });
+        }
     }
     
     // Autosave (idle/light gated in adapter). QA controls:

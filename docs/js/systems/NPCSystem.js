@@ -175,7 +175,9 @@ export default class NPCSystem {
                             const distToNPC = Math.sqrt((npc.x - proj.x) ** 2 + (npc.y - proj.y) ** 2);
                             if (distToNPC < 400) {
                                 const angleToNPC = Math.atan2(npc.y - proj.y, npc.x - proj.x);
-                                const angleDiff = Math.abs(angleToNPC - projAngle);
+                                // Normalize across the ±π seam or shots fired "west" never register
+                                let angleDiff = Math.abs(angleToNPC - projAngle);
+                                if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
                                 if (angleDiff < Math.PI / 6) {
                                     isHostile = true;
                                     break;
@@ -311,27 +313,9 @@ export default class NPCSystem {
             });
         }
         
-        // Pirates drop loot
-        if (npc.type === 'pirate' && Math.random() < 0.6) {
-            for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
-                const angle = Math.random() * Math.PI * 2;
-                const speed = Math.random() * 2 + 1;
-                
-                // Add pickup to state
-                if (!state.pickups) state.pickups = [];
-                state.pickups.push({
-                    x: npc.x,
-                    y: npc.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    type: Math.random() < 0.5 ? 'credits' : 'ore',
-                    value: Math.random() < 0.5 ? 10 : 25,
-                    lifetime: 0,
-                    maxLifetime: 600
-                });
-            }
-        }
-        
+        // Pirate loot drops are handled by SpawnSystem's NPC_DEATH handler;
+        // dropping here as well doubled the loot per kill.
+
         // Emit death event
         this.eventBus.emit(GameEvents.NPC_DESTROYED, { npc });
     }

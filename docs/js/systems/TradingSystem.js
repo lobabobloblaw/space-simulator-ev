@@ -192,10 +192,13 @@ export default class TradingSystem {
     buyCommodity(type, price) {
         const state = this.stateManager.state;
         const planet = state.ship.landedPlanet;
+        if (!planet) return;
         const repEff = this.getTraderRepEffect();
         const base = planet?.commodityPrices?.[type];
         const effectivePrice = Number.isFinite(base) ? Math.max(1, Math.round(base * repEff.buyMult)) : price;
-        
+        // Never trade on a non-finite price (e.g. NaN from a missing data-price attribute)
+        if (!Number.isFinite(effectivePrice)) return;
+
         // Check conditions
         if (state.ship.credits < effectivePrice) {
             this.eventBus.emit(GameEvents.UI_MESSAGE, {
@@ -220,7 +223,7 @@ export default class TradingSystem {
         state.ship.cargo.push({
             type: type,
             buyPrice: effectivePrice,
-            buyLocation: state.ship.landedPlanet.name
+            buyLocation: planet.name
         });
 
         // Play sound
@@ -247,7 +250,8 @@ export default class TradingSystem {
     sellCommodity(type) {
         const state = this.stateManager.state;
         const planet = state.ship.landedPlanet;
-        
+        if (!planet || !planet.commodityPrices) return;
+
         // Find item in cargo
         const itemIndex = state.ship.cargo.findIndex(item => item.type === type);
         if (itemIndex === -1) return;
