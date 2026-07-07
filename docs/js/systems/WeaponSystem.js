@@ -14,18 +14,23 @@ export class WeaponSystem {
         
         // System state
         this.projectiles = [];
+        // Fallback stats sourced from GameConstants so this table cannot
+        // drift from the purchasable weapons (it had: rapid cd 5 vs 12,
+        // plasma cd 30/speed 1.5 vs 28/1.9, mining dmg 3/cd 10 vs 2/35)
+        const W = GameConstants?.WEAPONS || {};
         this.weaponTypes = {
-            laser: { type: "laser", damage: 10, cooldown: 15, speed: 2 },
-            rapid: { type: "rapid", damage: 5, cooldown: 5, speed: 3 },
-            plasma: { type: "plasma", damage: 20, cooldown: 30, speed: 1.5 },
-            mining: { type: "mining", damage: 3, cooldown: 10, speed: 2 }
+            laser: { type: 'laser', damage: W.DEFAULT_LASER?.damage ?? 10, cooldown: W.DEFAULT_LASER?.cooldown ?? 15, speed: W.DEFAULT_LASER?.speed ?? 2 },
+            rapid: { type: 'rapid', damage: W.RAPID_LASER?.damage ?? 5, cooldown: W.RAPID_LASER?.cooldown ?? 12, speed: W.RAPID_LASER?.speed ?? 3 },
+            plasma: { type: 'plasma', damage: W.PLASMA_CANNON?.damage ?? 20, cooldown: W.PLASMA_CANNON?.cooldown ?? 28, speed: W.PLASMA_CANNON?.speed ?? 1.9 },
+            mining: { type: 'mining', damage: W.MINING_LASER?.damage ?? 2, cooldown: W.MINING_LASER?.cooldown ?? 35, speed: W.MINING_LASER?.speed ?? 2 }
         };
-        
+
         // Bind event handlers
         this.handleWeaponFire = this.handleWeaponFire.bind(this);
         this.handleWeaponSwitch = this.handleWeaponSwitch.bind(this);
         this.handleProjectileUpdate = this.handleProjectileUpdate.bind(this);
         this.handleEntityDestroyed = this.handleEntityDestroyed.bind(this);
+        this.handleCollision = this.handleCollision.bind(this);
         
         console.log('[WeaponSystem] Created');
     }
@@ -54,8 +59,8 @@ export class WeaponSystem {
         this.eventBus.on(GameEvents.WEAPON_FIRE, this.handleWeaponFire);
         this.eventBus.on(GameEvents.INPUT_SWITCH_WEAPON, this.handleWeaponSwitch);
         
-        // Combat events
-        this.eventBus.on(GameEvents.PHYSICS_COLLISION, this.handleCollision.bind(this));
+        // Combat events (handler pre-bound in constructor so destroy() can off() it)
+        this.eventBus.on(GameEvents.PHYSICS_COLLISION, this.handleCollision);
         this.eventBus.on(GameEvents.ENTITY_DESTROYED, this.handleEntityDestroyed);
     }
     

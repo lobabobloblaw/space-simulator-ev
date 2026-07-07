@@ -122,14 +122,15 @@ export class SpawnSystem {
      * Subscribe to game events
      */
     subscribeToEvents() {
-        this.eventBus.on(GameEvents.NPC_DEATH, (data) => {
+        // Keep references to inline handlers so destroy() can actually off() them
+        this._onNPCDeath = (data) => {
             // Small cooldown to avoid immediate replacement spawns right after a death
             try { this._spawnCooldown.until = (performance.now ? performance.now() : Date.now()) + (GameConstants?.SPAWN?.POST_NPC_DEATH_PAUSE_MS ?? 2000); } catch(_) {}
             // Also suppress pirate spawns for a short window after any death
             try { const now = performance.now ? performance.now() : Date.now(); this._recentPirateSuppressUntil = now + this._pirateSuppressMs; } catch(_) {}
             this.handleNPCDeath(data);
-        });
-        this.eventBus.on(GameEvents.SHIP_DEATH, () => {
+        };
+        this._onShipDeath = () => {
             // Also pause spawns briefly when the player dies
             try {
                 const now = performance.now ? performance.now() : Date.now();
@@ -138,7 +139,12 @@ export class SpawnSystem {
                 this._spawnCooldown.until = now + pause;
                 this._recentPirateSuppressUntil = Math.max(this._recentPirateSuppressUntil||0, now + this._pirateSuppressMs + extra);
             } catch(_) {}
-        });
+        };
+        this._onProjectileHit = (data) => {
+            try { this.handleProjectileHitDebris(data); } catch(_) {}
+        };
+        this.eventBus.on(GameEvents.NPC_DEATH, this._onNPCDeath);
+        this.eventBus.on(GameEvents.SHIP_DEATH, this._onShipDeath);
         this.eventBus.on('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.on('pickup.expired', this.handlePickupExpired);
         // Pickups: ship collection wiring (previously unhandled → lingering dots)
@@ -149,9 +155,7 @@ export class SpawnSystem {
         this.eventBus.on(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleShipLanded);
         // Small debris on projectile hits
-        this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, (data) => {
-            try { this.handleProjectileHitDebris(data); } catch(_) {}
-        });
+        this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, this._onProjectileHit);
     }
 
     // Generic handler to create a warp effect and manage pooling
@@ -1126,16 +1130,18 @@ export class SpawnSystem {
      * Clean up spawn system
      */
     destroy() {
-        // Unsubscribe from events
-        this.eventBus.off(GameEvents.NPC_DEATH, this.handleNPCDeath);
-        this.eventBus.off(GameEvents.SHIP_DEATH, () => {}); // legacy inline handler; kept for safety
+        // Unsubscribe from events (same references that were passed to on())
+        this.eventBus.off(GameEvents.NPC_DEATH, this._onNPCDeath);
+        this.eventBus.off(GameEvents.SHIP_DEATH, this._onShipDeath);
         this.eventBus.off('asteroid.destroyed', this.handleAsteroidDestroyed);
         this.eventBus.off('pickup.expired', this.handlePickupExpired);
+        this.eventBus.off(GameEvents.PHYSICS_PICKUP_COLLECTED, this.handlePickupCollected);
         this.eventBus.off(GameEvents.EXPLOSION, this.handleExplosion);
         this.eventBus.off(GameEvents.WARP_EFFECT_CREATED, this.handleWarpEffectCreated);
         this.eventBus.off(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
         this.eventBus.off(GameEvents.SHIP_LANDED, this.handleShipLanded);
-        
+        this.eventBus.off(GameEvents.PHYSICS_PROJECTILE_HIT, this._onProjectileHit);
+
         console.log('[SpawnSystem] Destroyed');
     }
 }

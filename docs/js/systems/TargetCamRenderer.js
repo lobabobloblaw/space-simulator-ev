@@ -1,5 +1,4 @@
 import { GameEvents } from '../core/EventBus.js';
-import { withScreen, toWhiteMaskCanvas } from './RenderHelpers.js';
 import { GameConstants } from '../utils/Constants.js';
 import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES } from './SpriteMappings.js';
 import { getFrameCanvasFromState } from './AssetSystem.js';
@@ -25,22 +24,13 @@ export default class TargetCamRenderer {
     // Direct image caches
     this.spriteCache = {};
     this._spriteCacheCap = 64;
-    this._targetCamSprites = {};
 
     // Minimal viewport baseline shapes
     this._viewportAtlas = null;
 
-    // Tiny white-mask cache to reduce per-frame allocations
-    this._maskCache = new Map(); // key -> canvas
-    this._maskOrder = []; // LRU
-    this._maskCap = 12;
-    this._srcIds = new WeakMap();
-    this._nextSrcId = 1;
     // Cached silhouette sizing per target to avoid rebuild churn
     this._silDims = new Map(); // targetId -> { dw, dh }
 
-    // Minimal trace state for optional logging without flooding
-    this._trace = { lastKey: null, lastTs: 0 };
     // Deterministic per-target source resolution to prevent mid-frame/path mixing
     this._resolved = { targetId: null, kind: null, src: null, w: 0, h: 0 };
     this._lastPath = null; // for optional on-canvas label
@@ -559,42 +549,6 @@ export default class TargetCamRenderer {
     }
     return this._resolved;
   }
-  _drawWhiteMasked(ctx, src, dw, dh, sx=null, sy=null, sw=null, sh=null) {
-    // Legacy path (kept for fallback/debug)
-    try {
-      ctx.save();
-      if (sw&&sh && sx!==null && sy!==null) ctx.drawImage(src, sx|0, sy|0, sw, sh, -dw/2, -dh/2, dw, dh);
-      else ctx.drawImage(src, -dw/2, -dh/2, dw, dh);
-      const prev = ctx.globalCompositeOperation;
-      ctx.globalCompositeOperation='source-in';
-      ctx.fillStyle='#e8f6ff';
-      ctx.fillRect(-dw/2,-dh/2,dw,dh);
-      ctx.globalCompositeOperation = prev;
-      ctx.restore();
-      return true;
-    } catch(__) { return false; }
-  }
-
-  _getTintedCanvas(src, dw, dh, sx=null, sy=null, sw=null, sh=null, allowBuild=true) {
-    try {
-      let sid = this._srcIds.get(src); if (!sid) { sid = this._nextSrcId++; this._srcIds.set(src, sid); }
-      const qdw = (Math.round((dw|0)/2)*2)|0;
-      const qdh = (Math.round((dh|0)/2)*2)|0;
-      const key = `${sid}|${qdw}|${qdh}|${sx??-1}|${sy??-1}|${sw??-1}|${sh??-1}|tinted`;
-      let tint = this._maskCache.get(key);
-      if (!tint && allowBuild) {
-        const mc = document.createElement('canvas'); mc.width = Math.max(1, qdw); mc.height = Math.max(1, qdh);
-        const mctx = mc.getContext('2d'); mctx.imageSmoothingEnabled = false;
-        if (sw && sh && sx!==null && sy!==null) mctx.drawImage(src, sx|0, sy|0, sw, sh, 0, 0, qdw, qdh);
-        else mctx.drawImage(src, 0, 0, qdw, qdh);
-        mctx.globalCompositeOperation = 'source-in'; mctx.fillStyle = '#e8f6ff'; mctx.fillRect(0,0,qdw,qdh);
-        this._maskCache.set(key, mc); this._maskOrder.push(key);
-        if (this._maskOrder.length > this._maskCap) { const oldest = this._maskOrder.shift(); this._maskCache.delete(oldest); }
-        tint = mc;
-      }
-      return tint || null;
-    } catch(_) { return null; }
-  }
   _rotFor(artId) {
     // PNG art is authored "up"; apply +90° base like world sprites
     return this.spriteRotationOffset + (this.spriteOrientationOverrides[artId] || 0);
@@ -633,25 +587,6 @@ export default class TargetCamRenderer {
     } catch(_) {}
   }
 
-  _traceDraw(path, spriteKey, innerRot, npcAngle) {
-    if (!window.TC_TRACE) return;
-    try {
-      const mode = (window.TC_TRACE === 'frame') ? 'frame' : 'change';
-      const key = `${path}|${spriteKey}|${(innerRot||0).toFixed(3)}`;
-      const now = performance.now ? performance.now() : Date.now();
-      if (mode === 'change') {
-        if (this._trace.lastKey === key && (now - this._trace.lastTs) < 1500) return;
-        this._trace.lastKey = key; this._trace.lastTs = now;
-      } else {
-        // frame mode: throttle to ~6Hz
-        if ((now - this._trace.lastTs) < 160) return;
-        this._trace.lastTs = now;
-      }
-      console.log('[TC]', path, spriteKey, { npcAngle, inner: innerRot, total: (npcAngle||0) + (innerRot||0) });
-    } catch(_) { /* ignore */ }
-  }
-  _spriteUrlFor(spriteId) { try { return new URL('../../assets/sprites/' + spriteId + '.png', import.meta.url).href; } catch(_) { return null; } }
-  _ensureDirectSpriteImage(spriteId) { try { let img = this._targetCamSprites[spriteId]; if (img && (img.naturalWidth>0 || !img.complete)) return img; const url = this._spriteUrlFor(spriteId); if (!url) return null; img = new Image(); img.decoding='async'; img.crossOrigin='anonymous'; img.referrerPolicy='no-referrer'; img.src = url; this._targetCamSprites[spriteId]=img; return img; } catch(_) { return null; } }
   getOrLoadSprite(spriteId) { try { const url = new URL('../../assets/sprites/' + spriteId + '.png', import.meta.url).href; let img = this.spriteCache[url]; if (img) return img; img = new Image(); img.decoding='async'; img.crossOrigin='anonymous'; img.referrerPolicy='no-referrer'; img.src = url; this.spriteCache[url] = img; try { const keys = Object.keys(this.spriteCache); const cap = this._spriteCacheCap||64; if (keys.length > cap) { delete this.spriteCache[keys[0]]; } } catch(_) {} return null; } catch(_) { return null; } }
 
   getViewportFallbackAtlas() {

@@ -43,6 +43,7 @@ export class AudioSystem {
         this.handleThrust = this.handleThrust.bind(this);
         this.handlePickup = this.handlePickup.bind(this);
         this.handleLanding = this.handleLanding.bind(this);
+        this.handleShieldHit = this.handleShieldHit.bind(this);
         
         // Bind sound methods to preserve context when called through proxy
         this.playLaser = this.playLaser.bind(this);
@@ -127,7 +128,7 @@ export class AudioSystem {
         this.eventBus.on(GameEvents.SHIP_THRUST, this.handleThrust);
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleLanding);
         this.eventBus.on(GameEvents.PICKUP_COLLECTED, this.handlePickup);
-        this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit.bind(this));
+        this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit);
 
         // Music/Radio controls
         this.eventBus.on(GameEvents.AUDIO_MUSIC_TOGGLE, async () => {
