@@ -54,6 +54,11 @@ await page.waitForFunction(() => window.stateManager && window.eventBus && windo
 await page.waitForTimeout(1500);
 check('boot: no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
+// Roguelike: the game boots paused at the main menu — start a run first
+await page.evaluate(() => document.getElementById('startRunBtn')?.click());
+await page.waitForFunction(() => window.stateManager.state.paused === false, null, { timeout: 5000 });
+await page.waitForTimeout(300);
+
 // Pause freezes the world
 const pauseRes = await page.evaluate(async () => {
   const { eventBus, stateManager, GameEvents } = window;

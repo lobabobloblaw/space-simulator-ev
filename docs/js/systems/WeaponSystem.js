@@ -18,7 +18,8 @@ export class WeaponSystem {
             laser: { type: "laser", damage: 10, cooldown: 15, speed: 2 },
             rapid: { type: "rapid", damage: 5, cooldown: 5, speed: 3 },
             plasma: { type: "plasma", damage: 20, cooldown: 30, speed: 1.5 },
-            mining: { type: "mining", damage: 3, cooldown: 10, speed: 2 }
+            mining: { type: "mining", damage: 3, cooldown: 10, speed: 2 },
+            void: { type: "void", damage: 18, cooldown: 22, speed: 2.2 }
         };
         
         // Bind event handlers
@@ -177,8 +178,8 @@ export class WeaponSystem {
             damage: weapon.damage,
             type: weapon.type,
             // Visual tuning for trails
-            trailLen: (weapon.type === 'rapid') ? 7 : (weapon.type === 'plasma') ? 9 : 6,
-            trailWidth: (weapon.type === 'rapid') ? 2 : (weapon.type === 'plasma') ? 4 : 3
+            trailLen: (weapon.type === 'rapid') ? 7 : (weapon.type === 'plasma') ? 9 : (weapon.type === 'void') ? 10 : 6,
+            trailWidth: (weapon.type === 'rapid') ? 2 : (weapon.type === 'plasma') ? 4 : (weapon.type === 'void') ? 4 : 3
         };
         
         // Adjust velocity for specific weapon types
@@ -191,6 +192,9 @@ export class WeaponSystem {
         } else if (weapon.type === "mining") {
             projectile.vx = Math.cos(finalAngle) * 2 + shooter.vx;
             projectile.vy = Math.sin(finalAngle) * 2 + shooter.vy;
+        } else if (weapon.type === "void") {
+            projectile.vx = Math.cos(finalAngle) * 2.2 + shooter.vx;
+            projectile.vy = Math.sin(finalAngle) * 2.2 + shooter.vy;
         } else {
             // Default laser
             projectile.vx = Math.cos(finalAngle) * 2 + shooter.vx;
@@ -209,7 +213,7 @@ export class WeaponSystem {
         if (isPlayer) {
             const ship = shooter;
             const addMap = (GameConstants?.WEAPONS?.RECOIL_BLOOM?.ADD_PER_SHOT) || { rapid: 0.4, plasma: 0.3, default: 0.25 };
-            const add = (weapon.type === 'rapid') ? addMap.rapid : (weapon.type === 'plasma') ? addMap.plasma : (addMap.default ?? 0.25);
+            const add = (weapon.type === 'rapid') ? addMap.rapid : (weapon.type === 'plasma') ? addMap.plasma : (weapon.type === 'void') ? (addMap.void ?? 0.3) : (addMap.default ?? 0.25);
             const maxBloom = (GameConstants?.WEAPONS?.RECOIL_BLOOM?.MAX ?? 6.0);
             ship.spreadBloom = Math.min(maxBloom, (ship.spreadBloom || 0) + add);
         }
@@ -224,7 +228,7 @@ export class WeaponSystem {
             fx.x = projectile.x;
             fx.y = projectile.y;
             fx.angle = finalAngle;
-            fx.color = (weapon.type === 'plasma') ? '#88ffff' : (weapon.type === 'rapid') ? '#ffbb66' : '#ffffaa';
+            fx.color = (weapon.type === 'plasma') ? '#88ffff' : (weapon.type === 'rapid') ? '#ffbb66' : (weapon.type === 'void') ? '#c09aff' : '#ffffaa';
             fx.lifetime = 0;
             fx.maxLifetime = (GameConstants?.EFFECTS?.MUZZLE_FLASH_MAX_LIFETIME_FRAMES ?? 6);
             // Soft-cap
@@ -450,7 +454,7 @@ export class WeaponSystem {
         spark.maxLifetime = 10;
         const scale = Math.max(0.3, Math.min(1.5, opts.scale || 1));
         spark.size = 6 * scale;
-        spark.color = (type === 'plasma') ? '#88ffff' : (type === 'rapid') ? '#ffbb66' : (type === 'shield') ? '#66e0ff' : '#ffffaa';
+        spark.color = (type === 'plasma') ? '#88ffff' : (type === 'rapid') ? '#ffbb66' : (type === 'void') ? '#c09aff' : (type === 'shield') ? '#66e0ff' : '#ffffaa';
         // Soft-cap
         if (state.hitSparks.length > 120) {
             const old = state.hitSparks.shift();

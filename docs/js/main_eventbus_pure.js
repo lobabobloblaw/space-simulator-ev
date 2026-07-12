@@ -111,7 +111,7 @@ async function loadGameData() {
 function loadSaveOrDefaults(state) {
     const skipSave = /(?:^|[?&])(fresh|nosave)=1(?:&|$)/.test(window.location.search || '');
     const savedData = skipSave ? null : localStorage.getItem('galaxyTraderSave');
-    let shipData = null, missionData = null;
+    let shipData = null, missionData = null, repData = null;
     if (savedData) {
         try {
             const save = JSON.parse(savedData);
@@ -119,11 +119,14 @@ function loadSaveOrDefaults(state) {
             // Validate parsed structure before using
             if (!validateSaveData(save)) {
                 console.warn('[EventBus] Save data validation failed, using defaults');
-                return { shipData: null, missionData: null };
+                return { shipData: null, missionData: null, repData: null };
             }
 
             shipData = save.ship || null;
-            missionData = save.missionSystem || null;
+            // The save writer produces mission {activeId, completed}; accept the
+            // legacy missionSystem shape from old saves too
+            missionData = save.mission || save.missionSystem || null;
+            repData = save.reputation || null;
             console.log('[EventBus] Found save during init - loading credits:', shipData?.credits);
             state.__loadedFromSave = true;
         } catch (e) {
@@ -132,7 +135,7 @@ function loadSaveOrDefaults(state) {
     } else {
         console.log('[EventBus] No save found - using defaults');
     }
-    return { shipData, missionData };
+    return { shipData, missionData, repData };
 }
 
 function initShip(state, shipData) {
@@ -295,14 +298,20 @@ function initStars(state) {
 
 function initMissions(state, missionsData, missionData) {
     state.missionSystem = {
-        active: missionData?.active ?? null,
+        active: null,
         completed: missionData?.completed ?? [],
         available: missionData?.available ?? missionsData
     };
+    // Saves store the active mission id only; resolve it against the live
+    // mission objects (their isComplete closures don't survive JSON)
+    const activeId = missionData?.activeId ?? missionData?.active?.id ?? null;
+    if (activeId) {
+        state.missionSystem.active = state.missionSystem.available.find(m => m.id === activeId) || null;
+    }
 }
 
-function initOtherState(state) {
-    state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
+function initOtherState(state, repData) {
+    state.reputation = { trader: 0, patrol: 0, pirate: 0, ...(repData || {}) };
     state.npcSpawnState = { nextShipSpawn: Date.now() + Math.random() * 3000 + 2000 };
     state.audio = { enabled: false, masterVolume: 0.3, musicVolume: 0.6 };
     state.input = { keys: new Set(), mouse: { x: 0, y: 0, pressed: false }, touch: { x: 0, y: 0, active: false } };
@@ -317,15 +326,25 @@ async function initializeGameState() {
     const state = stateManager.state;
     console.log('[EventBus] initializeGameState called');
     const { planetsData, missionsData } = await loadGameData();
-    const { shipData, missionData } = loadSaveOrDefaults(state);
+    const { shipData, missionData, repData } = loadSaveOrDefaults(state);
     initShip(state, shipData);
+    // Saves persist engineLevel, not its derived stats — re-derive so upgrades
+    // don't silently revert on reload (formula mirrors ShopSystem engine branch)
+    const engLvl = Math.max(1, Number(state.ship.engineLevel) || 1);
+    if (engLvl > 1) {
+        state.ship.maxSpeed = 0.8 + (engLvl - 1) * 0.2;
+        state.ship.thrust = 0.012 + (engLvl - 1) * 0.003;
+    }
+    if (!Array.isArray(state.ship.weapons) || state.ship.currentWeapon >= state.ship.weapons.length) {
+        state.ship.currentWeapon = 0;
+    }
     state.planets = planetsData;
     console.log('[EventBus] Assigned planets to state:', state.planets?.length);
     seedNPCs(state, planetsData);
     initAsteroids(state);
     initStars(state);
     initMissions(state, missionsData, missionData);
-    initOtherState(state);
+    initOtherState(state, repData);
     console.log('[EventBus] Game state initialized in StateManager');
 }
 
@@ -351,17 +370,21 @@ function setupEventHandlers() {
         if (stateManager.state.paused) stateManager.state.paused = false;
     });
 
-    // Ship damage handling
+    // Ship damage handling — only escalate to SHIP_DEATH on the transition
+    // into 0 HP; post-death damage events must not restart the sequence
     eventBus.on(GameEvents.SHIP_DAMAGE, (data) => {
         const state = stateManager.state;
-        if (state.ship.health <= 0) {
+        if (state.ship.health <= 0 && !state.ship.isDestroyed && !state.ship.deathSeq) {
             eventBus.emit(GameEvents.SHIP_DEATH);
         }
     });
-    
+
     // Ship death handling - ROGUELIKE PERMADEATH
+    // Idempotent: StateManager, damage follow-ups, and direct emits can all
+    // fire this for one death; the destruct sequence must run exactly once
     eventBus.on(GameEvents.SHIP_DEATH, () => {
         const state = stateManager.state;
+        if (state.ship.isDestroyed || state.ship.deathSeq) return;
         const now = performance.now ? performance.now() : Date.now();
         // Begin destruct sequence; delay final explosion a bit for drama
         state.ship.deathSeq = { start: now, duration: (GameConstants?.SHIP?.DESTRUCT_SEQUENCE_MS ?? 600) };
@@ -561,18 +584,8 @@ function setupEventHandlers() {
                         }, 2000);
                     }
 
-                    // Handle boss unlocks
-                    if (data.npc.unlocks) {
-                        const meta = runSystem.getMetaStateManager();
-                        if (meta && data.npc.unlocks.ship) {
-                            meta.unlockShip(data.npc.unlocks.ship);
-                            eventBus.emit(GameEvents.UI_MESSAGE, {
-                                message: `Unlocked: ${data.npc.unlocks.ship}`,
-                                type: 'success',
-                                duration: 3000
-                            });
-                        }
-                    }
+                    // Boss unlocks are granted (and announced) by
+                    // RunSystem.recordBossDefeat — single owner
                 }
             }
         }
@@ -1191,7 +1204,7 @@ async function initGame() {
             ship: state.ship
         });
     }
-    if (state.missionSystem && state.missionSystem.available.length > 0) {
+    if (state.missionSystem && state.missionSystem.available.length > 0 && !state.missionSystem.active) {
         state.missionSystem.active = state.missionSystem.available[0];
         eventBus.emit(GameEvents.UI_MESSAGE, {
             message: `New Mission: ${state.missionSystem.active.title}`,

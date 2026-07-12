@@ -309,6 +309,11 @@ class RunSystem {
             } else if (boss.unlocks.type === 'upgrade') {
                 this.metaManager.unlockUpgrade(boss.unlocks.id);
             }
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Unlocked: ${boss.unlocks.id}`,
+                type: 'success',
+                duration: 3000
+            });
         }
 
         this._saveRun();

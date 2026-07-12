@@ -29,6 +29,12 @@ const DEFAULT_META_STATE = {
     achievements: []  // Completed achievement IDs
 };
 
+// Deep copy so callers never share the nested unlocks/stats objects with the
+// module constant (a shallow spread let unlockShip() mutate DEFAULT_META_STATE)
+const makeDefaultMeta = () => (typeof structuredClone === 'function'
+    ? structuredClone(DEFAULT_META_STATE)
+    : JSON.parse(JSON.stringify(DEFAULT_META_STATE)));
+
 // All possible ship unlocks (for reference)
 export const ALL_SHIPS = ['shuttle', 'interceptor', 'corvette', 'freighter', 'gunship', 'battlecruiser'];
 
@@ -73,7 +79,7 @@ class MetaStateManager {
     _loadFromStorage() {
         try {
             const stored = localStorage.getItem(META_STORAGE_KEY);
-            if (!stored) return { ...DEFAULT_META_STATE };
+            if (!stored) return makeDefaultMeta();
 
             const parsed = JSON.parse(stored);
 
@@ -87,7 +93,7 @@ class MetaStateManager {
             return this._mergeWithDefaults(parsed);
         } catch (e) {
             console.warn('[MetaStateManager] Failed to load, using defaults:', e);
-            return { ...DEFAULT_META_STATE };
+            return makeDefaultMeta();
         }
     }
 
@@ -98,10 +104,14 @@ class MetaStateManager {
         return {
             version: META_VERSION,
             unlocks: {
-                ships: loaded.unlocks?.ships || DEFAULT_META_STATE.unlocks.ships,
-                upgrades: loaded.unlocks?.upgrades || DEFAULT_META_STATE.unlocks.upgrades
+                ships: [...(loaded.unlocks?.ships || DEFAULT_META_STATE.unlocks.ships)],
+                upgrades: [...(loaded.unlocks?.upgrades || DEFAULT_META_STATE.unlocks.upgrades)]
             },
-            stats: { ...DEFAULT_META_STATE.stats, ...(loaded.stats || {}) },
+            stats: {
+                ...DEFAULT_META_STATE.stats,
+                ...(loaded.stats || {}),
+                zonesReached: { ...DEFAULT_META_STATE.stats.zonesReached, ...(loaded.stats?.zonesReached || {}) }
+            },
             achievements: loaded.achievements || []
         };
     }
@@ -290,7 +300,7 @@ class MetaStateManager {
      * Reset all meta progression (for testing)
      */
     reset() {
-        this._meta = { ...DEFAULT_META_STATE };
+        this._meta = makeDefaultMeta();
         this.save();
         console.log('[MetaStateManager] Reset to defaults');
     }

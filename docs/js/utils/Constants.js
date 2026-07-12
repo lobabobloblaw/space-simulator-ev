@@ -125,7 +125,15 @@ export const GameConstants = {
             speed: 1.9,
             color: '#00ffff'
         },
-        
+
+        VOID_CANNON: {
+            type: "void",
+            damage: 18,
+            cooldown: 22,
+            speed: 2.2,
+            color: '#a06bff'
+        },
+
         PROJECTILE_LIFETIME: 60,   // Frames before projectile expires (laser/default)
         PROJECTILE_TRAIL_LENGTH: 5, // Length of projectile trail effect
         // Per-type projectile lifetime overrides (frames)
@@ -133,7 +141,8 @@ export const GameConstants = {
             laser: 60,
             rapid: 80,
             plasma: 140,
-            mining: 100
+            mining: 100,
+            void: 130
         },
         // Recoil/bloom tuning
         RECOIL_BLOOM: {
@@ -142,6 +151,7 @@ export const GameConstants = {
             ADD_PER_SHOT: {         // Bloom added per shot by type
                 rapid: 0.4,
                 plasma: 0.3,
+                void: 0.3,
                 default: 0.25
             }
         }

@@ -87,7 +87,6 @@ export default class ShopSystem {
             // Auto-equip if first weapon
             if (ship.weapons.length === 1) {
                 ship.currentWeapon = 0;
-                ship.currentWeaponIndex = 0;
             }
             
             purchaseSuccess = true;
@@ -256,8 +255,8 @@ export default class ShopSystem {
         ship.missionStates = currentMissionStates;
 
         // Restore current weapon index if valid
-        if (ship.currentWeaponIndex >= ship.weapons.length) {
-            ship.currentWeaponIndex = Math.max(0, ship.weapons.length - 1);
+        if (ship.currentWeapon >= ship.weapons.length) {
+            ship.currentWeapon = Math.max(0, ship.weapons.length - 1);
         }
 
         // Play purchase sound

@@ -28,7 +28,6 @@ export class UISystem {
         this.handleShipLanded = this.handleShipLanded.bind(this);
         this.handleShowPanel = this.handleShowPanel.bind(this);
         this.handleCloseOverlay = this.handleCloseOverlay.bind(this);
-        this.handleTrade = this.handleTrade.bind(this);
         this.handlePurchase = this.handlePurchase.bind(this);
         this.handleUIMessage = this.handleUIMessage.bind(this);
         this.handleTutorialUpdate = this.handleTutorialUpdate.bind(this);
@@ -149,7 +148,6 @@ export class UISystem {
         this.eventBus.on(GameEvents.MENU_CLOSE, this.handleCloseOverlay);
         
         // Trading events
-        this.eventBus.on(GameEvents.TRADE_COMPLETE, this.handleTrade);
         this.eventBus.on(GameEvents.SHIP_UPGRADE, this.handlePurchase);
         
         // UI messages
@@ -218,15 +216,6 @@ export class UISystem {
      */
     handleCloseOverlay() {
         this.closeLandingOverlay();
-    }
-    
-    /**
-     * Handle trade event
-     */
-    handleTrade(data) {
-        if (this.currentPanel === 'trading' && data.ship) {
-            this.updateTradingPanel(data.ship, data.commodities);
-        }
     }
     
     /**
@@ -1053,11 +1042,7 @@ export class UISystem {
         } else if (panel === 'trading') {
             if (tradingPanel) {
                 tradingPanel.style.display = 'flex';
-                if (ship && commodities) {
-                    this.updateTradingPanel(ship, commodities);
-                }
-                // Ensure delegated trading handlers are attached once
-                this.attachTradingDelegates();
+                // TradingSystem owns the trading panel render + click delegation
             }
         } else if (panel === 'shop') {
             if (shopPanel) {
@@ -1087,172 +1072,6 @@ export class UISystem {
                 this.attachShipyardDelegates();
             }
         }
-    }
-    
-    /**
-     * Update trading panel
-     */
-    updateTradingPanel(ship, commodities) {
-        if (!ship || !ship.currentPlanet) return;
-        
-        // Update status
-        const creditsElement = document.getElementById('tradeCredits');
-        const cargoElement = document.getElementById('tradeCargo');
-        
-        if (creditsElement) creditsElement.textContent = ship.credits;
-        
-        const cargoUsed = Array.isArray(ship.cargo)
-            ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
-            : 0;
-        if (cargoElement) cargoElement.textContent = `${cargoUsed}/${ship.cargoCapacity}`;
-        
-        // Calculate total cargo value
-        let totalValue = 0;
-        if (Array.isArray(ship.cargo)) {
-            for (let item of ship.cargo) {
-                const qty = (item?.quantity ?? 1);
-                const price = ship.currentPlanet?.commodityPrices?.[item?.type];
-                if (Number.isFinite(price)) {
-                    totalValue += qty * price;
-                }
-            }
-        }
-        
-        // Build commodity list
-        const list = document.getElementById('commodityList');
-        if (!list) return;
-        
-        try { list.setAttribute('role', 'list'); } catch(_) {}
-        list.innerHTML = '';
-        
-        // Add sell all button if carrying cargo
-        if (cargoUsed > 0) {
-            const sellAllRow = document.createElement('div');
-            sellAllRow.className = 'commodity-row';
-            try { sellAllRow.setAttribute('role', 'listitem'); } catch(_) {}
-            sellAllRow.style.borderBottom = '2px solid #333';
-
-            // Build DOM structure safely
-            const commodityInfo = document.createElement('div');
-            commodityInfo.className = 'commodity-info';
-
-            const commodityName = document.createElement('div');
-            commodityName.className = 'commodity-name';
-            commodityName.textContent = '💰 Sell All Cargo';
-            commodityInfo.appendChild(commodityName);
-
-            const commodityValue = document.createElement('div');
-            commodityValue.textContent = `Total value: ${totalValue}`;
-            commodityInfo.appendChild(commodityValue);
-
-            const buttonContainer = document.createElement('div');
-            buttonContainer.className = 'buy-sell-buttons';
-
-            const sellAllBtn = document.createElement('button');
-            sellAllBtn.className = 'trade-btn';
-            sellAllBtn.setAttribute('data-action', 'sellAll');
-            sellAllBtn.setAttribute('aria-label', `Sell all cargo for ${totalValue} credits`);
-            sellAllBtn.textContent = 'Sell All';
-            buttonContainer.appendChild(sellAllBtn);
-
-            sellAllRow.appendChild(commodityInfo);
-            sellAllRow.appendChild(buttonContainer);
-            list.appendChild(sellAllRow);
-        }
-        
-        // Add commodity rows
-        if (commodities) {
-            for (let key in commodities) {
-                const commodity = commodities[key];
-                const price = ship.currentPlanet.commodityPrices[key];
-                const basePrice = commodity.basePrice;
-                const owned = ship.cargo ? ship.cargo.find(c => c.type === key) : null;
-                const ownedQty = owned ? owned.quantity : 0;
-                
-                // Show price indicator
-                let priceIndicator = '';
-                if (price < basePrice * 0.7) {
-                    priceIndicator = ' 📉'; // Good buy price
-                } else if (price > basePrice * 1.3) {
-                    priceIndicator = ' 📈'; // Good sell price
-                }
-                
-                const row = document.createElement('div');
-                row.className = 'commodity-row';
-                try { row.setAttribute('role', 'listitem'); } catch(_) {}
-
-                // Build commodity info section
-                const commodityInfo = document.createElement('div');
-                commodityInfo.className = 'commodity-info';
-
-                const commodityNameDiv = document.createElement('div');
-                commodityNameDiv.className = 'commodity-name';
-                commodityNameDiv.textContent = `${commodity.icon} ${commodity.name}`;
-                commodityInfo.appendChild(commodityNameDiv);
-
-                const ownedDiv = document.createElement('div');
-                ownedDiv.textContent = `Owned: ${ownedQty}`;
-                commodityInfo.appendChild(ownedDiv);
-
-                // Build price section
-                const priceDiv = document.createElement('div');
-                priceDiv.className = 'price';
-                priceDiv.textContent = `${price}${priceIndicator}`;
-
-                // Build buttons section
-                const buttonContainer = document.createElement('div');
-                buttonContainer.className = 'buy-sell-buttons';
-
-                const buyBtn = document.createElement('button');
-                buyBtn.className = 'trade-btn';
-                buyBtn.setAttribute('data-action', 'buy');
-                buyBtn.setAttribute('data-type', key);
-                buyBtn.setAttribute('data-price', String(price));
-                buyBtn.setAttribute('aria-label', `Buy ${commodity.name} for ${price} credits`);
-                buyBtn.textContent = 'Buy';
-                buttonContainer.appendChild(buyBtn);
-
-                const sellBtn = document.createElement('button');
-                sellBtn.className = 'trade-btn';
-                sellBtn.setAttribute('data-action', 'sell');
-                sellBtn.setAttribute('data-type', key);
-                if (ownedQty === 0) sellBtn.disabled = true;
-                sellBtn.setAttribute('aria-label', `Sell ${commodity.name}${ownedQty ? '' : ' (none owned)'}`);
-                sellBtn.textContent = 'Sell';
-                buttonContainer.appendChild(sellBtn);
-
-                // Assemble row
-                row.appendChild(commodityInfo);
-                row.appendChild(priceDiv);
-                row.appendChild(buttonContainer);
-                list.appendChild(row);
-            }
-        }
-    }
-
-    /**
-     * Delegate trading actions to EventBus (no globals)
-     */
-    attachTradingDelegates() {
-        const list = document.getElementById('commodityList');
-        if (!list || this._tradeDelegatesAttached) return;
-        this._tradeDelegatesAttached = true;
-        list.addEventListener('click', (e) => {
-            const btn = e.target.closest('.trade-btn');
-            if (!btn || btn.disabled) return;
-            const action = btn.getAttribute('data-action');
-            if (!action) return;
-            if (action === 'buy') {
-                const type = btn.getAttribute('data-type');
-                const price = Number(btn.getAttribute('data-price'));
-                this.eventBus.emit(GameEvents.TRADE_BUY, { type, price });
-            } else if (action === 'sell') {
-                const type = btn.getAttribute('data-type');
-                this.eventBus.emit(GameEvents.TRADE_SELL, { type });
-            } else if (action === 'sellAll') {
-                this.eventBus.emit(GameEvents.TRADE_SELL_ALL, {});
-            }
-        });
     }
     
     /**
@@ -2105,7 +1924,6 @@ export class UISystem {
         this.eventBus.off(GameEvents.SHIP_LANDED, this.handleShipLanded);
         this.eventBus.off(GameEvents.MENU_OPEN, this.handleShowPanel);
         this.eventBus.off(GameEvents.MENU_CLOSE, this.handleCloseOverlay);
-        this.eventBus.off(GameEvents.TRADE_COMPLETE, this.handleTrade);
         this.eventBus.off(GameEvents.SHIP_UPGRADE, this.handlePurchase);
         this.eventBus.off(GameEvents.UI_MESSAGE, this.handleUIMessage);
         this.eventBus.off(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);

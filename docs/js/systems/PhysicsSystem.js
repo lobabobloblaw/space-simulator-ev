@@ -221,11 +221,9 @@ export class PhysicsSystem {
             ship.health = Math.min(ship.maxHealth, ship.health + rate);
         }
         
-        // Update weapon cooldown
-        if (ship.weaponCooldown > 0) {
-            ship.weaponCooldown--;
-        }
-        
+        // Weapon cooldown is decremented by WeaponSystem only — a second
+        // decrement here doubled the player's fire rate
+
         // Update landing cooldown
         if (ship.landingCooldown > 0) {
             ship.landingCooldown--;
