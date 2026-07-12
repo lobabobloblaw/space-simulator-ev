@@ -5,6 +5,8 @@
 
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { logError, checkLocalStorage, notifyUser } from '../utils/ErrorUtils.js';
+import { validateSaveData } from '../utils/SaveUtils.js';
 
 export class SaveSystemAdapterFixed {
     constructor() {
@@ -24,7 +26,13 @@ export class SaveSystemAdapterFixed {
         // Interaction gating: postpone autosave shortly after target cycling
         this._activeInteractUntil = 0; // timestamp when it's OK to autosave again
         this._quietMs = 12000; // default quiet window after input/targeting (12s)
-        
+
+        // Race condition prevention
+        this._saveLock = false; // Mutex to prevent concurrent saves
+        this._saveVersion = 0; // Incremented each save to detect stale operations
+        this._saveRetryCount = 0; // Depth guard for pending save retries
+        this._saveRetryMax = 2;
+
         // Bind event handlers
         this.handleSave = this.handleSave.bind(this);
         this.handleLoad = this.handleLoad.bind(this);
@@ -41,12 +49,13 @@ export class SaveSystemAdapterFixed {
             const dangerous = new Set(['__proto__', 'prototype', 'constructor']);
             const allowed = new Set([
                 'x','y','vx','vy','angle',
-                'fuel','credits','health','shield','maxShield',
+                'fuel','credits','health','maxHealth','shield','maxShield',
                 'cargo','weapons','currentWeapon',
-                'kills','engineLevel','weaponLevel','radarLevel',
+                'kills','pirateKills','missionKills',
+                'engineLevel','weaponLevel','radarLevel',
                 'cargoCapacity','tutorialStage',
                 // optional UI/flags we might persist later
-                'isLanded','landedPlanet','landingCooldown','class'
+                'isLanded','landedPlanet','landingCooldown','class','shipClass'
             ]);
             for (const key of Object.keys(source)) {
                 if (dangerous.has(key) || !allowed.has(key)) continue;
@@ -55,15 +64,40 @@ export class SaveSystemAdapterFixed {
                 if ((key === 'cargo' || key === 'weapons') && !Array.isArray(val)) continue;
                 target[key] = val;
             }
-        } catch(_) {}
+        } catch(e) { logError('SaveSystem._assignShipSafe', e); }
     }
-    
+
+    /**
+     * Validate save data structure after JSON.parse.
+     * Delegates to shared SaveUtils validator.
+     */
+    _validateSaveData(data) {
+        return validateSaveData(data);
+    }
+
     /**
      * Initialize the adapter
      */
     init() {
-        // Check if we need to apply a pending load
-        if (localStorage.getItem(this.LOAD_PENDING_KEY) === 'true') {
+        // Check localStorage availability (handles private browsing mode)
+        const storageCheck = checkLocalStorage();
+        this._storageAvailable = storageCheck.available;
+
+        if (!storageCheck.available) {
+            console.warn('[SaveSystemAdapterFixed] localStorage unavailable:', storageCheck.reason);
+
+            // Notify user with appropriate message
+            if (storageCheck.reason === 'private_browsing') {
+                notifyUser('PRIVATE BROWSING: Saves disabled', 'warning');
+            } else if (storageCheck.reason === 'quota_exceeded') {
+                notifyUser('STORAGE FULL: Clear browser data', 'warning');
+            } else {
+                notifyUser('SAVES UNAVAILABLE', 'warning');
+            }
+        }
+
+        // Check if we need to apply a pending load (only if storage available)
+        if (this._storageAvailable && localStorage.getItem(this.LOAD_PENDING_KEY) === 'true') {
             console.log('[SaveSystemAdapterFixed] Applying pending load...');
             localStorage.removeItem(this.LOAD_PENDING_KEY);
             
@@ -84,11 +118,11 @@ export class SaveSystemAdapterFixed {
                 // Avoid autosaves for a short window after targeting interaction
                 const quiet = (typeof window !== 'undefined' && Number(window.SAVE_QUIET_MS)) || this._quietMs;
                 this._activeInteractUntil = now + Math.max(1000, quiet|0);
-            } catch(_) {}
+            } catch(e) { logError('SaveSystem.TARGET_SET', e); }
         });
         // Watch user input (keys/mouse/touch) to extend quiet window during active interaction
         const bumpQuiet = () => {
-            try { const now = performance.now ? performance.now() : Date.now(); const quiet = (typeof window !== 'undefined' && Number(window.SAVE_QUIET_MS)) || this._quietMs; this._activeInteractUntil = Math.max(this._activeInteractUntil||0, now + Math.max(1000, quiet|0)); } catch(_) {}
+            try { const now = performance.now ? performance.now() : Date.now(); const quiet = (typeof window !== 'undefined' && Number(window.SAVE_QUIET_MS)) || this._quietMs; this._activeInteractUntil = Math.max(this._activeInteractUntil||0, now + Math.max(1000, quiet|0)); } catch(e) { logError('SaveSystem.bumpQuiet', e); }
         };
         this.eventBus.on(GameEvents.INPUT_KEY_DOWN, bumpQuiet);
         this.eventBus.on(GameEvents.INPUT_MOUSE_DOWN, bumpQuiet);
@@ -101,14 +135,24 @@ export class SaveSystemAdapterFixed {
      * Handle save event
      */
     handleSave(data = null) {
-        try { if (typeof window !== 'undefined' && window.DEBUG_SAVE) console.log('[SaveSystemAdapterFixed] SAVE triggered'); } catch(_) {}
+        try { if (typeof window !== 'undefined' && window.DEBUG_SAVE) console.log('[SaveSystemAdapterFixed] SAVE triggered'); } catch(e) { /* debug logging only */ }
+
+        // Skip save if localStorage is unavailable (private browsing, etc.)
+        if (!this._storageAvailable) {
+            const reason = (data && data.reason) || 'manual';
+            if (reason !== 'auto') {
+                this.showMessage('SAVES UNAVAILABLE', 'warning');
+            }
+            return false;
+        }
+
         try {
             // QA override to disable autosave entirely
             if ((data && data.reason === 'auto') && (typeof window !== 'undefined' && window.SAVE_DISABLED)) {
                 if (window.DEBUG_SAVE) console.log('[SaveSystemAdapterFixed] Autosave disabled via SAVE_DISABLED');
                 return true;
             }
-        } catch(_) {}
+        } catch(e) { logError('SaveSystem.handleSave.disabled_check', e); }
         // Coalesce autosaves; run off the critical path during idle time
         if (this._saveScheduled) { this._savePending = true; return true; }
         this._saveScheduled = true;
@@ -116,14 +160,18 @@ export class SaveSystemAdapterFixed {
             try {
                 // Avoid saving on heavy frames to prevent visible hitches
                 try {
-                    const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+                    const state = this.stateManager.state;
+                    // Prefer state.diagnostics, fallback to window.__lastFrameMs
+                    const lastFrameMs = (state?.diagnostics?.lastFrameMs) ||
+                                        (typeof window !== 'undefined' ? window.__lastFrameMs : 0) || 0;
+                    const heavy = lastFrameMs > 24;
                     const isAuto = !data || data.reason === 'auto';
                     if (isAuto && heavy && this._saveDeferCount < 20) { // extend defers to reduce visible hitches
                         this._saveDeferCount++;
                         setTimeout(run, 350);
                         return;
                     }
-                } catch(_) {}
+                } catch(e) { logError('SaveSystem.handleSave.heavy_frame_check', e); }
                 // Interaction quiet window after target cycling
                 try {
                     const isAuto = !data || data.reason === 'auto';
@@ -134,7 +182,7 @@ export class SaveSystemAdapterFixed {
                             return;
                         }
                     }
-                } catch(_) {}
+                } catch(e) { logError('SaveSystem.handleSave.interaction_check', e); }
                 // Skip autosave while profilers are active (to avoid test-induced "other" spikes)
                 try {
                     const isAuto = !data || data.reason === 'auto';
@@ -143,12 +191,15 @@ export class SaveSystemAdapterFixed {
                         setTimeout(run, 1200);
                         return;
                     }
-                } catch(_) {}
+                } catch(e) { logError('SaveSystem.handleSave.profiler_check', e); }
                 // For autosave, also require a brief streak of light frames
                 try {
                     const isAuto = !data || data.reason === 'auto';
                     if (isAuto) {
-                        const last = (typeof window !== 'undefined' && window.__lastFrameMs) ? window.__lastFrameMs : 0;
+                        const state = this.stateManager.state;
+                        // Prefer state.diagnostics, fallback to window.__lastFrameMs
+                        const last = (state?.diagnostics?.lastFrameMs) ||
+                                     (typeof window !== 'undefined' ? window.__lastFrameMs : 0) || 0;
                         if (last > 0 && last <= this._idleLightMs) this._idleLightStreak += 1; else this._idleLightStreak = 0;
                         if (this._idleLightStreak < this._idleLightNeed) {
                             setTimeout(run, this._idleRecheckMs);
@@ -156,31 +207,108 @@ export class SaveSystemAdapterFixed {
                         }
                         this._idleLightStreak = 0;
                     }
-                } catch(_) {}
+                } catch(e) { logError('SaveSystem.handleSave.idle_check', e); }
+
+                // Mutex: prevent concurrent save operations
+                if (this._saveLock) {
+                    console.log('[SaveSystemAdapterFixed] Save already in progress, queueing');
+                    this._savePending = true;
+                    this._saveScheduled = false;
+                    return;
+                }
+                this._saveLock = true;
+
                 const light = (!data || data.reason === 'auto');
-                const payload = this._buildSaveData(light);
-                // JSON + setItem can be a long task; do it here (idle/fallback timeout)
-                const json = JSON.stringify(payload);
-                localStorage.setItem(this.SAVE_KEY, json);
-                // QA: compute save size (bytes/KB) for optional HUD display
-                try {
-                    const bytes = (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(json).length : (json.length * 2);
-                    if (typeof window !== 'undefined') {
-                        window.LAST_SAVE_SIZE_BYTES = bytes;
-                        window.LAST_SAVE_SIZE_KB = Number((bytes / 1024).toFixed(1));
-                    }
-                } catch(_) {}
-                // Only show toast for manual saves
                 const reason = (data && data.reason) || 'manual';
-                if (reason !== 'auto') this.showMessage('GAME SAVED', 'success');
-                try { if (typeof window !== 'undefined' && window.DEBUG_SAVE) console.log('[SaveSystemAdapterFixed] Saved - Credits:', payload.ship.credits, 'reason:', reason); } catch(_) {}
+
+                // Progressive save strategy to handle QuotaExceededError
+                let saveSuccess = false;
+                let payload = null;
+                let saveMode = light ? 'light' : 'full';
+
+                // Strategy 1: Try requested mode (full or light)
+                try {
+                    payload = this._buildSaveData(light);
+                    const json = JSON.stringify(payload);
+                    localStorage.setItem(this.SAVE_KEY, json);
+                    saveSuccess = true;
+                    this._trackSaveSize(json);
+                } catch (e) {
+                    if (e.name === 'QuotaExceededError' && !light) {
+                        console.warn('[SaveSystemAdapterFixed] Quota exceeded, trying light mode...');
+
+                        // Strategy 2: Try light mode (no NPCs/asteroids/pickups)
+                        try {
+                            payload = this._buildSaveData(true);
+                            const json = JSON.stringify(payload);
+                            localStorage.setItem(this.SAVE_KEY, json);
+                            saveSuccess = true;
+                            saveMode = 'light';
+                            this._trackSaveSize(json);
+                        } catch (e2) {
+                            if (e2.name === 'QuotaExceededError') {
+                                console.warn('[SaveSystemAdapterFixed] Quota still exceeded, trying critical-only mode...');
+
+                                // Strategy 3: Critical only (ship + reputation)
+                                try {
+                                    payload = this._buildCriticalSaveData();
+                                    const json = JSON.stringify(payload);
+                                    localStorage.setItem(this.SAVE_KEY, json);
+                                    saveSuccess = true;
+                                    saveMode = 'critical';
+                                    this._trackSaveSize(json);
+                                } catch (e3) {
+                                    throw e3; // Give up, throw to outer catch
+                                }
+                            } else {
+                                throw e2;
+                            }
+                        }
+                    } else {
+                        throw e; // Not quota error or already light, rethrow
+                    }
+                }
+
+                if (saveSuccess && payload) {
+                    // Show appropriate message based on save mode
+                    if (reason !== 'auto') {
+                        if (saveMode === 'critical') {
+                            this.showMessage('SAVE LIMITED (STORAGE FULL)', 'warning');
+                        } else if (saveMode === 'light' && !light) {
+                            this.showMessage('SAVE REDUCED (STORAGE LOW)', 'warning');
+                        } else {
+                            this.showMessage('GAME SAVED', 'success');
+                        }
+                    }
+                    try {
+                        if (typeof window !== 'undefined' && window.DEBUG_SAVE) {
+                            console.log(`[SaveSystemAdapterFixed] Saved (${saveMode}) - Credits:`, payload.ship.credits, 'reason:', reason);
+                        }
+                    } catch(e) { /* debug logging only */ }
+                }
             } catch (e) {
                 console.error('[SaveSystemAdapterFixed] Save failed:', e);
-                this.showMessage('SAVE FAILED', 'error');
+                if (e.name === 'QuotaExceededError') {
+                    this.showMessage('SAVE FAILED - STORAGE FULL', 'error');
+                } else {
+                    this.showMessage('SAVE FAILED', 'error');
+                }
             } finally {
+                this._saveLock = false; // Release mutex
                 this._saveScheduled = false;
                 this._saveDeferCount = 0;
-                if (this._savePending) { this._savePending = false; this.handleSave(); }
+                if (this._savePending) {
+                    this._savePending = false;
+                    if (this._saveRetryCount < this._saveRetryMax) {
+                        this._saveRetryCount++;
+                        this.handleSave();
+                    } else {
+                        console.warn('[SaveSystemAdapterFixed] Max save retries reached, giving up');
+                        this._saveRetryCount = 0;
+                    }
+                } else {
+                    this._saveRetryCount = 0;
+                }
             }
         };
         try {
@@ -195,39 +323,113 @@ export class SaveSystemAdapterFixed {
         return true;
     }
 
-    _buildSaveData(light = false) {
+    /**
+     * Track save size for debugging/monitoring
+     */
+    _trackSaveSize(json) {
+        try {
+            const bytes = (typeof TextEncoder !== 'undefined') ?
+                new TextEncoder().encode(json).length : (json.length * 2);
+            const kb = Number((bytes / 1024).toFixed(1));
+
+            // Write to state.diagnostics (preferred)
+            const state = this.stateManager.state;
+            if (state && state.diagnostics) {
+                state.diagnostics.lastSaveSizeBytes = bytes;
+                state.diagnostics.lastSaveSizeKB = kb;
+            }
+
+            // Keep window globals for backwards compat with QA tools
+            if (typeof window !== 'undefined') {
+                window.LAST_SAVE_SIZE_BYTES = bytes;
+                window.LAST_SAVE_SIZE_KB = kb;
+            }
+        } catch(e) { logError('SaveSystem._trackSaveSize', e); }
+    }
+
+    /**
+     * Build critical-only save data (minimal size for quota issues)
+     */
+    _buildCriticalSaveData() {
         const state = this.stateManager.state;
-        // Trim large arrays to keep payloads small and stable
-        const npcList = light ? [] : (state.npcShips || []).slice(0, this.SAVE_MAX_NPCS);
         return {
-            version: '6.0',
+            version: '6.0-critical',
             timestamp: Date.now(),
             ship: {
                 x: state.ship.x,
                 y: state.ship.y,
-                vx: state.ship.vx,
-                vy: state.ship.vy,
                 angle: state.ship.angle,
-                fuel: state.ship.fuel,
                 credits: state.ship.credits,
                 health: state.ship.health,
+                maxHealth: state.ship.maxHealth || 100,
                 shield: state.ship.shield,
+                maxShield: state.ship.maxShield || 0,
                 cargo: state.ship.cargo || [],
                 weapons: state.ship.weapons || [],
-                currentWeapon: state.ship.currentWeapon || 0,
                 kills: state.ship.kills || 0,
-                engineLevel: state.ship.engineLevel || 1,
-                weaponLevel: state.ship.weaponLevel || 1,
-                radarLevel: state.ship.radarLevel || 0,
-                maxShield: state.ship.maxShield || 0,
+                weaponSlots: state.ship.weaponSlots || 1,
                 cargoCapacity: state.ship.cargoCapacity || 10,
-                tutorialStage: state.ship.tutorialStage || 'start'
+                class: state.ship.class || state.ship.shipClass || 'shuttle'
             },
-            reputation: state.reputation || { trader: 0, patrol: 0, pirate: 0 },
-            mission: {
-                activeId: state.missionSystem?.active?.id || null,
-                completed: state.missionSystem?.completed || []
-            },
+            reputation: state.reputation || { trader: 0, patrol: 0, pirate: 0 }
+        };
+    }
+
+    _buildSaveData(light = false) {
+        const state = this.stateManager.state;
+
+        // Snapshot ship data upfront to prevent race conditions
+        // (state could change between reads in a multi-threaded-like scenario)
+        const ship = state.ship;
+        const shipSnapshot = {
+            x: ship.x,
+            y: ship.y,
+            vx: ship.vx,
+            vy: ship.vy,
+            angle: ship.angle,
+            fuel: ship.fuel,
+            credits: ship.credits,
+            health: ship.health,
+            maxHealth: ship.maxHealth || 100,
+            shield: ship.shield,
+            cargo: ship.cargo ? [...ship.cargo] : [],
+            weapons: ship.weapons ? [...ship.weapons] : [],
+            currentWeapon: ship.currentWeapon || 0,
+            kills: ship.kills || 0,
+            pirateKills: ship.pirateKills || 0,
+            missionKills: ship.missionKills || 0,
+            engineLevel: ship.engineLevel || 1,
+            weaponLevel: ship.weaponLevel || 1,
+            radarLevel: ship.radarLevel || 0,
+            maxShield: ship.maxShield || 0,
+            cargoCapacity: ship.cargoCapacity || 10,
+            tutorialStage: ship.tutorialStage || 'start',
+            class: ship.class || ship.shipClass || 'shuttle'
+        };
+
+        // Snapshot reputation
+        const rep = state.reputation;
+        const repSnapshot = rep ? { trader: rep.trader || 0, patrol: rep.patrol || 0, pirate: rep.pirate || 0 } : { trader: 0, patrol: 0, pirate: 0 };
+
+        // Snapshot mission data
+        const missionSnapshot = {
+            activeId: state.missionSystem?.active?.id || null,
+            completed: state.missionSystem?.completed ? [...state.missionSystem.completed] : []
+        };
+
+        // Trim large arrays to keep payloads small and stable
+        const npcList = light ? [] : (state.npcShips || []).slice(0, this.SAVE_MAX_NPCS);
+
+        // Increment save version for this operation
+        this._saveVersion++;
+
+        return {
+            version: '6.1', // Bumped for snapshot-based saves
+            saveVersion: this._saveVersion,
+            timestamp: Date.now(),
+            ship: shipSnapshot,
+            reputation: repSnapshot,
+            mission: missionSnapshot,
             // Persist essentials for NPCs only on manual saves; autosave omits
             npcs: npcList.map(npc => ({ x: npc.x, y: npc.y, vx: npc.vx, vy: npc.vy, angle: npc.angle, type: npc.type, size: npc.size, health: npc.health, maxHealth: npc.maxHealth })),
             // Autosave omits asteroids/pickups entirely; manual keeps a small slice
@@ -284,8 +486,15 @@ export class SaveSystemAdapterFixed {
             }
             
             const data = JSON.parse(saveData);
+
+            // Validate save data structure
+            if (!this._validateSaveData(data)) {
+                console.error('[SaveSystemAdapterFixed] Save data validation failed, aborting load');
+                return false;
+            }
+
             console.log('[SaveSystemAdapterFixed] Applying save - Credits:', data.ship.credits);
-            
+
             const state = this.stateManager.state;
             
             // Safely apply whitelisted ship properties
@@ -304,48 +513,61 @@ export class SaveSystemAdapterFixed {
                 }
             }
             
-            // Restore NPCs if any
-            if (data.npcs && data.npcs.length > 0) {
-                state.npcShips.length = 0;
-                data.npcs.forEach(npcData => {
-                    // Drop legacy/optional 'scavenger' NPCs (feature removed)
-                    if (npcData && npcData.type === 'scavenger') return;
-                    const npc = {
-                        ...npcData,
-                        color: npcData.type === 'pirate' ? '#ff4444' : 
-                               npcData.type === 'trader' ? '#44ff44' : 
-                               npcData.type === 'patrol' ? '#4444ff' : 
-                               npcData.type === 'freighter' ? '#4488ff' : '#888888',
-                        state: 'idle',
-                        target: null,
-                        lastScan: 0,
-                        weaponCooldown: 0,
-                        fleeThreshold: 0.3,
-                        aggressionLevel: npcData.behavior === 'aggressive' ? 0.8 : 0.3
-                    };
-                    state.npcShips.push(npc);
-                });
-            }
-            
-            // Restore some asteroids
-            if (data.asteroids && data.asteroids.length > 0) {
-                // Clear existing and add saved ones
-                state.asteroids.length = 0;
-                data.asteroids.forEach(astData => {
-                    const shapePoints = [];
-                    for (let j = 0; j < 8; j++) {
-                        shapePoints.push(0.7 + Math.random() * 0.6);
-                    }
-                    
-                    state.asteroids.push({
-                        ...astData,
-                        color: "#666",
-                        rotationSpeed: (Math.random() - 0.5) * 0.02,
-                        rotation: Math.random() * Math.PI * 2,
-                        maxHealth: 20,
-                        shapePoints: shapePoints
+            // Restore NPCs if any (wrapped in try/catch to prevent partial corruption)
+            try {
+                if (data.npcs && data.npcs.length > 0) {
+                    const restoredNpcs = [];
+                    data.npcs.forEach(npcData => {
+                        // Drop legacy/optional 'scavenger' NPCs (feature removed)
+                        if (npcData && npcData.type === 'scavenger') return;
+                        const npc = {
+                            ...npcData,
+                            color: npcData.type === 'pirate' ? '#ff4444' :
+                                   npcData.type === 'trader' ? '#44ff44' :
+                                   npcData.type === 'patrol' ? '#4444ff' :
+                                   npcData.type === 'freighter' ? '#4488ff' : '#888888',
+                            state: 'idle',
+                            target: null,
+                            lastScan: 0,
+                            weaponCooldown: 0,
+                            fleeThreshold: 0.3,
+                            aggressionLevel: npcData.behavior === 'aggressive' ? 0.8 : 0.3
+                        };
+                        restoredNpcs.push(npc);
                     });
-                });
+                    // Only replace if restore succeeded
+                    state.npcShips.length = 0;
+                    restoredNpcs.forEach(n => state.npcShips.push(n));
+                }
+            } catch (e) { logError('SaveSystem.applyLoadedState.npcs', e); }
+            
+            // Restore some asteroids (wrapped to prevent partial corruption)
+            try {
+                if (data.asteroids && data.asteroids.length > 0) {
+                    const restoredAsteroids = [];
+                    data.asteroids.forEach(astData => {
+                        const shapePoints = [];
+                        for (let j = 0; j < 8; j++) {
+                            shapePoints.push(0.7 + Math.random() * 0.6);
+                        }
+                        restoredAsteroids.push({
+                            ...astData,
+                            color: "#666",
+                            rotationSpeed: (Math.random() - 0.5) * 0.02,
+                            rotation: Math.random() * Math.PI * 2,
+                            maxHealth: 20,
+                            shapePoints: shapePoints
+                        });
+                    });
+                    state.asteroids.length = 0;
+                    restoredAsteroids.forEach(a => state.asteroids.push(a));
+                }
+            } catch (e) { logError('SaveSystem.applyLoadedState.asteroids', e); }
+
+            // If loading a critical save (no NPCs/asteroids), signal SpawnSystem to repopulate
+            if ((!data.npcs || data.npcs.length === 0) && (!data.asteroids || data.asteroids.length === 0)) {
+                console.log('[SaveSystemAdapterFixed] Sparse save detected, requesting world repopulation');
+                this.eventBus.emit('world.repopulate');
             }
             
             // Update camera
@@ -374,13 +596,32 @@ export class SaveSystemAdapterFixed {
      * Check if save exists
      */
     hasSave() {
-        return localStorage.getItem(this.SAVE_KEY) !== null;
+        if (!this._storageAvailable) return false;
+        try {
+            return localStorage.getItem(this.SAVE_KEY) !== null;
+        } catch (e) {
+            logError('SaveSystem.hasSave', e);
+            return false;
+        }
     }
     
     /**
-     * Show a temporary message
+     * Show a temporary message with graceful degradation notification
      */
     showMessage(text, type = 'info') {
+        // Emit UI_MESSAGE event for centralized handling
+        try {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: text,
+                type: type,
+                duration: 2500
+            });
+        } catch (e) {
+            console.warn('[SaveSystemAdapterFixed] Failed to emit UI_MESSAGE:', e);
+        }
+
+        // Only use DOM fallback if no UISystem is listening (M7: prevent double notification)
+        if (this.eventBus.getListenerCount && this.eventBus.getListenerCount(GameEvents.UI_MESSAGE) > 0) return;
         const msg = document.createElement('div');
         msg.textContent = text.toUpperCase();
         msg.style.cssText = `
@@ -388,7 +629,7 @@ export class SaveSystemAdapterFixed {
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: ${type === 'error' ? '#ff4444' : type === 'success' ? '#44ff44' : '#4444ff'};
+            background: ${type === 'error' ? '#ff4444' : type === 'success' ? '#44ff44' : type === 'warning' ? '#ffaa44' : '#4444ff'};
             color: white;
             padding: 10px 20px;
             font-family: 'JetBrains Mono', monospace;
@@ -397,7 +638,7 @@ export class SaveSystemAdapterFixed {
             z-index: 10000;
             animation: fadeInOut 2.5s ease-in-out;
         `;
-        
+
         if (!document.querySelector('#saveNotificationKeyframes')) {
             const style = document.createElement('style');
             style.id = 'saveNotificationKeyframes';
@@ -411,7 +652,7 @@ export class SaveSystemAdapterFixed {
             `;
             document.head.appendChild(style);
         }
-        
+
         document.body.appendChild(msg);
         setTimeout(() => msg.remove(), 2500);
     }

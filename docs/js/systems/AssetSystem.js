@@ -1,12 +1,41 @@
 import { getEventBus } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
+import { logError } from '../utils/ErrorUtils.js';
 
 export default class AssetSystem {
     constructor() {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
         this.ready = false;
+        this.fetchTimeout = 10000; // 10 second timeout for asset fetches
+    }
+
+    /**
+     * Fetch with timeout using AbortController
+     * @param {string} url - URL to fetch
+     * @param {object} options - Fetch options
+     * @param {number} timeout - Timeout in milliseconds
+     * @returns {Promise<Response>} Fetch response
+     */
+    async fetchWithTimeout(url, options = {}, timeout = this.fetchTimeout) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error(`Fetch timeout after ${timeout}ms: ${url}`);
+            }
+            throw error;
+        }
     }
 
     async init() {
@@ -33,19 +62,19 @@ export default class AssetSystem {
             if (typeof state.renderSettings.useSprites === 'undefined') {
                 state.renderSettings.useSprites = true;
             }
-            try { this.eventBus.emit('render.useSprites', { enabled: state.renderSettings.useSprites }); } catch(_) {}
+            try { this.eventBus.emit('render.useSprites', { enabled: state.renderSettings.useSprites }); } catch(e) { /* event emit optional */ }
             this.ready = true;
-            try { this.eventBus.emit('assets.ready', { atlases: Object.keys(state.assets.atlases) }); } catch(_) {}
+            try { this.eventBus.emit('assets.ready', { atlases: Object.keys(state.assets.atlases) }); } catch(e) { /* event emit optional */ }
             console.log('[AssetSystem] Placeholder atlas ready');
         } catch (e) {
-            console.warn('[AssetSystem] Failed to initialize assets:', e);
+            logError('AssetSystem.init', e);
         }
     }
 
     async loadAtlas() {
         try {
             const url = new URL('../assets/atlas.json', import.meta.url).href;
-            const res = await fetch(url, { cache: 'no-cache' });
+            const res = await this.fetchWithTimeout(url, { cache: 'no-cache' });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const meta = await res.json();
             if (meta.image === '__generated__') {
@@ -54,8 +83,9 @@ export default class AssetSystem {
             // Load external image path if provided
             const img = await this.loadImage(meta.image);
             return { image: img, frames: meta.frames || {}, tileSize: meta.tileSize || { w: img.width, h: img.height } };
-        } catch (_) {
-            // Hard fallback: generate a default placeholder atlas
+        } catch (e) {
+            // Hard fallback: generate a default placeholder atlas (atlas.json missing or invalid)
+            logError('AssetSystem.loadAtlas', e);
             return await this.generatePlaceholderAtlas({
                 tileSize: { w: 32, h: 32 },
                 frames: {
@@ -77,12 +107,13 @@ export default class AssetSystem {
             // Resolve relative to docs/ root
             const root = new URL('../../', import.meta.url);
             const href = new URL(urlStr.replace(/^\.\//, ''), root).href;
-            const res = await fetch(href, { cache: 'no-cache' });
+            const res = await this.fetchWithTimeout(href, { cache: 'no-cache' });
             if (!res.ok) return; // manifest optional
             const manifest = await res.json();
             const state = this.stateManager.state;
             state.assets = state.assets || {};
             state.assets.planets = state.assets.planets || {};
+            state.assets.planetsMeta = state.assets.planetsMeta || {};
             const preloadOne = async (slug, srcOverride) => {
                 const key = String(slug || '').toLowerCase().replace(/\s+/g, '_');
                 if (state.assets.planets[key] && (state.assets.planets[key].complete || state.assets.planets[key].naturalWidth)) return;
@@ -90,6 +121,7 @@ export default class AssetSystem {
                 try {
                     const src = srcOverride ? srcOverride : new URL(`assets/planets/${key}.png`, root).href;
                     img.src = src; state.assets.planets[key] = img;
+                    state.assets.planetsMeta[key] = { src };
                 } catch(_) { /* ignore */ }
             };
             if (Array.isArray(manifest)) {
@@ -119,7 +151,7 @@ export default class AssetSystem {
     async loadSpritesManifest() {
         try {
             const url = new URL('../assets/sprites.json', import.meta.url).href;
-            const res = await fetch(url, { cache: 'no-cache' });
+            const res = await this.fetchWithTimeout(url, { cache: 'no-cache' });
             if (!res.ok) return; // manifest optional
             const list = await res.json();
             if (!Array.isArray(list)) return;
@@ -228,7 +260,7 @@ export default class AssetSystem {
 
     async loadKnownShipSprites() {
         try {
-            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/shuttle_1'];
+            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/freighter_1','ships/trader_0','ships/trader_1','ships/shuttle_0','ships/shuttle_1'];
             const state = this.stateManager.state;
             state.assets = state.assets || {};
             const sprites = state.assets.sprites || (state.assets.sprites = {});
@@ -268,7 +300,7 @@ export default class AssetSystem {
         try {
             // Resolve manifest relative to this module
             const manifestURL = new URL('../assets/explosion.json', import.meta.url);
-            const res = await fetch(manifestURL.href, { cache: 'no-cache' });
+            const res = await this.fetchWithTimeout(manifestURL.href, { cache: 'no-cache' });
             if (!res.ok) throw new Error('no flipbook manifest');
             const manifest = await res.json();
             if (!manifest || !Array.isArray(manifest.frames) || manifest.frames.length === 0) throw new Error('empty flipbook');
@@ -452,29 +484,49 @@ export function getPlanetSpriteFromState(state, name) {
         if (!state) return null;
         state.assets = state.assets || {};
         const store = state.assets.planets || (state.assets.planets = {});
+        const meta = state.assets.planetsMeta || {};
         const baseKey = String(name || '').toLowerCase().replace(/\s+/g, '_');
         // Optional runtime overrides, e.g., window.PLANET_SPRITE_OVERRIDES = { terra_nova: 'terra_nova_1' }
         let finalKey = baseKey;
+        let overrideSrc = null;
         try {
             const g = (typeof window !== 'undefined') ? window : globalThis;
             if (g && g.PLANET_SPRITE_OVERRIDES && g.PLANET_SPRITE_OVERRIDES[baseKey]) {
-                finalKey = String(g.PLANET_SPRITE_OVERRIDES[baseKey]).toLowerCase().replace(/\s+/g, '_').replace(/\.png$/,'');
+                const raw = String(g.PLANET_SPRITE_OVERRIDES[baseKey]).trim();
+                const slug = raw.toLowerCase().replace(/\s+/g, '_');
+                const m = slug.match(/\.(png|svg|webp)$/);
+                if (m) {
+                    const withoutExt = slug.replace(/\.(png|svg|webp)$/, '');
+                    finalKey = withoutExt;
+                    overrideSrc = raw;
+                } else {
+                    finalKey = slug;
+                }
             }
         } catch(_) {}
         let img = store[finalKey];
-        if (img && (img.naturalWidth || img.width || img.complete)) return img;
-        // Lazily create and begin loading. Default path convention: assets/planets/<slug>.png
+        if (img) return img;
         img = new Image();
         img.crossOrigin = 'anonymous';
         img.decoding = 'async';
-        // Resolve relative to docs/ root (two levels up from systems/)
-        try {
-            const root = new URL('../../', import.meta.url);
-            img.src = new URL(`assets/planets/${finalKey}.png`, root).href;
-        } catch (_) {
-            img.src = `./assets/planets/${finalKey}.png`;
+        const root = new URL('../../', import.meta.url);
+        const metaEntry = meta[finalKey];
+        const desiredSrc = overrideSrc || metaEntry?.src;
+        if (desiredSrc) {
+            store[finalKey] = img;
+            try { img.src = new URL(String(desiredSrc).replace(/^\.\//, ''), root).href; }
+            catch (_) { img.src = desiredSrc; }
+            if (!metaEntry) {
+                state.assets.planetsMeta = meta;
+                meta[finalKey] = { src: desiredSrc };
+            }
+        } else {
+            try { img.src = new URL(`assets/planets/${finalKey}.png`, root).href; }
+            catch (_) { img.src = `./assets/planets/${finalKey}.png`; }
+            state.assets.planetsMeta = meta;
+            meta[finalKey] = { src: img.src };
+            store[finalKey] = img;
         }
-        store[finalKey] = img;
         return img;
     } catch (_) { return null; }
 }

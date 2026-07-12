@@ -2,6 +2,7 @@ import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
 import { MathUtils } from '../utils/MathUtils.js';
+import { SpatialHash } from '../utils/SpatialHash.js';
 
 /**
  * PhysicsSystem - Handles all physics simulation
@@ -11,23 +12,27 @@ export class PhysicsSystem {
     constructor() {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
-        
+
         // Physics constants
         this.SPACE_FRICTION = 1.0;  // No friction in space!
         this.BRAKE_FRICTION = 0.95;
         const worldHalf = Math.floor(((GameConstants?.WORLD?.ASTEROID_WORLD_SIZE ?? 4000) / 2));
         this.WORLD_BOUNDS = { min: -worldHalf, max: worldHalf };
-        
+
+        // Spatial hashes for O(n) collision detection (cell size ~100px for finer granularity)
+        this._npcHash = new SpatialHash(100);
+        this._asteroidHash = new SpatialHash(150);
+
         // Movement state tracking
         this.thrustActive = false;
         this.brakeActive = false;
         this.turnDirection = 0; // -1 left, 0 none, 1 right
-        
+
         // Bound event handlers
         this.handleThrust = this.handleThrust.bind(this);
         this.handleBrake = this.handleBrake.bind(this);
         this.handleTurn = this.handleTurn.bind(this);
-        
+
         console.log('[PhysicsSystem] Created');
     }
     
@@ -188,15 +193,11 @@ export class PhysicsSystem {
         // ship.vx *= this.SPACE_FRICTION;  // Commented out - no friction
         // ship.vy *= this.SPACE_FRICTION;  // Commented out - no friction
         
-        // Apply velocity limits
-        const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+        // Apply velocity limits with validation
         const maxSpeed = ship.maxSpeed || 0.45;
-        
-        if (speed > maxSpeed) {
-            const scale = maxSpeed / speed;
-            ship.vx *= scale;
-            ship.vy *= scale;
-        }
+        const cappedVelocity = MathUtils.capVelocity(ship.vx, ship.vy, maxSpeed);
+        ship.vx = cappedVelocity.vx;
+        ship.vy = cappedVelocity.vy;
         
         // Update position
         ship.x += ship.vx;
@@ -260,13 +261,10 @@ export class PhysicsSystem {
             // npc.vx *= this.SPACE_FRICTION;  // Removed - no friction
             // npc.vy *= this.SPACE_FRICTION;  // Removed - no friction
             
-            // Apply velocity limits
-            const speed = Math.sqrt(npc.vx * npc.vx + npc.vy * npc.vy);
-            if (speed > npc.maxSpeed) {
-                const scale = npc.maxSpeed / speed;
-                npc.vx *= scale;
-                npc.vy *= scale;
-            }
+            // Apply velocity limits with validation
+            const cappedVelocity = MathUtils.capVelocity(npc.vx, npc.vy, npc.maxSpeed);
+            npc.vx = cappedVelocity.vx;
+            npc.vy = cappedVelocity.vy;
             
             // Position is updated in the old system for now
         }
@@ -374,12 +372,16 @@ export class PhysicsSystem {
     checkCollisions(state) {
         const ship = state.ship;
         if (!ship || ship.isDestroyed) return;
-        
+
         const projectiles = state.projectiles || [];
         const asteroids = state.asteroids || [];
         const pickups = state.pickups || [];
         const npcShips = state.npcShips || [];
-        
+
+        // Rebuild spatial hashes for O(n) collision queries
+        this._npcHash.rebuild(npcShips);
+        this._asteroidHash.rebuild(asteroids);
+
         // Clear previous collisions
         state.physics.collisions = [];
         
@@ -431,10 +433,10 @@ export class PhysicsSystem {
                         });
                     }
                     
-                    // Screen shake/damage flash
-                    ship.screenShake = Math.min(20, damage * 0.5);
-                    ship.screenShakeDecay = (GameConstants?.PHYSICS?.SCREEN_SHAKE_DECAY ?? 0.8);
-                    ship.damageFlash = (GameConstants?.PHYSICS?.DAMAGE_FLASH_INITIAL ?? 1.0);
+                    // Screen shake/damage flash (amplified for better game feel)
+                    ship.screenShake = Math.min(40, damage * 1.5);
+                    ship.screenShakeDecay = (GameConstants?.PHYSICS?.SCREEN_SHAKE_DECAY ?? 0.85);
+                    ship.damageFlash = (GameConstants?.PHYSICS?.DAMAGE_FLASH_INITIAL ?? 1.2);
                     
                     // Emit damage event
                     this.eventBus.emit(GameEvents.SHIP_DAMAGE, {
@@ -512,13 +514,16 @@ export class PhysicsSystem {
             const dy = ship.y - pickup.y;
             const r = (ship.size || 0) + 10; const r2 = r * r;
             if ((dx*dx + dy*dy) < r2) {
+                // Remove pickup immediately to prevent double-collection
+                pickups.splice(i, 1);
+
                 // Emit pickup collected event
                 this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, {
                     ship,
                     pickup,
                     index: i
                 });
-                
+
                 // Record collision
                 state.physics.collisions.push({
                     type: 'ship-pickup',
@@ -527,71 +532,9 @@ export class PhysicsSystem {
             }
         }
         
-        // Projectile collisions (simplified for now)
-        for (let i = projectiles.length - 1; i >= 0; i--) {
-            const proj = projectiles[i];
-            
-            // Check collision with player (if not player's projectile)
-            if (!proj.isPlayer) {
-                if (this.checkPointCircleCollision(proj, ship)) {
-                    // Emit projectile hit event
-                    this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
-                        projectile: proj,
-                        target: ship,
-                        isPlayer: true,
-                        index: i
-                    });
-                    
-                    // Record collision
-                    state.physics.collisions.push({
-                        type: 'projectile-ship',
-                        timestamp: Date.now()
-                    });
-                }
-            }
-            
-            // Check collision with NPCs
-            for (let npc of npcShips) {
-                if (proj.shooter === npc) continue;
-                
-                if (this.checkPointCircleCollision(proj, npc)) {
-                    // Emit projectile hit event
-                    this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
-                        projectile: proj,
-                        target: npc,
-                        isPlayer: false,
-                        index: i
-                    });
-                    
-                    // Record collision
-                    state.physics.collisions.push({
-                        type: 'projectile-npc',
-                        timestamp: Date.now()
-                    });
-                    break;
-                }
-            }
-            
-            // Check collision with asteroids
-            for (let asteroid of asteroids) {
-                if (this.checkPointCircleCollision(proj, asteroid)) {
-                    // Emit projectile hit event
-                    this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_HIT, {
-                        projectile: proj,
-                        target: asteroid,
-                        isAsteroid: true,
-                        index: i
-                    });
-                    
-                    // Record collision
-                    state.physics.collisions.push({
-                        type: 'projectile-asteroid',
-                        timestamp: Date.now()
-                    });
-                    break;
-                }
-            }
-        }
+        // Projectile collisions are handled by WeaponSystem (which also splices hits).
+        // PhysicsSystem previously duplicated this work without removing projectiles,
+        // causing double-damage and extra debris. Removed in April 2026 audit (C1).
     }
     
     /**

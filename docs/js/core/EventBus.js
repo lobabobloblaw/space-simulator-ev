@@ -166,7 +166,15 @@ export const GameEvents = {
     TRADE_SELL: 'economy.trade.sell',
     TRADE_SELL_ALL: 'economy.trade.sellAll',
     SHOP_BUY: 'shop.buy',
-    
+    SHIP_BUY: 'shop.ship.buy',
+
+    // Mission events
+    MISSION_ACCEPT: 'mission.accept',
+    MISSION_COMPLETE: 'mission.complete',
+    MISSION_ABANDON: 'mission.abandon',
+    MISSION_FAILED: 'mission.failed',
+    MISSION_UPDATED: 'mission.updated',
+
     // Game state events
     GAME_PAUSE: 'game.pause',
     GAME_RESUME: 'game.resume',
@@ -193,7 +201,8 @@ export const GameEvents = {
     INPUT_SWITCH_WEAPON: 'input.switchWeapon',
     INPUT_LAND: 'input.land',
     INPUT_INTERACT: 'input.interact',
-    
+    INPUT_ZONE_ADVANCE: 'input.zoneAdvance',
+
     // UI events
     UI_MESSAGE: 'ui.message',
     UI_UPDATE: 'ui.update',
@@ -225,7 +234,6 @@ export const GameEvents = {
     REPUTATION_CHANGED: 'reputation.changed',
     
     // Physics events
-    PICKUP_COLLECTED: 'physics.pickup.collected',
     PHYSICS_THRUST_CHANGED: 'physics.thrust.changed',
     PHYSICS_BRAKE_CHANGED: 'physics.brake.changed',
     PHYSICS_TURN_CHANGED: 'physics.turn.changed',

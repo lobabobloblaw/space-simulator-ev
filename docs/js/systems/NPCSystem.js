@@ -6,12 +6,20 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
+import { MathUtils } from '../utils/MathUtils.js';
+import { SpatialHash } from '../utils/SpatialHash.js';
 
 export default class NPCSystem {
     constructor() {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
-        
+
+        // Spatial hashes for O(n) proximity queries (cell size ~200px)
+        this._npcHash = new SpatialHash(200);
+
+        // Frame-cached timestamp to avoid repeated Date.now() calls
+        this._frameTime = 0;
+
         console.log('[NPCSystem] Created with full AI personalities');
     }
     
@@ -20,9 +28,9 @@ export default class NPCSystem {
         this.eventBus.on(GameEvents.PROJECTILE_FIRED, (data) => {
             // Track player hostility for patrol AI
             if (data.isPlayer) {
-                const state = this.stateManager.getState();
+                const state = this.stateManager.state;
                 if (!state.playerLastFireTime) {
-                    this.stateManager.updateState({ playerLastFireTime: Date.now() });
+                    state.playerLastFireTime = Date.now();
                 }
             }
         });
@@ -61,10 +69,16 @@ export default class NPCSystem {
      */
     update(state, deltaTime) {
         if (!state || !state.npcShips) return;
-        
+
         const ship = state.ship;
         if (!ship) return;
-        
+
+        // Cache timestamp once per frame (avoids 30+ Date.now() calls)
+        this._frameTime = Date.now();
+
+        // Rebuild spatial hash for O(n) proximity queries (exclude dying NPCs)
+        this._npcHash.rebuild(state.npcShips.filter(n => n.health > 0));
+
         // Check player hostility status ONCE for all patrols
         const playerHostility = this.checkPlayerHostility(state);
         
@@ -122,7 +136,7 @@ export default class NPCSystem {
         const dy = npc.y - ship.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist > (GameConstants?.NPC?.REP_COMMS_NEAR_DIST ?? 450)) return;
-        const now = Date.now();
+        const now = this._frameTime;
 
         if (npc.behavior === 'lawful' && rep.patrol >= 6) {
             if (!npc.lastHail || now - npc.lastHail > (GameConstants?.NPC?.HAIL_COOLDOWN_MS ?? 9000)) {
@@ -142,7 +156,7 @@ export default class NPCSystem {
                 const lines = [
                     'You think the patrols can save you?',
                     'Bounty hunter, huh? Try me.',
-                    'Your head’s worth credits.'
+                    "Your head's worth credits."
                 ];
                 npc.message = lines[Math.floor(Math.random()*lines.length)];
                 npc.messageTime = now;
@@ -157,37 +171,37 @@ export default class NPCSystem {
     checkPlayerHostility(state) {
         const ship = state.ship;
         const projectiles = state.projectiles || [];
-        
+
         let isHostile = false;
         let recentlyFired = false;
         const playerIsAlive = !ship.isDestroyed;
-        
+
         if (playerIsAlive && projectiles.length > 0) {
             // Check recent player projectiles
             for (let proj of projectiles) {
                 if (proj.isPlayer && proj.lifetime < 30) {
                     recentlyFired = true;
                     const projAngle = Math.atan2(proj.vy, proj.vx);
-                    
-                    // Check if shooting at patrol or innocent
-                    for (let npc of state.npcShips) {
-                        if (npc.behavior === "lawful" || npc.behavior === "passive") {
-                            const distToNPC = Math.sqrt((npc.x - proj.x) ** 2 + (npc.y - proj.y) ** 2);
-                            if (distToNPC < 400) {
-                                const angleToNPC = Math.atan2(npc.y - proj.y, npc.x - proj.x);
-                                const angleDiff = Math.abs(angleToNPC - projAngle);
-                                if (angleDiff < Math.PI / 6) {
-                                    isHostile = true;
-                                    break;
-                                }
-                            }
+
+                    // Use spatial hash - only check NPCs within 400 units (O(1) average)
+                    const nearbyNPCs = this._npcHash.queryNearFiltered(
+                        proj.x, proj.y, 400,
+                        npc => npc.behavior === 'lawful' || npc.behavior === 'passive'
+                    );
+
+                    for (const npc of nearbyNPCs) {
+                        const angleToNPC = Math.atan2(npc.y - proj.y, npc.x - proj.x);
+                        const angleDiff = Math.abs(angleToNPC - projAngle);
+                        if (angleDiff < Math.PI / 6) {
+                            isHostile = true;
+                            break;
                         }
                     }
                     if (isHostile) break;
                 }
             }
         }
-        
+
         // Career criminal check
         if (ship.kills > 5 && ship.pirateKills < ship.kills * 0.5) {
             isHostile = true;
@@ -201,50 +215,45 @@ export default class NPCSystem {
      */
     handlePatrolWarning(ship, npcShips, playerHostility) {
         if (!ship.patrolWarningShown && !ship.patrolWarningExpired) {
-            // Check if any patrol is close enough to warn
-            let patrolNearby = false;
-            for (let npc of npcShips) {
-                if (npc.behavior === "lawful") {
-                    const dist = Math.sqrt((npc.x - ship.x) ** 2 + (npc.y - ship.y) ** 2);
-                    if (dist < (GameConstants?.NPC?.PATROL_WARNING_DISTANCE ?? 1000)) {
-                        patrolNearby = true;
-                        break;
-                    }
-                }
-            }
-            
-            if (patrolNearby) {
+            // Use spatial hash to find nearby patrols (O(1) average)
+            const warnDist = GameConstants?.NPC?.PATROL_WARNING_DISTANCE ?? 1000;
+            const nearbyPatrols = this._npcHash.queryNearFiltered(
+                ship.x, ship.y, warnDist,
+                npc => npc.behavior === 'lawful'
+            );
+
+            if (nearbyPatrols.length > 0) {
                 ship.patrolWarningShown = true;
-                ship.patrolWarningTime = Date.now();
-                
+                ship.patrolWarningTime = this._frameTime;
+
                 // Emit warning event for UI to handle
                 this.eventBus.emit(GameEvents.PATROL_WARNING, {
                     message: 'PATROL WARNING: CEASE HOSTILE ACTIONS'
                 });
             }
         }
-        
+
         // Check if warning has expired
-        if (ship.patrolWarningShown && Date.now() - ship.patrolWarningTime > (GameConstants?.NPC?.PATROL_WARNING_DURATION ?? 2000)) {
+        if (ship.patrolWarningShown && this._frameTime - ship.patrolWarningTime > (GameConstants?.NPC?.PATROL_WARNING_DURATION ?? 2000)) {
             ship.patrolWarningExpired = true;
         }
     }
-    
+
     /**
      * Check if player's hostility should be cleared
      */
     checkHostilityClearance(ship) {
-        if (Date.now() - ship.patrolWarningTime > (GameConstants?.NPC?.PATROL_FORGIVENESS_TIME ?? 5000)) {
+        if (this._frameTime - ship.patrolWarningTime > (GameConstants?.NPC?.PATROL_FORGIVENESS_TIME ?? 5000)) {
             if (ship.patrolWarningShown && !ship.patrolStandingDown) {
                 ship.patrolStandingDown = true;
                 ship.patrolWarningShown = false;
                 ship.patrolWarningExpired = false;
-                
+
                 // Emit stand down event
                 this.eventBus.emit(GameEvents.PATROL_STAND_DOWN, {
                     message: 'PATROL: STANDING DOWN'
                 });
-                
+
                 setTimeout(() => {
                     ship.patrolStandingDown = false;
                 }, (GameConstants?.NPC?.PATROL_STAND_DOWN_RESET_MS ?? 2000));
@@ -263,14 +272,13 @@ export default class NPCSystem {
         
         // Remove if dead, with a brief destruct sequence
         if (npc.health <= 0) {
-            const now = performance.now ? performance.now() : Date.now();
             if (!npc.deathSeq) {
                 const ms = (typeof GameConstants !== 'undefined' && GameConstants?.NPC_SETTINGS?.DESTRUCT_SEQUENCE_MS) ? GameConstants.NPC_SETTINGS.DESTRUCT_SEQUENCE_MS : 450;
-                npc.deathSeq = { start: now, duration: ms };
+                npc.deathSeq = { start: this._frameTime, duration: ms };
                 // Freeze motion
                 npc.vx = 0; npc.vy = 0;
             }
-            if (now - npc.deathSeq.start >= npc.deathSeq.duration) {
+            if (this._frameTime - npc.deathSeq.start >= npc.deathSeq.duration) {
                 this.handleNPCDeath(npc, ship, state);
                 return true;
             }
@@ -311,27 +319,8 @@ export default class NPCSystem {
             });
         }
         
-        // Pirates drop loot
-        if (npc.type === 'pirate' && Math.random() < 0.6) {
-            for (let j = 0; j < 2 + Math.floor(Math.random() * 3); j++) {
-                const angle = Math.random() * Math.PI * 2;
-                const speed = Math.random() * 2 + 1;
-                
-                // Add pickup to state
-                if (!state.pickups) state.pickups = [];
-                state.pickups.push({
-                    x: npc.x,
-                    y: npc.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    type: Math.random() < 0.5 ? 'credits' : 'ore',
-                    value: Math.random() < 0.5 ? 10 : 25,
-                    lifetime: 0,
-                    maxLifetime: 600
-                });
-            }
-        }
-        
+        // Loot drops handled by SpawnSystem.handleNPCDeath (H8: removed duplicate)
+
         // Emit death event
         this.eventBus.emit(GameEvents.NPC_DESTROYED, { npc });
     }
@@ -379,7 +368,7 @@ export default class NPCSystem {
         };
         
         // Clear old messages
-        if (npc.messageTime && Date.now() - npc.messageTime > 3000) {
+        if (npc.messageTime && this._frameTime - npc.messageTime > 3000) {
             npc.message = null;
             npc.messageTime = null;
         }
@@ -393,6 +382,8 @@ export default class NPCSystem {
                 return this.makeTraderDecision(npc, state, decision);
             case "scavenger":
                 return this.makeScavengerDecision(npc, state, decision);
+            case "boss":
+                return this.makeBossDecision(npc, state, decision);
             default:
                 return this.makeDefaultDecision(npc, state, decision);
         }
@@ -404,32 +395,24 @@ export default class NPCSystem {
     makePirateDecision(npc, state, decision) {
         const ship = state.ship;
         const playerIsAlive = !ship.isDestroyed;
-        
-        // Check for nearby patrol threats
-        let nearbyPatrol = null;
-        let patrolDist = 600;
-        for (let other of state.npcShips) {
-            if (other.behavior === "lawful") {
-                const dist = Math.sqrt((other.x - npc.x) ** 2 + (other.y - npc.y) ** 2);
-                if (dist < patrolDist) {
-                    nearbyPatrol = other;
-                    patrolDist = dist;
-                    break;
-                }
-            }
-        }
-        
+
+        // Check for nearby patrol threats using spatial hash (O(1) average)
+        const patrolSearchDist = 600;
+        const result = this._npcHash.findNearest(npc.x, npc.y, patrolSearchDist, other => other.behavior === 'lawful');
+        const nearbyPatrol = result ? result.entity : null;
+
         // EVADE PATROL if one is nearby and pursuing
         if (nearbyPatrol && nearbyPatrol.pursuing) {
             const evadeX = npc.x - nearbyPatrol.x;
             const evadeY = npc.y - nearbyPatrol.y;
             decision.desiredAngle = Math.atan2(evadeY, evadeX);
-            
+
             npc.isFleeing = true;
             npc.state = 'fleeing';
-            
+
             // Pirate panic messages
-            if (!npc.lastFleeMessage || Date.now() - npc.lastFleeMessage > (GameConstants?.NPC?.PIRATE_PANIC_COOLDOWN_MS ?? 5000)) {
+            const panicCooldown = GameConstants?.NPC?.PIRATE_PANIC_COOLDOWN_MS ?? 5000;
+            if (!npc.lastFleeMessage || this._frameTime - npc.lastFleeMessage > panicCooldown) {
                 const fleeMessages = [
                     "It's the feds!",
                     "Patrol incoming!",
@@ -437,12 +420,12 @@ export default class NPCSystem {
                     "Not today!"
                 ];
                 npc.message = fleeMessages[Math.floor(Math.random() * fleeMessages.length)];
-                npc.messageTime = Date.now();
-                npc.lastFleeMessage = Date.now();
+                npc.messageTime = this._frameTime;
+                npc.lastFleeMessage = this._frameTime;
             }
-            
+
             let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
-            
+
             if (Math.abs(angleDiff) < Math.PI / 6) {
                 decision.shouldThrust = true;
             } else if (Math.abs(angleDiff) < Math.PI / 3) {
@@ -484,7 +467,9 @@ export default class NPCSystem {
                 npc.state = 'pursuing';
                 
                 // Pirate attack messages
-                if (bestTargetDist < (GameConstants?.NPC?.PIRATE_TAUNT_DISTANCE ?? 400) && (!npc.lastAttackMessage || Date.now() - npc.lastAttackMessage > (GameConstants?.NPC?.TAUNT_COOLDOWN_MS ?? 8000))) {
+                const tauntDist = GameConstants?.NPC?.PIRATE_TAUNT_DISTANCE ?? 400;
+                const tauntCooldown = GameConstants?.NPC?.TAUNT_COOLDOWN_MS ?? 8000;
+                if (bestTargetDist < tauntDist && (!npc.lastAttackMessage || this._frameTime - npc.lastAttackMessage > tauntCooldown)) {
                     const attackMessages = [
                         "Surrender your cargo!",
                         "This is a raid!",
@@ -492,19 +477,16 @@ export default class NPCSystem {
                         "Nowhere to run!"
                     ];
                     npc.message = attackMessages[Math.floor(Math.random() * attackMessages.length)];
-                    npc.messageTime = Date.now();
-                    npc.lastAttackMessage = Date.now();
+                    npc.messageTime = this._frameTime;
+                    npc.lastAttackMessage = this._frameTime;
                 }
-                
-                // Calculate intercept angle with modest lead
-                const leadFactor = 0.7;
-                const interceptTime = bestTargetDist / (npc.maxSpeed * 50);
-                const targetX = bestTarget.x + bestTarget.vx * interceptTime * leadFactor;
-                const targetY = bestTarget.y + bestTarget.vy * interceptTime * leadFactor;
-                decision.desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
-                
+
+                // Calculate intercept angle with modest lead and validation
+                const interceptPos = this.calculateSafeIntercept(bestTarget, npc.x, npc.y, bestTargetDist, npc.maxSpeed, 50, 0.7);
+                decision.desiredAngle = Math.atan2(interceptPos.y - npc.y, interceptPos.x - npc.x);
+
                 let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
-                
+
                 // Arrive behavior to prevent tight orbits
                 if (bestTargetDist > 180) {
                     if (Math.abs(angleDiff) < Math.PI / 3) decision.shouldThrust = true;
@@ -519,10 +501,9 @@ export default class NPCSystem {
 
                 // Strafe when close to avoid orbit lock
                 if (bestTargetDist < 250 && bestTargetDist > 120) {
-                    const now = Date.now();
-                    if (!npc.strafeDir || !npc.strafeTimer || now - npc.strafeTimer > 900 + Math.random()*500) {
+                    if (!npc.strafeDir || !npc.strafeTimer || this._frameTime - npc.strafeTimer > 900 + Math.random()*500) {
                         npc.strafeDir = (Math.random() < 0.5 ? -1 : 1);
-                        npc.strafeTimer = now;
+                        npc.strafeTimer = this._frameTime;
                     }
                     const strafeAngle = decision.desiredAngle + npc.strafeDir * Math.PI * 0.25; // ±45°
                     // Apply a small lateral nudge
@@ -559,7 +540,7 @@ export default class NPCSystem {
         const distToPlayer = Math.sqrt((ship.x - npc.x) ** 2 + (ship.y - npc.y) ** 2);
 
         // Respond to distress target first
-        if (npc.respondTarget && Date.now() < npc.respondTarget.expires) {
+        if (npc.respondTarget && this._frameTime < npc.respondTarget.expires) {
             const dx = npc.respondTarget.x - npc.x; const dy = npc.respondTarget.y - npc.y;
             const dist = Math.hypot(dx, dy);
             decision.desiredAngle = Math.atan2(dy, dx);
@@ -568,65 +549,72 @@ export default class NPCSystem {
             if (dist < 120) { npc.respondTarget = null; npc.pursuing = false; }
             return decision;
         }
-        
+
         // Check if player is friendly (pirate hunter)
         const playerIsFriendly = ship.pirateKills >= 3 && (!ship.kills || ship.pirateKills >= ship.kills * 0.8);
-        
-        // PRIORITY 1: Find pirates
+
+        // PRIORITY 1: Find pirates using spatial hash (O(1) average instead of O(n))
+        const searchRadius = playerIsFriendly ? 1500 : 1200;
+        const nearbyPirates = this._npcHash.queryNearFiltered(
+            npc.x, npc.y, searchRadius,
+            other => other.behavior === 'aggressive'
+        );
+
         let targetPirate = null;
-        let closestPirateDist = playerIsFriendly ? 1500 : 1200;
+        let closestPirateDist = searchRadius;
         let pirateIsAttacking = false;
-        
-        for (let other of state.npcShips) {
-            if (other.behavior === "aggressive") {
-                const dist = Math.sqrt((other.x - npc.x) ** 2 + (other.y - npc.y) ** 2);
-                
-                const pirateShootingNow = other.weaponCooldown > 0;
-                
-                // Is pirate near merchant?
-                let nearMerchant = false;
-                for (let victim of state.npcShips) {
-                    if (victim.behavior === "passive") {
-                        const distToVictim = Math.sqrt((other.x - victim.x) ** 2 + (other.y - victim.y) ** 2);
-                        if (distToVictim < (GameConstants?.NPC?.PIRATE_NEAR_MERCHANT_DISTANCE ?? 400)) {
-                            nearMerchant = true;
-                            break;
-                        }
-                    }
+        const merchantCheckDist = GameConstants?.NPC?.PIRATE_NEAR_MERCHANT_DISTANCE ?? 400;
+        const helpPlayerDist = GameConstants?.NPC?.PATROL_HELP_PLAYER_DISTANCE ?? 500;
+
+        for (const other of nearbyPirates) {
+            const dx = other.x - npc.x;
+            const dy = other.y - npc.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            const pirateShootingNow = other.weaponCooldown > 0;
+
+            // Is pirate near merchant? Use spatial hash instead of full loop
+            const nearbyMerchants = this._npcHash.queryNearFiltered(
+                other.x, other.y, merchantCheckDist,
+                v => v.behavior === 'passive'
+            );
+            const nearMerchant = nearbyMerchants.length > 0;
+
+            // Is pirate threatening player?
+            const dxPlayer = other.x - ship.x;
+            const dyPlayer = other.y - ship.y;
+            const nearPlayer = (dxPlayer * dxPlayer + dyPlayer * dyPlayer) < helpPlayerDist * helpPlayerDist;
+            const helpingPlayer = playerIsFriendly && nearPlayer;
+
+            if (pirateShootingNow || nearMerchant || helpingPlayer) {
+                targetPirate = other;
+                closestPirateDist = dist;
+                pirateIsAttacking = true;
+
+                if (helpingPlayer && !npc.shownHelpMessage) {
+                    npc.shownHelpMessage = true;
+                    this.eventBus.emit(GameEvents.PATROL_ASSIST, {
+                        message: '✅ PATROL: ENGAGING HOSTILE - ASSISTANCE PROVIDED'
+                    });
                 }
-                
-                // Is pirate threatening player?
-                const nearPlayer = Math.sqrt((other.x - ship.x) ** 2 + (other.y - ship.y) ** 2) < (GameConstants?.NPC?.PATROL_HELP_PLAYER_DISTANCE ?? 500);
-                const helpingPlayer = playerIsFriendly && nearPlayer;
-                
-                if (pirateShootingNow || nearMerchant || helpingPlayer) {
-                    targetPirate = other;
-                    closestPirateDist = dist;
-                    pirateIsAttacking = true;
-                    
-                    if (helpingPlayer && !npc.shownHelpMessage) {
-                        npc.shownHelpMessage = true;
-                        this.eventBus.emit(GameEvents.PATROL_ASSIST, {
-                            message: '✅ PATROL: ENGAGING HOSTILE - ASSISTANCE PROVIDED'
-                        });
-                    }
-                    break;
-                } else if (dist < closestPirateDist) {
-                    targetPirate = other;
-                    closestPirateDist = dist;
-                    pirateIsAttacking = false;
-                }
+                break;
+            } else if (dist < closestPirateDist) {
+                targetPirate = other;
+                closestPirateDist = dist;
+                pirateIsAttacking = false;
             }
         }
-        
+
         // Mark pursuit state
         if (targetPirate) {
             npc.pursuing = true;
             npc.state = 'pursuing';
             if (!npc.pursuitTimer) npc.pursuitTimer = 0;
-            
+
             // Patrol pursuit messages
-            if (closestPirateDist < (GameConstants?.NPC?.PATROL_PURSUIT_MSG_DISTANCE ?? 500) && (!npc.lastPursuitMessage || Date.now() - npc.lastPursuitMessage > (GameConstants?.NPC?.PURSUIT_MSG_COOLDOWN_MS ?? 6000))) {
+            const pursuitMsgDist = GameConstants?.NPC?.PATROL_PURSUIT_MSG_DISTANCE ?? 500;
+            const pursuitMsgCooldown = GameConstants?.NPC?.PURSUIT_MSG_COOLDOWN_MS ?? 6000;
+            if (closestPirateDist < pursuitMsgDist && (!npc.lastPursuitMessage || this._frameTime - npc.lastPursuitMessage > pursuitMsgCooldown)) {
                 const pursuitMessages = [
                     "Stop right there!",
                     "Halt, criminal!",
@@ -634,8 +622,8 @@ export default class NPCSystem {
                     "Cease and desist!"
                 ];
                 npc.message = pursuitMessages[Math.floor(Math.random() * pursuitMessages.length)];
-                npc.messageTime = Date.now();
-                npc.lastPursuitMessage = Date.now();
+                npc.messageTime = this._frameTime;
+                npc.lastPursuitMessage = this._frameTime;
             }
         } else {
             npc.pursuing = false;
@@ -647,16 +635,16 @@ export default class NPCSystem {
             npc.state = 'pursuing';
             
             // Hostile player messages
-            if (distToPlayer < (GameConstants?.NPC?.PIRATE_TAUNT_DISTANCE ?? 400) && (!npc.lastHostileMessage || Date.now() - npc.lastHostileMessage > (GameConstants?.NPC?.HOSTILE_MSG_COOLDOWN_MS ?? 5000))) {
+            const hostileMsgDist = GameConstants?.NPC?.PIRATE_TAUNT_DISTANCE ?? 400;
+            const hostileMsgCooldown = GameConstants?.NPC?.HOSTILE_MSG_COOLDOWN_MS ?? 5000;
+            if (distToPlayer < hostileMsgDist && (!npc.lastHostileMessage || this._frameTime - npc.lastHostileMessage > hostileMsgCooldown)) {
                 npc.message = "Criminal detected!";
-                npc.messageTime = Date.now();
-                npc.lastHostileMessage = Date.now();
+                npc.messageTime = this._frameTime;
+                npc.lastHostileMessage = this._frameTime;
             }
-            
-            const interceptTime = distToPlayer / (npc.maxSpeed * 100);
-            const targetX = ship.x + ship.vx * interceptTime * 2;
-            const targetY = ship.y + ship.vy * interceptTime * 2;
-            decision.desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+
+            const interceptPos = this.calculateSafeIntercept(ship, npc.x, npc.y, distToPlayer, npc.maxSpeed, 100, 2);
+            decision.desiredAngle = Math.atan2(interceptPos.y - npc.y, interceptPos.x - npc.x);
             
             let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
             
@@ -674,14 +662,12 @@ export default class NPCSystem {
             // Warning message
             if (!npc.shownWarningMessage) {
                 npc.message = "CEASE FIRE!";
-                npc.messageTime = Date.now();
+                npc.messageTime = this._frameTime;
                 npc.shownWarningMessage = true;
             }
-            
-            const interceptTime = distToPlayer / (npc.maxSpeed * 100);
-            const targetX = ship.x + ship.vx * interceptTime * 2;
-            const targetY = ship.y + ship.vy * interceptTime * 2;
-            decision.desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+
+            const interceptPos = this.calculateSafeIntercept(ship, npc.x, npc.y, distToPlayer, npc.maxSpeed, 100, 2);
+            decision.desiredAngle = Math.atan2(interceptPos.y - npc.y, interceptPos.x - npc.x);
             
             let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
             
@@ -692,10 +678,8 @@ export default class NPCSystem {
         
         // PRIORITY 3: Pursue pirates
         if (targetPirate) {
-            const interceptTime = closestPirateDist / (npc.maxSpeed * 100);
-            const targetX = targetPirate.x + targetPirate.vx * interceptTime * 2;
-            const targetY = targetPirate.y + targetPirate.vy * interceptTime * 2;
-            decision.desiredAngle = Math.atan2(targetY - npc.y, targetX - npc.x);
+            const interceptPos = this.calculateSafeIntercept(targetPirate, npc.x, npc.y, closestPirateDist, npc.maxSpeed, 100, 2);
+            decision.desiredAngle = Math.atan2(interceptPos.y - npc.y, interceptPos.x - npc.x);
             
             let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
             
@@ -787,9 +771,10 @@ export default class NPCSystem {
                 fleeing = true;
                 npc.isFleeing = true;
                 npc.state = 'fleeing';
-                
+
                 // Trader panic messages
-                if (!npc.lastPanicMessage || Date.now() - npc.lastPanicMessage > (GameConstants?.NPC?.PANIC_COOLDOWN_MS ?? 4000)) {
+                const panicCooldown = GameConstants?.NPC?.PANIC_COOLDOWN_MS ?? 4000;
+                if (!npc.lastPanicMessage || this._frameTime - npc.lastPanicMessage > panicCooldown) {
                     const panicMessages = [
                         "Help! Help!",
                         "Someone help!",
@@ -797,18 +782,19 @@ export default class NPCSystem {
                         "Mayday! Mayday!"
                     ];
                     npc.message = panicMessages[Math.floor(Math.random() * panicMessages.length)];
-                    npc.messageTime = Date.now();
-                    npc.lastPanicMessage = Date.now();
+                    npc.messageTime = this._frameTime;
+                    npc.lastPanicMessage = this._frameTime;
                 }
-                
+
                 // Emit a distress beacon (throttled)
-                if (!npc._lastDistress || Date.now() - npc._lastDistress > (GameConstants?.NPC?.DISTRESS_THROTTLE_MS ?? 6000)) {
-                    npc._lastDistress = Date.now();
+                const distressThrottle = GameConstants?.NPC?.DISTRESS_THROTTLE_MS ?? 6000;
+                if (!npc._lastDistress || this._frameTime - npc._lastDistress > distressThrottle) {
+                    npc._lastDistress = this._frameTime;
                     this.eventBus.emit(GameEvents.NPC_DISTRESS, { id: npc.id, x: npc.x, y: npc.y, type: npc.type });
                 }
 
                 let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
-                
+
                 if (Math.abs(angleDiff) < Math.PI / 6) {
                     decision.shouldThrust = true;
                 } else {
@@ -816,40 +802,43 @@ export default class NPCSystem {
                 }
             }
         }
-        
-        // Check for hostile NPCs
-        for (let other of state.npcShips) {
-            if (other.behavior === "aggressive") {
-                const odx = other.x - npc.x;
-                const ody = other.y - npc.y;
-                const distToHostile = Math.sqrt(odx * odx + ody * ody);
-                if (distToHostile < (GameConstants?.NPC?.TRADER_FLEE_HOSTILE_DISTANCE ?? 200)) {
-                    decision.desiredAngle = Math.atan2(-ody, -odx);
-                    fleeing = true;
-                    npc.isFleeing = true;
-                    npc.state = 'fleeing';
-                    
-                    // Trader panic from pirates
-                    if (!npc.lastPirateMessage || Date.now() - npc.lastPirateMessage > (GameConstants?.NPC?.PIRATE_PANIC_COOLDOWN_MS ?? 5000)) {
-                        npc.message = "Pirates!";
-                        npc.messageTime = Date.now();
-                        npc.lastPirateMessage = Date.now();
-                    }
-                    
-                    // Emit distress for pirates too (throttled)
-                    if (!npc._lastDistress || Date.now() - npc._lastDistress > (GameConstants?.NPC?.DISTRESS_THROTTLE_MS ?? 6000)) {
-                        npc._lastDistress = Date.now();
-                        this.eventBus.emit(GameEvents.NPC_DISTRESS, { id: npc.id, x: npc.x, y: npc.y, type: npc.type });
-                    }
-                    let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
-                    
-                    if (Math.abs(angleDiff) < Math.PI / 6) {
-                        decision.shouldThrust = true;
-                    } else {
-                        decision.shouldThrust = false;
-                    }
-                    break;
-                }
+
+        // Check for hostile NPCs using spatial hash (O(1) average instead of O(n))
+        const fleeDist = GameConstants?.NPC?.TRADER_FLEE_HOSTILE_DISTANCE ?? 200;
+        const nearbyHostiles = this._npcHash.queryNearFiltered(
+            npc.x, npc.y, fleeDist,
+            other => other.behavior === 'aggressive'
+        );
+
+        if (nearbyHostiles.length > 0) {
+            const other = nearbyHostiles[0]; // Flee from first hostile found
+            const odx = other.x - npc.x;
+            const ody = other.y - npc.y;
+            decision.desiredAngle = Math.atan2(-ody, -odx);
+            fleeing = true;
+            npc.isFleeing = true;
+            npc.state = 'fleeing';
+
+            // Trader panic from pirates
+            const piratePanicCooldown = GameConstants?.NPC?.PIRATE_PANIC_COOLDOWN_MS ?? 5000;
+            if (!npc.lastPirateMessage || this._frameTime - npc.lastPirateMessage > piratePanicCooldown) {
+                npc.message = "Pirates!";
+                npc.messageTime = this._frameTime;
+                npc.lastPirateMessage = this._frameTime;
+            }
+
+            // Emit distress for pirates too (throttled)
+            const distressThrottle2 = GameConstants?.NPC?.DISTRESS_THROTTLE_MS ?? 6000;
+            if (!npc._lastDistress || this._frameTime - npc._lastDistress > distressThrottle2) {
+                npc._lastDistress = this._frameTime;
+                this.eventBus.emit(GameEvents.NPC_DISTRESS, { id: npc.id, x: npc.x, y: npc.y, type: npc.type });
+            }
+            let angleDiff = this.normalizeAngle(decision.desiredAngle - npc.angle);
+
+            if (Math.abs(angleDiff) < Math.PI / 6) {
+                decision.shouldThrust = true;
+            } else {
+                decision.shouldThrust = false;
             }
         }
         
@@ -933,7 +922,94 @@ export default class NPCSystem {
         npc.state = best ? 'scavenging' : 'wandering';
         return decision;
     }
-    
+
+    /**
+     * Boss AI - relentless pursuit of player with phase-based behavior
+     */
+    makeBossDecision(npc, state, decision) {
+        const ship = state.ship;
+        const playerIsAlive = ship && !ship.isDestroyed;
+
+        if (!playerIsAlive) {
+            // Idle if player is dead
+            npc.state = 'idle';
+            return decision;
+        }
+
+        // Calculate distance to player
+        const dx = ship.x - npc.x;
+        const dy = ship.y - npc.y;
+        const distToPlayer = Math.hypot(dx, dy);
+
+        // Determine current phase based on health
+        const healthRatio = (npc.health || 0) / (npc.maxHealth || 1);
+        let currentPhase = 0;
+        if (npc.phases) {
+            for (let i = 0; i < npc.phases.length; i++) {
+                if (healthRatio <= npc.phases[i].healthThreshold) {
+                    currentPhase = i;
+                    break;
+                }
+            }
+        }
+
+        // Phase transition messages
+        if (npc._lastPhase !== currentPhase) {
+            npc._lastPhase = currentPhase;
+            const phaseKey = currentPhase === 0 ? 'spawnMessage' :
+                             currentPhase === 1 ? 'phase2Message' :
+                             currentPhase === 2 ? 'phase3Message' : null;
+            if (phaseKey && npc[phaseKey] && !npc[`_${phaseKey}Shown`]) {
+                npc.message = npc[phaseKey];
+                npc.messageTime = this._frameTime;
+                npc[`_${phaseKey}Shown`] = true;
+            }
+        }
+
+        // Get phase behavior
+        const phase = npc.phases?.[currentPhase] || { behavior: 'aggressive' };
+        const behavior = phase.behavior || 'aggressive';
+
+        // Always target player
+        decision.desiredAngle = Math.atan2(dy, dx);
+
+        // Behavior variants
+        if (behavior === 'tactical') {
+            // Keep medium distance, strafe and fire
+            const idealDist = 300;
+            if (distToPlayer < idealDist - 50) {
+                // Too close - back off slightly
+                decision.desiredAngle = Math.atan2(-dy, -dx);
+                decision.shouldThrust = true;
+                decision.thrustPower = 0.5;
+            } else if (distToPlayer > idealDist + 100) {
+                // Too far - close in
+                decision.shouldThrust = true;
+            }
+            // Fire when facing player
+            const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
+            decision.shouldFire = angleDiff < Math.PI / 4 && distToPlayer < 600;
+        } else if (behavior === 'aggressive' || behavior === 'berserk') {
+            // Chase and fire constantly
+            const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
+            if (angleDiff < Math.PI / 3) {
+                decision.shouldThrust = true;
+                decision.thrustPower = behavior === 'berserk' ? 1.2 : 1.0;
+            }
+            decision.shouldFire = angleDiff < Math.PI / 3 && distToPlayer < 700;
+        } else if (behavior === 'desperate') {
+            // All-out attack - constant thrust and fire
+            decision.shouldThrust = true;
+            decision.thrustPower = 1.3;
+            decision.shouldFire = distToPlayer < 800;
+        }
+
+        npc.state = 'pursuing';
+        npc.pursuing = true;
+
+        return decision;
+    }
+
     /**
      * Default patrol pattern
      */
@@ -1003,7 +1079,7 @@ export default class NPCSystem {
         }
         
         // Fire weapon if decided
-        if (decision.shouldFire && npc.weapon && npc.weaponCooldown <= 0) {
+        if (decision.shouldFire && npc.weapon && npc.weaponCooldown <= 0 && !npc.deathSeq) {
             this.fireNPCWeapon(npc, state);
         }
     }
@@ -1056,13 +1132,43 @@ export default class NPCSystem {
         npc.x += npc.vx;
         npc.y += npc.vy;
     }
-    
+
     /**
-     * Normalize angle to -PI to PI range
+     * Calculate safe intercept position with NaN/Infinity validation
+     * @param {Object} target - Target object with x, y, vx, vy
+     * @param {number} npcX - NPC x position
+     * @param {number} npcY - NPC y position
+     * @param {number} distance - Distance to target
+     * @param {number} npcMaxSpeed - NPC max speed
+     * @param {number} speedFactor - Speed calculation factor
+     * @param {number} leadFactor - Lead time multiplier
+     * @returns {{x: number, y: number}} Safe intercept position
+     */
+    calculateSafeIntercept(target, npcX, npcY, distance, npcMaxSpeed, speedFactor = 100, leadFactor = 1) {
+        // Validate inputs
+        const safeMaxSpeed = MathUtils.safeNumber(npcMaxSpeed, 0.1);
+        const safeDistance = MathUtils.safeNumber(distance, 1);
+        const safeFactor = MathUtils.safeNumber(speedFactor, 100);
+        const safeLead = MathUtils.safeNumber(leadFactor, 1);
+
+        // Calculate intercept time safely
+        const divisor = safeMaxSpeed * safeFactor;
+        const interceptTime = divisor > 0.001 ? safeDistance / divisor : 0;
+        const safeInterceptTime = MathUtils.safeNumber(interceptTime, 0);
+
+        // Calculate target position with validation
+        const targetVx = MathUtils.safeNumber(target.vx, 0);
+        const targetVy = MathUtils.safeNumber(target.vy, 0);
+        const targetX = MathUtils.safeNumber(target.x + targetVx * safeInterceptTime * safeLead, target.x);
+        const targetY = MathUtils.safeNumber(target.y + targetVy * safeInterceptTime * safeLead, target.y);
+
+        return { x: targetX, y: targetY };
+    }
+
+    /**
+     * Normalize angle to -PI to PI range with NaN/Infinity validation
      */
     normalizeAngle(angle) {
-        while (angle > Math.PI) angle -= Math.PI * 2;
-        while (angle < -Math.PI) angle += Math.PI * 2;
-        return angle;
+        return MathUtils.normalizeAngleSafe(angle);
     }
 }

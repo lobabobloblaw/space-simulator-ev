@@ -3,7 +3,27 @@ import { shouldUseFlipbook, ringCountFor, sparkCountFor } from './RenderQualityP
 
 // ExplosionRenderer centralizes explosion visuals: rings/shockwaves (world) and flipbook (screen)
 export class ExplosionRenderer {
-  constructor() {}
+  constructor() {
+    // Performance optimization: Distance threshold for gradient quality degradation
+    // Explosions beyond this distance from camera use solid colors to reduce gradient allocations
+    this._gradientDistanceThreshold = 500;
+  }
+
+  /**
+   * Check if explosion should use simplified rendering (solid colors vs gradients)
+   * @param {number} expX - Explosion X position
+   * @param {number} expY - Explosion Y position
+   * @param {number} camX - Camera X position
+   * @param {number} camY - Camera Y position
+   * @returns {boolean} True if should use simplified rendering
+   */
+  _shouldUseSimplifiedRendering(expX, expY, camX, camY) {
+    const dx = expX - camX;
+    const dy = expY - camY;
+    const distSq = dx * dx + dy * dy;
+    const thresholdSq = this._gradientDistanceThreshold * this._gradientDistanceThreshold;
+    return distSq > thresholdSq;
+  }
 
   render(ctx, state, camera, screenCenter, quality, showParticles) {
     const explosions = state.explosions || [];
@@ -26,13 +46,22 @@ export class ExplosionRenderer {
       const radius = exp.radius + (exp.maxRadius - exp.radius) * progress;
       const isTiny = (exp.maxRadius || 0) <= 20; // asteroid/impact pops
 
+      // Performance: Use simplified rendering for distant explosions
+      const useSimplified = this._shouldUseSimplifiedRendering(exp.x, exp.y, camera.x, camera.y);
+
       // Initial core flash (world space)
       if (progress < 0.12) {
         const flashAlpha = (1 - progress / 0.12) * 0.9;
-        const fg = ctx.createRadialGradient(exp.x, exp.y, 0, exp.x, exp.y, Math.max(10, radius * 0.6));
-        fg.addColorStop(0, `rgba(255,255,255,${flashAlpha})`);
-        fg.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = fg;
+        if (useSimplified) {
+          // Use solid color for distant explosions (no gradient allocation)
+          ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha * 0.7})`;
+        } else {
+          // Use gradient for close explosions
+          const fg = ctx.createRadialGradient(exp.x, exp.y, 0, exp.x, exp.y, Math.max(10, radius * 0.6));
+          fg.addColorStop(0, `rgba(255,255,255,${flashAlpha})`);
+          fg.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = fg;
+        }
         ctx.beginPath();
         ctx.arc(exp.x, exp.y, Math.max(12, radius * 0.6), 0, Math.PI * 2);
         ctx.fill();
@@ -61,12 +90,15 @@ export class ExplosionRenderer {
         const ringProgress = Math.max(0, progress - i * 0.12);
         const ringRadius = isTiny ? radius * 0.7 : radius * (1 - i * 0.2);
         const alpha = (isTiny ? 0.6 : 1) * (1 - ringProgress) * (1 - i * 0.3);
-        if (quality === 'low') {
+
+        // Use simplified rendering for low quality or distant explosions
+        if (quality === 'low' || useSimplified) {
           ctx.fillStyle = `rgba(255, 140, 40, ${alpha * 0.6})`;
           ctx.beginPath();
           ctx.arc(exp.x, exp.y, ringRadius, 0, Math.PI * 2);
           ctx.fill();
         } else {
+          // Full gradient rendering for close explosions at medium/high quality
           const gradient = ctx.createRadialGradient(exp.x, exp.y, ringRadius * 0.5, exp.x, exp.y, ringRadius);
           gradient.addColorStop(0, `rgba(255, 255, 200, ${alpha})`);
           gradient.addColorStop(0.3, `rgba(255, 150, 0, ${alpha * 0.8})`);

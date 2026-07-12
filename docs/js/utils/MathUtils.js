@@ -56,6 +56,7 @@ export class MathUtils {
      * @returns {number} Normalized angle
      */
     static normalizeAngle(angle) {
+        if (!isFinite(angle)) return 0;
         while (angle > Math.PI) angle -= Math.PI * 2;
         while (angle < -Math.PI) angle += Math.PI * 2;
         return angle;
@@ -354,6 +355,47 @@ export class MathUtils {
      */
     static pointInRect(px, py, rx, ry, width, height) {
         return px >= rx && px <= rx + width && py >= ry && py <= ry + height;
+    }
+
+    /**
+     * Validate and sanitize a numeric value
+     * @param {number} value - Value to validate
+     * @param {number} fallback - Fallback value if invalid
+     * @returns {number} Valid number or fallback
+     */
+    static safeNumber(value, fallback = 0) {
+        return (isFinite(value) && !isNaN(value)) ? value : fallback;
+    }
+
+    /**
+     * Normalize angle to [-PI, PI] with NaN/Infinity validation
+     * @param {number} angle - Angle in radians
+     * @returns {number} Normalized angle, or 0 if invalid
+     */
+    static normalizeAngleSafe(angle) {
+        if (!isFinite(angle) || isNaN(angle)) return 0;
+        const normalized = ((angle + Math.PI) % (Math.PI * 2)) - Math.PI;
+        return isFinite(normalized) ? normalized : 0;
+    }
+
+    /**
+     * Cap velocity magnitude with validation
+     * @param {number} vx - X velocity
+     * @param {number} vy - Y velocity
+     * @param {number} maxSpeed - Maximum speed
+     * @returns {{vx: number, vy: number}} Capped velocity
+     */
+    static capVelocity(vx, vy, maxSpeed) {
+        if (!isFinite(vx)) vx = 0;
+        if (!isFinite(vy)) vy = 0;
+        if (!isFinite(maxSpeed) || maxSpeed <= 0) return {vx, vy};
+
+        const speed = Math.sqrt(vx * vx + vy * vy);
+        if (speed > maxSpeed && speed > 0) {
+            const scale = maxSpeed / speed;
+            return { vx: vx * scale, vy: vy * scale };
+        }
+        return {vx, vy};
     }
 }
 

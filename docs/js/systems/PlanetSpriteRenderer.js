@@ -8,6 +8,8 @@ export default class PlanetSpriteRenderer {
   constructor(stateManager) {
     this.stateManager = stateManager;
     this._preloaded = new Set();
+    this._decodeReady = new Set(); // planet.name values that finished decode()
+    this._scaledCache = new Map(); // name -> { canvas, w, h, forRadius }
   }
 
   initializePlanets(planets) {
@@ -24,26 +26,62 @@ export default class PlanetSpriteRenderer {
     try {
       const state = this.stateManager.state;
       const img = getPlanetSpriteFromState(state, planet.name);
-      return !!(img && (img.complete || img.naturalWidth));
+      if (!img) return false;
+      // Prefer explicit decode gate to avoid first-draw sync decode hitch
+      if (this._decodeReady.has(planet.name)) return true;
+      // Fallback: if decode() unsupported, rely on complete+naturalWidth
+      return !!(img.complete && (img.naturalWidth || img.width));
     } catch (_) { return false; }
   }
 
   prepareAsync(planet) {
-    // Hint the loader; getPlanetSpriteFromState lazily creates the image
-    try { getPlanetSpriteFromState(this.stateManager.state, planet.name); } catch (_) {}
+    // Hint the loader and proactively decode to avoid sync decode during render
+    try {
+      const img = getPlanetSpriteFromState(this.stateManager.state, planet.name);
+      if (!img) return;
+      if (this._preloaded.has(planet.name)) return;
+      this._preloaded.add(planet.name);
+      if (typeof img.decode === 'function') {
+        img.decode().then(() => { this._decodeReady.add(planet.name); }).catch(() => {
+          // If decode fails, fall back to complete check
+          if (img.complete && (img.naturalWidth || img.width)) this._decodeReady.add(planet.name);
+        });
+      } else {
+        // No decode(): poll briefly for readiness (bounded) without blocking
+        let tries = 0;
+        const t = setInterval(() => {
+          tries++;
+          if (img.complete && (img.naturalWidth || img.width)) {
+            this._decodeReady.add(planet.name);
+            clearInterval(t);
+          } else if (tries > 20) {
+            clearInterval(t);
+          }
+        }, 60);
+      }
+    } catch (_) {}
   }
 
   renderPlanet(ctx, planet, now) {
     const state = this.stateManager.state;
     const img = getPlanetSpriteFromState(state, planet.name);
     if (img && (img.naturalWidth || img.width)) {
-      // Draw at identity — compute dw/dh from planet radius
+      // Downscale once into a cached canvas at target draw size to avoid per-frame resampling cost
       const dw = Math.max(2, planet.radius * 2);
       const dh = dw;
+      let entry = this._scaledCache.get(planet.name);
+      if (!entry || entry.w !== dw || entry.h !== dh) {
+        const c = document.createElement('canvas');
+        c.width = dw; c.height = dh;
+        const cctx = c.getContext('2d');
+        try { cctx.imageSmoothingEnabled = true; cctx.imageSmoothingQuality = 'high'; } catch(_) {}
+        cctx.drawImage(img, 0, 0, dw, dh);
+        entry = { canvas: c, w: dw, h: dh, forRadius: planet.radius };
+        this._scaledCache.set(planet.name, entry);
+      }
       ctx.save();
-      // Enable smoothing for non-pixel art planets
       try { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; } catch(_) {}
-      ctx.drawImage(img, planet.x - dw/2, planet.y - dh/2, dw, dh);
+      ctx.drawImage(entry.canvas, planet.x - dw/2, planet.y - dh/2);
       ctx.restore();
       return;
     }
@@ -60,4 +98,3 @@ export default class PlanetSpriteRenderer {
     ctx.restore();
   }
 }
-

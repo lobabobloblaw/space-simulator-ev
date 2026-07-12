@@ -63,8 +63,9 @@ export default class TradingSystem {
 
     showTradingPanel() {
         const state = this.stateManager.state;
+        if (!state.ship.isLanded) return;
         const planet = state.ship.landedPlanet;
-        
+
         if (!planet || !planet.commodityPrices) return;
         const repEff = this.getTraderRepEffect();
 
@@ -168,14 +169,19 @@ export default class TradingSystem {
         if (!Array.isArray(state.ship.cargo) || state.ship.cargo.length === 0) return;
         const repEff = this.getTraderRepEffect();
         let total = 0;
-        for (let i = state.ship.cargo.length - 1; i >= 0; i--) {
-            const item = state.ship.cargo[i];
+        const remainingCargo = [];
+        for (const item of state.ship.cargo) {
             const sellPrice = planet.commodityPrices[item.type];
-            if (!Number.isFinite(sellPrice)) continue;
+            if (!Number.isFinite(sellPrice)) {
+                remainingCargo.push(item);
+                continue;
+            }
             const adjusted = Math.max(1, Math.round(sellPrice * repEff.sellMult));
             total += adjusted;
-            state.ship.cargo.splice(i, 1);
+            // Don't keep sold items
         }
+        // Reassign to trigger proxy (splice bypasses proxy)
+        state.ship.cargo = remainingCargo;
         if (total > 0) {
             state.ship.credits += total;
             this.eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'sell' });
@@ -191,6 +197,7 @@ export default class TradingSystem {
 
     buyCommodity(type, price) {
         const state = this.stateManager.state;
+        if (!state.ship.isLanded || !state.ship.landedPlanet) return;
         const planet = state.ship.landedPlanet;
         const repEff = this.getTraderRepEffect();
         const base = planet?.commodityPrices?.[type];
@@ -220,7 +227,7 @@ export default class TradingSystem {
         state.ship.cargo.push({
             type: type,
             buyPrice: effectivePrice,
-            buyLocation: state.ship.landedPlanet.name
+            buyLocation: state.ship.landedPlanet?.name || 'unknown'
         });
 
         // Play sound
@@ -246,8 +253,9 @@ export default class TradingSystem {
 
     sellCommodity(type) {
         const state = this.stateManager.state;
+        if (!state.ship.isLanded || !state.ship.landedPlanet) return;
         const planet = state.ship.landedPlanet;
-        
+
         // Find item in cargo
         const itemIndex = state.ship.cargo.findIndex(item => item.type === type);
         if (itemIndex === -1) return;

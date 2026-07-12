@@ -35,7 +35,8 @@ export class InputSystem {
             // Interaction
             'l': 'land',
             'e': 'interact',
-            
+            'z': 'zoneAdvance',
+
             // System
             'escape': 'pause',
             'p': 'pause',
@@ -63,8 +64,19 @@ export class InputSystem {
         this.handleTouchEnd = this.handleTouchEnd.bind(this);
         this.handleTouchMove = this.handleTouchMove.bind(this);
         this.handleContextMenu = this.handleContextMenu.bind(this);
-        
+        this._handleSpaceBarScroll = this._handleSpaceBarScroll.bind(this);
+
         console.log('[InputSystem] Created');
+    }
+
+    /**
+     * Prevent space bar from scrolling the page
+     * @private
+     */
+    _handleSpaceBarScroll(e) {
+        if (e.key === ' ' && e.target === document.body) {
+            e.preventDefault();
+        }
     }
     
     /**
@@ -102,12 +114,30 @@ export class InputSystem {
             canvas.addEventListener('touchmove', this.handleTouchMove);
         }
         
-        // Prevent space bar scrolling
-        window.addEventListener('keydown', (e) => {
-            if (e.key === ' ' && e.target === document.body) {
-                e.preventDefault();
+        // Prevent space bar scrolling (uses bound method for proper cleanup)
+        window.addEventListener('keydown', this._handleSpaceBarScroll);
+
+        // Clear stuck keys on window blur/alt-tab (H4) and auto-pause
+        this._blurPaused = false; // track whether WE caused the pause
+        this._handleBlur = () => {
+            this.keys.clear();
+            this.eventBus.emit(GameEvents.INPUT_THRUST, { active: false });
+            this.eventBus.emit(GameEvents.INPUT_BRAKE, { active: false });
+            this.eventBus.emit(GameEvents.INPUT_TURN, { direction: 0 });
+            this.eventBus.emit(GameEvents.INPUT_FIRE, { active: false });
+            // Auto-pause on blur to prevent unfair damage while tabbed out
+            this._blurPaused = true;
+            this.eventBus.emit(GameEvents.GAME_PAUSE);
+        };
+        // Auto-resume on focus only if we were the ones who paused
+        this._handleFocus = () => {
+            if (this._blurPaused) {
+                this._blurPaused = false;
+                this.eventBus.emit(GameEvents.GAME_RESUME);
             }
-        });
+        };
+        window.addEventListener('blur', this._handleBlur);
+        window.addEventListener('focus', this._handleFocus);
     }
     
     /**
@@ -169,6 +199,9 @@ export class InputSystem {
                     break;
                 case 'interact':
                     this.eventBus.emit(GameEvents.INPUT_INTERACT);
+                    break;
+                case 'zoneAdvance':
+                    this.eventBus.emit(GameEvents.INPUT_ZONE_ADVANCE);
                     break;
                 case 'pause':
                     this.eventBus.emit(GameEvents.GAME_PAUSE_TOGGLE);
@@ -510,7 +543,10 @@ export class InputSystem {
         // Remove event listeners
         document.removeEventListener('keydown', this.handleKeyDown);
         document.removeEventListener('keyup', this.handleKeyUp);
-        
+        window.removeEventListener('keydown', this._handleSpaceBarScroll);
+        if (this._handleBlur) window.removeEventListener('blur', this._handleBlur);
+        if (this._handleFocus) window.removeEventListener('focus', this._handleFocus);
+
         const canvas = document.getElementById('gameCanvas');
         if (canvas) {
             canvas.removeEventListener('mousedown', this.handleMouseDown);
@@ -521,7 +557,7 @@ export class InputSystem {
             canvas.removeEventListener('touchend', this.handleTouchEnd);
             canvas.removeEventListener('touchmove', this.handleTouchMove);
         }
-        
+
         console.log('[InputSystem] Destroyed');
     }
 }

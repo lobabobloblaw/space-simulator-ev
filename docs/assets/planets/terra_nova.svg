@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="sea" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#6bd0ff"/>
+      <stop offset="70%" stop-color="#2b7bbd"/>
+      <stop offset="100%" stop-color="#0a0f1a"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="30%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" fill="#000"/>
+  <g transform="translate(128,128)">
+    <circle r="110" fill="url(#sea)" />
+    <g fill="#d8f8ff" fill-opacity="0.9">
+      <path d="M-70,-10 C-30,-20,-20,-8,10,-12 C40,-16,60,-2,74,8 C40,20,10,18,-20,16 C-40,14,-60,4,-70,-10 Z"/>
+      <path d="M-30,28 C-10,20,20,24,40,34 C26,40,-10,44,-34,36 Z" fill-opacity="0.7"/>
+      <path d="M50,-36 C70,-30,84,-18,86,-8 C70,-12,56,-14,44,-18 Z" fill-opacity="0.6"/>
+    </g>
+    <ellipse rx="90" ry="60" cy="-60" fill="url(#gloss)"/>
+  </g>
+</svg>
+

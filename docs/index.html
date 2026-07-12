@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Galaxy Trader - Space Trading & Combat</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https:;">
+    <!-- CSP: 'unsafe-eval' required for potential WASM/Emscripten modules; connect-src restricted to known APIs -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://lexica.art https://image.pollinations.ai; frame-ancestors 'none'; base-uri 'self';">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -67,9 +68,9 @@
             </div>
             <!-- Ship Radio / Music Player -->
             <div id="shipRadio" class="radio-radial" aria-label="Ship Radio">
-                <button id="radioPrev" title="Previous frequency">◄</button>
-                <button id="radioPlay" title="Play/Pause">▶</button>
-                <button id="radioNext" title="Next frequency">►</button>
+                <button id="radioPrev" title="Previous frequency" aria-label="Previous frequency">◄</button>
+                <button id="radioPlay" title="Play/Pause" aria-label="Play or pause radio">▶</button>
+                <button id="radioNext" title="Next frequency" aria-label="Next frequency">►</button>
                 <div id="radioTitle">SCANNING… 118.7 MHz</div>
                 <div id="radioViz" aria-hidden="true"></div>
                 <div id="radioDial" aria-hidden="true"></div>
@@ -80,8 +81,8 @@
             
             <!-- Right Panel: Controls & Radar -->
             <div class="hud-right">
-                <div id="centerViewport">
-                    <canvas id="centerViewportCanvas" width="100" height="100"></canvas>
+                <div id="centerViewport" aria-label="Target camera viewport" role="img">
+                    <canvas id="centerViewportCanvas" width="100" height="100" aria-label="Target camera display"></canvas>
                 </div>
                 <div class="controls-panel">
                     <div class="controls">
@@ -111,13 +112,58 @@
                         <span class="control-action">CLEAR</span>
                     </div>
                 </div>
-                <div id="minimap">
-                    <canvas id="minimapCanvas" width="100" height="100"></canvas>
+                <div id="minimap" aria-label="Minimap radar" role="img">
+                    <canvas id="minimapCanvas" width="100" height="100" aria-label="Minimap radar display"></canvas>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- Roguelike Main Menu Overlay -->
+    <div id="mainMenuOverlay">
+        <div class="menu-content">
+            <h1 class="menu-title">GALAXY TRADER</h1>
+            <div class="menu-subtitle">A Space Trading Roguelike</div>
+
+            <div id="shipCarousel" class="ship-carousel">
+                <!-- Ships populated by MainMenuUI.js -->
+            </div>
+
+            <div class="menu-buttons">
+                <button id="startRunBtn" class="menu-btn primary">BEGIN RUN</button>
+                <button id="continueRunBtn" class="menu-btn" style="display: none;">CONTINUE RUN</button>
+            </div>
+
+            <div id="metaStats" class="meta-stats">
+                <!-- Stats populated by MainMenuUI.js -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Death Screen Overlay -->
+    <div id="deathScreenOverlay">
+        <div class="death-content">
+            <h1 class="death-title">SHIP DESTROYED</h1>
+            <div class="death-subtitle" id="deathZone">Zone: Core Systems</div>
+
+            <div id="runSummary" class="run-summary">
+                <div class="stat-row"><span class="stat-label">Run Time</span><span class="stat-value" id="deathRunTime">0:00</span></div>
+                <div class="stat-row"><span class="stat-label">Kills</span><span class="stat-value" id="deathKills">0</span></div>
+                <div class="stat-row"><span class="stat-label">Credits Earned</span><span class="stat-value" id="deathCredits">0</span></div>
+                <div class="stat-row"><span class="stat-label">Zone Reached</span><span class="stat-value" id="deathZoneReached">Core Systems</span></div>
+            </div>
+
+            <div id="deathUnlocks" class="death-unlocks" style="display: none;">
+                <!-- New unlocks shown here -->
+            </div>
+
+            <div class="death-buttons">
+                <button id="retryRunBtn" class="menu-btn primary">TRY AGAIN</button>
+                <button id="mainMenuBtn" class="menu-btn">MAIN MENU</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Landing/Station Interface -->
     <div id="landingOverlay">
         <div id="landingHeader">
@@ -155,12 +201,38 @@
                     <div id="shopList"></div>
                 </div>
             </div>
+            <div id="missionsPanel">
+                <div class="trading-header">
+                    <div class="cargo-status">
+                        <strong>ACTIVE:</strong> <span id="activeMissionCount">0</span> |
+                        <strong>COMPLETED:</strong> <span id="completedMissionCount">0</span>
+                    </div>
+                    <div class="commodity-header">MISSION BOARD</div>
+                </div>
+                <div class="trading-content">
+                    <div id="missionsList"></div>
+                </div>
+            </div>
+            <div id="shipyardPanel">
+                <div class="trading-header">
+                    <div class="cargo-status">
+                        <strong>CREDITS:</strong> <span id="shipyardCredits">0</span> |
+                        <strong>CURRENT:</strong> <span id="currentShipName">Scout Shuttle</span>
+                    </div>
+                    <div class="commodity-header">SHIPYARD</div>
+                </div>
+                <div class="trading-content">
+                    <div id="shipsList"></div>
+                </div>
+            </div>
         </div>
         <div id="landingButtons">
             <button id="departBtn">[1] DEPART</button>
             <button id="stationBtn">[2] STATION</button>
             <button id="tradeBtn">[3] TRADE</button>
             <button id="outfitterBtn">[4] OUTFITTER</button>
+            <button id="missionsBtn">[5] MISSIONS</button>
+            <button id="shipyardBtn">[6] SHIPYARD</button>
         </div>
     </div>
 

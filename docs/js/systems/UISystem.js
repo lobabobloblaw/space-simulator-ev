@@ -18,6 +18,10 @@ export class UISystem {
         this.tutorialStage = 'start';
         this._thrustActive = false;
         this._brakeActive = false;
+
+        // Focus management for landing overlay
+        this._previouslyFocusedElement = null;
+        this._overlayKeyHandler = null;
         
         // Bind event handlers
         this.handleStateChange = this.handleStateChange.bind(this);
@@ -31,6 +35,10 @@ export class UISystem {
         this.handleAudioStateChanged = this.handleAudioStateChanged.bind(this);
         // Bind music state handler to keep "this" context when called via EventBus
         this.handleMusicState = this.handleMusicState.bind(this);
+        this.handleShipDestroyed = this.handleShipDestroyed.bind(this);
+        this.handleShipRespawn = this.handleShipRespawn.bind(this);
+        this._handleThrustChanged = (e) => { try { this._thrustActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} };
+        this._handleBrakeChanged = (e) => { try { this._brakeActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} };
         
         console.log('[UISystem] Created');
 
@@ -65,6 +73,9 @@ export class UISystem {
             lastSpeedTs: 0,
             speedMs: (GameConstants?.UI?.SPEED_READOUT_MS ?? 333) // update speed readout at ~3 Hz
         };
+
+        // Cached DOM references for frequently-updated HUD elements (populated in init)
+        this._domCache = {};
     }
     
     /**
@@ -76,7 +87,13 @@ export class UISystem {
         if (this.planetCanvas) {
             this.planetCtx = this.planetCanvas.getContext('2d');
         }
-        
+
+        // Cache frequently-accessed HUD elements to avoid per-frame getElementById calls
+        const hudIds = ['health', 'shield', 'fuel', 'speed', 'cargo', 'location', 'credits', 'weapon', 'tutorialHint'];
+        for (const id of hudIds) {
+            this._domCache[id] = document.getElementById(id);
+        }
+
         // Subscribe to UI events
         this.subscribeToEvents();
         
@@ -98,14 +115,13 @@ export class UISystem {
             }
         } catch(_) {}
 
-        // Wire mute toggle click if present
+        // Wire mute toggle click if present (H16: store ref for cleanup)
         const muteKey = document.getElementById('muteKey');
         if (muteKey) {
             muteKey.style.cursor = 'pointer';
             muteKey.title = 'Toggle sound (M)';
-            muteKey.addEventListener('click', () => {
-                this.eventBus.emit(GameEvents.AUDIO_TOGGLE);
-            });
+            this._muteKeyHandler = () => this.eventBus.emit(GameEvents.AUDIO_TOGGLE);
+            muteKey.addEventListener('click', this._muteKeyHandler);
         }
 
         // Initialize mute label based on current state
@@ -124,8 +140,8 @@ export class UISystem {
         // State changes
         this.eventBus.on(GameEvents.UI_UPDATE, this.handleStateChange);
         // Physics input state (for fuel alert)
-        this.eventBus.on(GameEvents.PHYSICS_THRUST_CHANGED, (e) => { try { this._thrustActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} });
-        this.eventBus.on(GameEvents.PHYSICS_BRAKE_CHANGED, (e) => { try { this._brakeActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} });
+        this.eventBus.on(GameEvents.PHYSICS_THRUST_CHANGED, this._handleThrustChanged);
+        this.eventBus.on(GameEvents.PHYSICS_BRAKE_CHANGED, this._handleBrakeChanged);
         
         // Landing/overlay events
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleShipLanded);
@@ -143,8 +159,8 @@ export class UISystem {
         this.eventBus.on(GameEvents.AUDIO_MUSIC_STATE, this.handleMusicState);
         
         // Ship lifecycle
-        this.eventBus.on(GameEvents.SHIP_DEATH, () => this.handleShipDestroyed());
-        this.eventBus.on(GameEvents.SHIP_RESPAWN, () => this.handleShipRespawn());
+        this.eventBus.on(GameEvents.SHIP_DEATH, this.handleShipDestroyed);
+        this.eventBus.on(GameEvents.SHIP_RESPAWN, this.handleShipRespawn);
         
         // Tutorial
         this.eventBus.on(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
@@ -416,13 +432,16 @@ export class UISystem {
     updateHUD(ship) {
         if (!ship) return;
         const now = performance.now ? performance.now() : Date.now();
+        const cache = this._domCache;
 
+        // Helper using cached DOM reference (avoids getElementById per frame)
         const updateElement = (id, value) => {
-            const element = document.getElementById(id);
+            const element = cache[id];
             if (!element) return;
             // Avoid unnecessary DOM writes to reduce layout/reflow
-            if (element.textContent !== String(value)) {
-                element.textContent = String(value);
+            const strVal = String(value);
+            if (element.textContent !== strVal) {
+                element.textContent = strVal;
             }
         };
 
@@ -456,14 +475,14 @@ export class UISystem {
         if (this._hudCache.values.location !== locStr) { this._hudCache.values.location = locStr; updateElement('location', locStr); }
         const credStr = String(ship.credits || 0);
         if (this._hudCache.values.credits !== credStr) { this._hudCache.values.credits = credStr; updateElement('credits', credStr); }
-        updateElement('weapon', ship.weapons && ship.weapons.length > 0 ? 
+        updateElement('weapon', ship.weapons && ship.weapons.length > 0 ?
             ship.weapons[ship.currentWeapon].type.toUpperCase() : 'EQUIP');
         // Kills and target readouts removed from HUD by design
     }
 
     _updateFuelAlert() {
         try {
-            const el = document.getElementById('fuel');
+            const el = this._domCache.fuel;
             if (!el) return;
             const ship = this.stateManager.state?.ship;
             // Use displayed value semantics: blink when the shown percent is 0%
@@ -478,7 +497,7 @@ export class UISystem {
      * Update tutorial hint
      */
     updateTutorialHint(ship) {
-        const hintElement = document.getElementById('tutorialHint');
+        const hintElement = this._domCache.tutorialHint;
         if (!hintElement) return;
         // If console is showing a readout, do not override it
         if (hintElement.dataset && hintElement.dataset.console === '1') return;
@@ -487,23 +506,32 @@ export class UISystem {
         
         switch(this.tutorialStage) {
             case 'start':
-                // Suppress old WEAPONS OFFLINE banner; rely on console readouts
+                message = 'Welcome pilot! Land at a planet (L key when close) to purchase weapons and start trading.';
                 if (ship.weapons && ship.weapons.length > 0) {
                     this.tutorialStage = 'armed';
+                    message = 'WEAPONS ONLINE. Fire with SPACE. Check missions at planets for rewards!';
                 }
                 break;
-                
+
             case 'armed':
-                // Suppress WEAPONS ONLINE banner; move to combat state silently
-                this.tutorialStage = 'combat';
+                message = 'ARMED: Fire with SPACE. Hunt pirates or accept missions for credits.';
+                if (ship.kills >= 1) {
+                    this.tutorialStage = 'combat';
+                    message = 'First kill confirmed! You can now access all ship systems.';
+                }
                 break;
-                
+
             case 'combat':
-                // No message during combat
+                if (ship.kills >= 5 || ship.credits >= 2000) {
+                    message = 'Good work! Explore the shipyard to upgrade your vessel.';
+                    this.tutorialStage = 'complete';
+                } else {
+                    message = 'Complete missions and trade goods to earn credits. Press M to toggle minimap.';
+                }
                 break;
-                
+
             case 'complete':
-                // Suppress completion banner to keep area as console readout
+                message = 'Tutorial complete! Explore the galaxy, upgrade ships, and build your fortune.';
                 this.tutorialStage = 'done';
                 break;
         }
@@ -522,14 +550,17 @@ export class UISystem {
     showLandingOverlay(planet, ship) {
         const overlay = document.getElementById('landingOverlay');
         if (!overlay) return;
-        
+
+        // Focus management: Save currently focused element
+        this._previouslyFocusedElement = document.activeElement;
+
         // Show overlay
         overlay.style.display = 'flex';
-        
+
         // Update planet info
         const nameElement = document.getElementById('planetName');
         const descElement = document.getElementById('planetDescription');
-        
+
         if (nameElement) nameElement.textContent = planet.name;
         if (descElement) {
             const text = planet.longDescription || planet.description || '';
@@ -537,15 +568,62 @@ export class UISystem {
         }
         // Populate contextual details panel
         this.populateLandingDetails(planet);
-        
+
         // Draw planet visual
         if (this.planetCanvas) {
             const useAI = this.landscapeImageProvider !== 'none';
             this.drawPlanetVisual(planet, this.planetCanvas, useAI);
         }
-        
+
         // Show landing info panel by default
         this.showPanel('landing', ship);
+
+        // Focus management: Set focus to first button and add keyboard shortcuts
+        // Defensively remove any existing overlay key handler before attaching new one (C3)
+        if (this._overlayKeyHandler) {
+            document.removeEventListener('keydown', this._overlayKeyHandler);
+            this._overlayKeyHandler = null;
+        }
+        setTimeout(() => {
+            const firstButton = document.getElementById('departBtn');
+            if (firstButton) {
+                firstButton.focus();
+            }
+
+            // Add keyboard shortcuts for overlay buttons (1-6 keys)
+            this._overlayKeyHandler = (e) => {
+                if (overlay.style.display === 'none') return;
+
+                switch(e.key) {
+                    case '1':
+                        e.preventDefault();
+                        document.getElementById('departBtn')?.click();
+                        break;
+                    case '2':
+                        e.preventDefault();
+                        document.getElementById('stationBtn')?.click();
+                        break;
+                    case '3':
+                        e.preventDefault();
+                        document.getElementById('tradeBtn')?.click();
+                        break;
+                    case '4':
+                        e.preventDefault();
+                        document.getElementById('outfitterBtn')?.click();
+                        break;
+                    case '5':
+                        e.preventDefault();
+                        document.getElementById('missionsBtn')?.click();
+                        break;
+                    case '6':
+                        e.preventDefault();
+                        document.getElementById('shipyardBtn')?.click();
+                        break;
+                }
+            };
+
+            document.addEventListener('keydown', this._overlayKeyHandler);
+        }, 0);
     }
 
     /**
@@ -780,6 +858,25 @@ export class UISystem {
     }
 
     /**
+     * Validate Lexica API response structure
+     * @param {any} data - Parsed JSON response
+     * @returns {boolean} True if response has expected structure
+     */
+    _validateLexicaResponse(data) {
+        if (!data || typeof data !== 'object') return false;
+        if (!Array.isArray(data.images)) return false;
+        // Validate each image has expected string URL properties
+        for (const img of data.images) {
+            if (!img || typeof img !== 'object') continue;
+            // At least one URL source should be a string
+            const hasValidUrl = (typeof img.src === 'string' && img.src.startsWith('http')) ||
+                               (typeof img.srcSmall === 'string' && img.srcSmall.startsWith('http'));
+            if (!hasValidUrl) continue; // Skip invalid entries, don't fail entire response
+        }
+        return true;
+    }
+
+    /**
      * Fetch a high-res image URL from Lexica search by prompt.
      * Chooses the first image meeting minWidth, otherwise best available.
      */
@@ -793,14 +890,23 @@ export class UISystem {
             clearTimeout(t);
             if (!res.ok) throw new Error(`Lexica HTTP ${res.status}`);
             const data = await res.json();
-            const imgs = Array.isArray(data.images) ? data.images : [];
+
+            // Validate API response structure
+            if (!this._validateLexicaResponse(data)) {
+                console.warn('[UISystem] Invalid Lexica API response structure');
+                return null;
+            }
+
+            const imgs = data.images;
             if (imgs.length === 0) return null;
             // Prefer portrait-ish or square images with width >= minWidth
             const candidates = imgs
+                .filter(i => i && typeof i === 'object')
                 .map(i => ({
-                    url: i.src || i.srcSmall,
-                    w: i.width || 0,
-                    h: i.height || 0,
+                    url: (typeof i.src === 'string' && i.src.startsWith('http')) ? i.src :
+                         (typeof i.srcSmall === 'string' && i.srcSmall.startsWith('http')) ? i.srcSmall : null,
+                    w: typeof i.width === 'number' ? i.width : 0,
+                    h: typeof i.height === 'number' ? i.height : 0,
                 }))
                 .filter(i => !!i.url);
             const good = candidates.filter(i => i.w >= minWidth);
@@ -892,12 +998,28 @@ export class UISystem {
         if (overlay) {
             overlay.style.display = 'none';
         }
-        
+
+        // Focus management: Remove keyboard handler
+        if (this._overlayKeyHandler) {
+            document.removeEventListener('keydown', this._overlayKeyHandler);
+            this._overlayKeyHandler = null;
+        }
+
+        // Focus management: Restore previously focused element
+        if (this._previouslyFocusedElement && typeof this._previouslyFocusedElement.focus === 'function') {
+            try {
+                this._previouslyFocusedElement.focus();
+            } catch(e) {
+                // Element might no longer be in DOM
+            }
+        }
+        this._previouslyFocusedElement = null;
+
         // Clear planet canvas data
         if (this.planetCanvas) {
             delete this.planetCanvas.dataset.planetLoaded;
         }
-        
+
         // Emit resume event
         this.eventBus.emit(GameEvents.GAME_RESUME);
     }
@@ -909,16 +1031,20 @@ export class UISystem {
         // Get all panels
         const tradingPanel = document.getElementById('tradingPanel');
         const shopPanel = document.getElementById('shopPanel');
+        const missionsPanel = document.getElementById('missionsPanel');
+        const shipyardPanel = document.getElementById('shipyardPanel');
         const landingInfo = document.getElementById('landingInfo');
-        
+
         // Hide all panels first
         if (tradingPanel) tradingPanel.style.display = 'none';
         if (shopPanel) shopPanel.style.display = 'none';
+        if (missionsPanel) missionsPanel.style.display = 'none';
+        if (shipyardPanel) shipyardPanel.style.display = 'none';
         if (landingInfo) landingInfo.style.display = 'none';
-        
+
         // Update current panel
         this.currentPanel = panel;
-        
+
         // Show the requested panel
         if (panel === 'landing') {
             if (landingInfo) {
@@ -941,6 +1067,24 @@ export class UISystem {
                 }
                 // Ensure delegated handlers are attached once
                 this.attachShopDelegates();
+            }
+        } else if (panel === 'missions') {
+            if (missionsPanel) {
+                missionsPanel.style.display = 'flex';
+                if (ship) {
+                    this.updateMissionsPanel(ship);
+                }
+                // Ensure delegated handlers are attached once
+                this.attachMissionDelegates();
+            }
+        } else if (panel === 'shipyard') {
+            if (shipyardPanel) {
+                shipyardPanel.style.display = 'flex';
+                if (ship) {
+                    this.updateShipyardPanel(ship);
+                }
+                // Ensure delegated handlers are attached once
+                this.attachShipyardDelegates();
             }
         }
     }
@@ -978,22 +1122,41 @@ export class UISystem {
         const list = document.getElementById('commodityList');
         if (!list) return;
         
+        try { list.setAttribute('role', 'list'); } catch(_) {}
         list.innerHTML = '';
         
         // Add sell all button if carrying cargo
         if (cargoUsed > 0) {
             const sellAllRow = document.createElement('div');
             sellAllRow.className = 'commodity-row';
+            try { sellAllRow.setAttribute('role', 'listitem'); } catch(_) {}
             sellAllRow.style.borderBottom = '2px solid #333';
-            sellAllRow.innerHTML = `
-                <div class="commodity-info">
-                    <div class="commodity-name">💰 Sell All Cargo</div>
-                    <div>Total value: ${totalValue}</div>
-                </div>
-                <div class="buy-sell-buttons">
-                    <button class="trade-btn" data-action="sellAll">Sell All</button>
-                </div>
-            `;
+
+            // Build DOM structure safely
+            const commodityInfo = document.createElement('div');
+            commodityInfo.className = 'commodity-info';
+
+            const commodityName = document.createElement('div');
+            commodityName.className = 'commodity-name';
+            commodityName.textContent = '💰 Sell All Cargo';
+            commodityInfo.appendChild(commodityName);
+
+            const commodityValue = document.createElement('div');
+            commodityValue.textContent = `Total value: ${totalValue}`;
+            commodityInfo.appendChild(commodityValue);
+
+            const buttonContainer = document.createElement('div');
+            buttonContainer.className = 'buy-sell-buttons';
+
+            const sellAllBtn = document.createElement('button');
+            sellAllBtn.className = 'trade-btn';
+            sellAllBtn.setAttribute('data-action', 'sellAll');
+            sellAllBtn.setAttribute('aria-label', `Sell all cargo for ${totalValue} credits`);
+            sellAllBtn.textContent = 'Sell All';
+            buttonContainer.appendChild(sellAllBtn);
+
+            sellAllRow.appendChild(commodityInfo);
+            sellAllRow.appendChild(buttonContainer);
             list.appendChild(sellAllRow);
         }
         
@@ -1016,17 +1179,52 @@ export class UISystem {
                 
                 const row = document.createElement('div');
                 row.className = 'commodity-row';
-                row.innerHTML = `
-                    <div class="commodity-info">
-                        <div class="commodity-name">${commodity.icon} ${commodity.name}</div>
-                        <div>Owned: ${ownedQty}</div>
-                    </div>
-                    <div class="price">${price}${priceIndicator}</div>
-                    <div class="buy-sell-buttons">
-                        <button class="trade-btn" data-action="buy" data-type="${key}" data-price="${price}">Buy</button>
-                        <button class="trade-btn" data-action="sell" data-type="${key}" ${ownedQty === 0 ? 'disabled' : ''}>Sell</button>
-                    </div>
-                `;
+                try { row.setAttribute('role', 'listitem'); } catch(_) {}
+
+                // Build commodity info section
+                const commodityInfo = document.createElement('div');
+                commodityInfo.className = 'commodity-info';
+
+                const commodityNameDiv = document.createElement('div');
+                commodityNameDiv.className = 'commodity-name';
+                commodityNameDiv.textContent = `${commodity.icon} ${commodity.name}`;
+                commodityInfo.appendChild(commodityNameDiv);
+
+                const ownedDiv = document.createElement('div');
+                ownedDiv.textContent = `Owned: ${ownedQty}`;
+                commodityInfo.appendChild(ownedDiv);
+
+                // Build price section
+                const priceDiv = document.createElement('div');
+                priceDiv.className = 'price';
+                priceDiv.textContent = `${price}${priceIndicator}`;
+
+                // Build buttons section
+                const buttonContainer = document.createElement('div');
+                buttonContainer.className = 'buy-sell-buttons';
+
+                const buyBtn = document.createElement('button');
+                buyBtn.className = 'trade-btn';
+                buyBtn.setAttribute('data-action', 'buy');
+                buyBtn.setAttribute('data-type', key);
+                buyBtn.setAttribute('data-price', String(price));
+                buyBtn.setAttribute('aria-label', `Buy ${commodity.name} for ${price} credits`);
+                buyBtn.textContent = 'Buy';
+                buttonContainer.appendChild(buyBtn);
+
+                const sellBtn = document.createElement('button');
+                sellBtn.className = 'trade-btn';
+                sellBtn.setAttribute('data-action', 'sell');
+                sellBtn.setAttribute('data-type', key);
+                if (ownedQty === 0) sellBtn.disabled = true;
+                sellBtn.setAttribute('aria-label', `Sell ${commodity.name}${ownedQty ? '' : ' (none owned)'}`);
+                sellBtn.textContent = 'Sell';
+                buttonContainer.appendChild(sellBtn);
+
+                // Assemble row
+                row.appendChild(commodityInfo);
+                row.appendChild(priceDiv);
+                row.appendChild(buttonContainer);
                 list.appendChild(row);
             }
         }
@@ -1075,6 +1273,7 @@ export class UISystem {
         const list = document.getElementById('shopList');
         if (!list) return;
         
+        try { list.setAttribute('role', 'list'); } catch(_) {}
         list.innerHTML = '';
         
         // Only show items available at this planet
@@ -1102,24 +1301,51 @@ export class UISystem {
                 
                 const shopItem = document.createElement('div');
                 shopItem.className = 'shop-item';
-                shopItem.innerHTML = `
-                    <div class="item-info">
-                        <div class="item-name">${item.name}</div>
-                        <div style="font-size: 10px; color: #999;">${item.description}</div>
-                    </div>
-                    <div class="price">${item.price}</div>
-                    <button class="shop-buy-button" 
-                            data-item-id="${itemId}" 
-                            ${alreadyOwned || ship.credits < item.price ? 'disabled' : ''}>
-                        ${alreadyOwned ? 'Owned' : 'Buy'}
-                    </button>
-                `;
+                try { shopItem.setAttribute('role', 'listitem'); } catch(_) {}
+
+                // Build item info section
+                const itemInfo = document.createElement('div');
+                itemInfo.className = 'item-info';
+
+                const itemName = document.createElement('div');
+                itemName.className = 'item-name';
+                itemName.textContent = item.name;
+                itemInfo.appendChild(itemName);
+
+                const itemDesc = document.createElement('div');
+                itemDesc.style.fontSize = '10px';
+                itemDesc.style.color = '#999';
+                itemDesc.textContent = item.description;
+                itemInfo.appendChild(itemDesc);
+
+                // Build price section
+                const priceDiv = document.createElement('div');
+                priceDiv.className = 'price';
+                priceDiv.textContent = String(item.price);
+
+                // Build buy button
+                const buyBtn = document.createElement('button');
+                buyBtn.className = 'shop-buy-button';
+                buyBtn.setAttribute('data-item-id', itemId);
+                if (alreadyOwned || ship.credits < item.price) buyBtn.disabled = true;
+                buyBtn.setAttribute('aria-label', alreadyOwned ? `Owned: ${item.name}` : `Buy ${item.name} for ${item.price} credits`);
+                buyBtn.textContent = alreadyOwned ? 'Owned' : 'Buy';
+
+                // Assemble shop item
+                shopItem.appendChild(itemInfo);
+                shopItem.appendChild(priceDiv);
+                shopItem.appendChild(buyBtn);
                 list.appendChild(shopItem);
             }
         }
         
         if (itemsToShow.length === 0) {
-            list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No items available at this station</div>';
+            const emptyMsg = document.createElement('div');
+            emptyMsg.style.padding = '20px';
+            emptyMsg.style.textAlign = 'center';
+            emptyMsg.style.color = '#999';
+            emptyMsg.textContent = 'No items available at this station';
+            list.appendChild(emptyMsg);
         }
     }
 
@@ -1138,9 +1364,362 @@ export class UISystem {
             this.eventBus.emit(GameEvents.SHOP_BUY, { itemId });
         });
     }
-    
-    
-    
+
+    /**
+     * Update missions panel
+     */
+    async updateMissionsPanel(ship) {
+        if (!ship) return;
+
+        // Import missions data and generator
+        let missionsData = [];
+        let MissionGenerator = null;
+        try {
+            const gameDataModule = await import('../data/gameData.js');
+            missionsData = gameDataModule.missions || [];
+            const genModule = await import('./MissionGenerator.js');
+            MissionGenerator = genModule.MissionGenerator || genModule.default;
+        } catch (e) {
+            console.error('Failed to load missions:', e);
+            return;
+        }
+
+        // Initialize mission tracking if not exists
+        if (!ship.missions) {
+            ship.missions = {
+                active: [],
+                completed: [],
+                available: []
+            };
+        }
+
+        // Generate procedural missions if needed (keep 5-8 available at all times)
+        if (ship.missions.available.length < 5 && MissionGenerator) {
+            const generator = new MissionGenerator();
+            const difficultyMod = generator.calculateDifficultyMod(ship);
+            const newMissions = generator.generateMissionBatch(8 - ship.missions.available.length, { difficultyMod });
+            ship.missions.available.push(...newMissions);
+        }
+
+        // Combine static and procedural missions for display
+        const allAvailableMissions = [
+            ...missionsData.filter(m => !ship.missions.completed.find(c => c.id === m.id)),
+            ...ship.missions.available
+        ].slice(0, 15); // Limit display to 15 missions
+
+        // Update counters
+        const activeCount = document.getElementById('activeMissionCount');
+        const completedCount = document.getElementById('completedMissionCount');
+        if (activeCount) activeCount.textContent = ship.missions.active.length;
+        if (completedCount) completedCount.textContent = ship.missions.completed.length;
+
+        // Build missions list
+        const list = document.getElementById('missionsList');
+        if (!list) return;
+
+        try { list.setAttribute('role', 'list'); } catch(_) {}
+        list.innerHTML = '';
+
+        // Display active missions first
+        if (ship.missions.active.length > 0) {
+            const activeHeader = document.createElement('div');
+            activeHeader.className = 'mission-section-header';
+            activeHeader.textContent = 'ACTIVE MISSIONS';
+            activeHeader.style.cssText = 'padding: 10px; background: #1a1a2e; color: #4ADE80; font-weight: bold; margin-bottom: 5px;';
+            list.appendChild(activeHeader);
+
+            for (const mission of ship.missions.active) {
+                const missionRow = this._createMissionRow(mission, ship, 'active');
+                list.appendChild(missionRow);
+            }
+        }
+
+        // Display available missions
+        if (allAvailableMissions.length > 0) {
+            const availableHeader = document.createElement('div');
+            availableHeader.className = 'mission-section-header';
+            availableHeader.textContent = 'AVAILABLE MISSIONS';
+            availableHeader.style.cssText = 'padding: 10px; background: #1a1a2e; color: #94A3B8; font-weight: bold; margin: 10px 0 5px 0;';
+            list.appendChild(availableHeader);
+
+            for (const mission of allAvailableMissions) {
+                const missionRow = this._createMissionRow(mission, ship, 'available');
+                list.appendChild(missionRow);
+            }
+        }
+
+        // Show message if no missions
+        if (allAvailableMissions.length === 0 && ship.missions.active.length === 0) {
+            const noMissions = document.createElement('div');
+            noMissions.style.cssText = 'padding: 20px; text-align: center; color: #777;';
+            noMissions.textContent = 'No missions available at this location. Check back later.';
+            list.appendChild(noMissions);
+        }
+    }
+
+    /**
+     * Create a mission row element
+     */
+    _createMissionRow(mission, ship, status) {
+        const row = document.createElement('div');
+        row.className = 'commodity-row';
+        try { row.setAttribute('role', 'listitem'); } catch(_) {}
+        row.style.cssText = 'border-bottom: 1px solid #333; padding: 10px;';
+
+        const missionInfo = document.createElement('div');
+        missionInfo.className = 'commodity-info';
+        missionInfo.style.flex = '1';
+
+        const missionTitle = document.createElement('div');
+        missionTitle.className = 'commodity-name';
+        missionTitle.style.cssText = 'font-weight: bold; margin-bottom: 5px;';
+
+        // Add mission type icon
+        let typeIcon = '';
+        if (mission.type === 'delivery') typeIcon = '📦';
+        else if (mission.type === 'bounty') typeIcon = '⚔️';
+        else if (mission.type === 'escort') typeIcon = '🛡️';
+        else if (mission.type === 'trade') typeIcon = '💰';
+
+        const urgentBadge = mission.urgent ? ' [URGENT]' : '';
+        missionTitle.textContent = `${typeIcon} ${mission.title}${urgentBadge}`;
+        missionInfo.appendChild(missionTitle);
+
+        const missionDesc = document.createElement('div');
+        missionDesc.style.cssText = 'font-size: 0.9em; color: #94A3B8; margin-bottom: 5px;';
+        missionDesc.textContent = mission.description;
+        missionInfo.appendChild(missionDesc);
+
+        const missionReward = document.createElement('div');
+        missionReward.style.cssText = 'font-size: 0.85em; color: #4ADE80;';
+        missionReward.textContent = `Reward: ${mission.reward} credits`;
+        missionInfo.appendChild(missionReward);
+
+        row.appendChild(missionInfo);
+
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'buy-sell-buttons';
+        buttonContainer.style.cssText = 'display: flex; flex-direction: column; gap: 5px;';
+
+        if (status === 'available') {
+            const acceptBtn = document.createElement('button');
+            acceptBtn.textContent = 'ACCEPT';
+            acceptBtn.className = 'mission-accept-button';
+            acceptBtn.setAttribute('data-mission-id', mission.id);
+            acceptBtn.style.cssText = 'background: #4ADE80; color: #000; padding: 5px 15px; cursor: pointer;';
+            buttonContainer.appendChild(acceptBtn);
+        } else if (status === 'active') {
+            const completeBtn = document.createElement('button');
+            const isComplete = mission.isComplete ? mission.isComplete(ship, ship.missionStates?.[mission.id]) : false;
+            completeBtn.textContent = isComplete ? 'COMPLETE' : 'IN PROGRESS';
+            completeBtn.className = 'mission-complete-button';
+            completeBtn.setAttribute('data-mission-id', mission.id);
+            completeBtn.disabled = !isComplete;
+            completeBtn.style.cssText = isComplete
+                ? 'background: #4ADE80; color: #000; padding: 5px 15px; cursor: pointer;'
+                : 'background: #555; color: #999; padding: 5px 15px; cursor: not-allowed;';
+            buttonContainer.appendChild(completeBtn);
+
+            const abandonBtn = document.createElement('button');
+            abandonBtn.textContent = 'ABANDON';
+            abandonBtn.className = 'mission-abandon-button';
+            abandonBtn.setAttribute('data-mission-id', mission.id);
+            abandonBtn.style.cssText = 'background: #E74C3C; color: #fff; padding: 5px 15px; cursor: pointer; font-size: 0.85em;';
+            buttonContainer.appendChild(abandonBtn);
+        }
+
+        row.appendChild(buttonContainer);
+        return row;
+    }
+
+    /**
+     * Attach mission delegates for event handling
+     */
+    attachMissionDelegates() {
+        const list = document.getElementById('missionsList');
+        if (!list || this._missionDelegatesAttached) return;
+        this._missionDelegatesAttached = true;
+
+        list.addEventListener('click', (e) => {
+            const acceptBtn = e.target.closest('.mission-accept-button');
+            const completeBtn = e.target.closest('.mission-complete-button');
+            const abandonBtn = e.target.closest('.mission-abandon-button');
+
+            if (acceptBtn && !acceptBtn.disabled) {
+                const missionId = acceptBtn.getAttribute('data-mission-id');
+                if (missionId) {
+                    this.eventBus.emit(GameEvents.MISSION_ACCEPT, { missionId });
+                }
+            } else if (completeBtn && !completeBtn.disabled) {
+                const missionId = completeBtn.getAttribute('data-mission-id');
+                if (missionId) {
+                    this.eventBus.emit(GameEvents.MISSION_COMPLETE, { missionId });
+                }
+            } else if (abandonBtn && !abandonBtn.disabled) {
+                const missionId = abandonBtn.getAttribute('data-mission-id');
+                if (missionId) {
+                    this.eventBus.emit(GameEvents.MISSION_ABANDON, { missionId });
+                }
+            }
+        });
+    }
+
+    /**
+     * Update shipyard panel
+     */
+    async updateShipyardPanel(ship) {
+        if (!ship) return;
+
+        // Import ship classes
+        let shipClasses = {};
+        try {
+            const gameDataModule = await import('../data/gameData.js');
+            shipClasses = gameDataModule.shipClasses || {};
+        } catch (e) {
+            console.error('Failed to load ship classes:', e);
+            return;
+        }
+
+        // Update counters
+        const creditsEl = document.getElementById('shipyardCredits');
+        const currentShipEl = document.getElementById('currentShipName');
+        if (creditsEl) creditsEl.textContent = ship.credits;
+
+        const currentShipClass = shipClasses[ship.shipClass || 'shuttle'];
+        if (currentShipEl && currentShipClass) {
+            currentShipEl.textContent = currentShipClass.name;
+        }
+
+        // Build ships list
+        const list = document.getElementById('shipsList');
+        if (!list) return;
+
+        try { list.setAttribute('role', 'list'); } catch(_) {}
+        list.innerHTML = '';
+
+        // Display all ships sorted by price
+        const shipArray = Object.values(shipClasses).sort((a, b) => a.price - b.price);
+
+        for (const shipClass of shipArray) {
+            // Skip starter ship if already owned
+            if (shipClass.id === 'shuttle' && (ship.shipClass !== 'shuttle')) continue;
+
+            const shipRow = this._createShipRow(shipClass, ship);
+            list.appendChild(shipRow);
+        }
+    }
+
+    /**
+     * Create a ship row element
+     */
+    _createShipRow(shipClass, ship) {
+        const row = document.createElement('div');
+        row.className = 'commodity-row';
+        try { row.setAttribute('role', 'listitem'); } catch(_) {}
+        row.style.cssText = 'border-bottom: 1px solid #333; padding: 12px;';
+
+        // Check if this is the current ship
+        const isCurrent = ship.shipClass === shipClass.id;
+
+        // Check requirements
+        const meetsKillReq = ship.kills >= shipClass.requiredKills;
+        const meetsCreditsReq = ship.credits >= shipClass.requiredCredits;
+        const canAfford = ship.credits >= shipClass.price;
+
+        const shipInfo = document.createElement('div');
+        shipInfo.className = 'commodity-info';
+        shipInfo.style.flex = '1';
+
+        const shipTitle = document.createElement('div');
+        shipTitle.className = 'commodity-name';
+        shipTitle.style.cssText = 'font-weight: bold; margin-bottom: 5px; color: ' + shipClass.color;
+        shipTitle.textContent = `${shipClass.name}${isCurrent ? ' [CURRENT]' : ''}`;
+        shipInfo.appendChild(shipTitle);
+
+        const shipDesc = document.createElement('div');
+        shipDesc.style.cssText = 'font-size: 0.9em; color: #94A3B8; margin-bottom: 8px;';
+        shipDesc.textContent = shipClass.description;
+        shipInfo.appendChild(shipDesc);
+
+        // Stats
+        const statsDiv = document.createElement('div');
+        statsDiv.style.cssText = 'font-size: 0.85em; color: #CBD5E1; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;';
+        const statItems = [
+            ['Speed', shipClass.maxSpeed.toFixed(1)],
+            ['Cargo', shipClass.cargoCapacity],
+            ['Health', shipClass.maxHealth],
+            ['Shield', shipClass.maxShield],
+            ['Weapons', shipClass.weaponSlots],
+            ['Turn', shipClass.turnSpeed.toFixed(3)]
+        ];
+        for (const [label, value] of statItems) {
+            const span = document.createElement('span');
+            span.textContent = `${label}: ${value}`;
+            statsDiv.appendChild(span);
+        }
+        shipInfo.appendChild(statsDiv);
+
+        // Price & requirements
+        const priceDiv = document.createElement('div');
+        priceDiv.style.cssText = 'font-size: 0.85em; margin-top: 8px;';
+        const priceColor = canAfford ? '#4ADE80' : '#E74C3C';
+        const priceSpan = document.createElement('span');
+        priceSpan.style.color = priceColor;
+        priceSpan.textContent = `Price: §${shipClass.price}`;
+        priceDiv.appendChild(priceSpan);
+
+        if (shipClass.requiredKills > 0 || shipClass.requiredCredits > 0) {
+            const reqColor = (meetsKillReq && meetsCreditsReq) ? '#94A3B8' : '#E74C3C';
+            const reqSpan = document.createElement('span');
+            reqSpan.style.color = reqColor;
+            reqSpan.textContent = ` | Req: ${shipClass.requiredKills} kills, §${shipClass.requiredCredits}`;
+            priceDiv.appendChild(reqSpan);
+        }
+        shipInfo.appendChild(priceDiv);
+
+        row.appendChild(shipInfo);
+
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'buy-sell-buttons';
+        buttonContainer.style.cssText = 'display: flex; flex-direction: column; gap: 5px;';
+
+        const buyBtn = document.createElement('button');
+        buyBtn.textContent = isCurrent ? 'OWNED' : 'BUY';
+        buyBtn.className = 'ship-buy-button';
+        buyBtn.setAttribute('data-ship-id', shipClass.id);
+
+        const canBuy = !isCurrent && canAfford && meetsKillReq && meetsCreditsReq;
+        buyBtn.disabled = !canBuy;
+
+        buyBtn.style.cssText = canBuy
+            ? 'background: #4ADE80; color: #000; padding: 8px 20px; cursor: pointer; font-weight: bold;'
+            : 'background: #555; color: #999; padding: 8px 20px; cursor: not-allowed;';
+
+        buttonContainer.appendChild(buyBtn);
+        row.appendChild(buttonContainer);
+        return row;
+    }
+
+    /**
+     * Attach shipyard delegates for event handling
+     */
+    attachShipyardDelegates() {
+        const list = document.getElementById('shipsList');
+        if (!list || this._shipyardDelegatesAttached) return;
+        this._shipyardDelegatesAttached = true;
+
+        list.addEventListener('click', (e) => {
+            const buyBtn = e.target.closest('.ship-buy-button');
+
+            if (buyBtn && !buyBtn.disabled) {
+                const shipId = buyBtn.getAttribute('data-ship-id');
+                if (shipId) {
+                    this.eventBus.emit(GameEvents.SHIP_BUY, { shipId });
+                }
+            }
+        });
+    }
+
     /**
      * Generate planet-specific prompt
      */
@@ -1286,7 +1865,7 @@ export class UISystem {
         let fadeProgress = 0;
         const fadeDuration = 60;
         
-        function fadeTransition() {
+        const fadeTransition = () => {
             fadeProgress++;
             const fadeRatio = Math.min(fadeProgress / fadeDuration, 1);
             
@@ -1368,10 +1947,17 @@ export class UISystem {
             }
             
             if (fadeProgress < fadeDuration) {
-                requestAnimationFrame(fadeTransition);
+                this._fadeRAF = requestAnimationFrame(fadeTransition);
+            } else {
+                this._fadeRAF = null;
             }
+        };
+
+        // Cancel any existing fade loop before starting a new one (C4)
+        if (this._fadeRAF) {
+            cancelAnimationFrame(this._fadeRAF);
+            this._fadeRAF = null;
         }
-        
         fadeTransition();
         console.log('[UISystem] AI landscape loaded successfully for', planetName);
     }
@@ -1461,7 +2047,7 @@ export class UISystem {
         document.body.appendChild(el);
         // schedule fade-out then play next
         const totalMs = Math.max(800, Number(next.duration) || 2000);
-        setTimeout(() => {
+        this._drainTimerId = setTimeout(() => {
             try {
                 el.classList.add('fade-out');
                 el.addEventListener('transitionend', () => {
@@ -1523,11 +2109,67 @@ export class UISystem {
         this.eventBus.off(GameEvents.SHIP_UPGRADE, this.handlePurchase);
         this.eventBus.off(GameEvents.UI_MESSAGE, this.handleUIMessage);
         this.eventBus.off(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
-        
+        this.eventBus.off(GameEvents.PHYSICS_THRUST_CHANGED, this._handleThrustChanged);
+        this.eventBus.off(GameEvents.PHYSICS_BRAKE_CHANGED, this._handleBrakeChanged);
+        this.eventBus.off(GameEvents.AUDIO_STATE_CHANGED, this.handleAudioStateChanged);
+        this.eventBus.off(GameEvents.AUDIO_MUSIC_STATE, this.handleMusicState);
+        this.eventBus.off(GameEvents.SHIP_DEATH, this.handleShipDestroyed);
+        this.eventBus.off(GameEvents.SHIP_RESPAWN, this.handleShipRespawn);
+
+        // Clear all timers to prevent memory leaks
+        if (this._radioStaticTimer) {
+            clearInterval(this._radioStaticTimer);
+            this._radioStaticTimer = null;
+        }
+        if (this.radioScanInterval) {
+            clearInterval(this.radioScanInterval);
+            this.radioScanInterval = null;
+        }
+        if (this.radioScanTimeout) {
+            clearTimeout(this.radioScanTimeout);
+            this.radioScanTimeout = null;
+        }
+        if (this._consoleTimer) {
+            clearTimeout(this._consoleTimer);
+            this._consoleTimer = null;
+        }
+
+        // Disconnect ResizeObserver
+        if (this._radioResizeObs) {
+            this._radioResizeObs.disconnect();
+            this._radioResizeObs = null;
+        }
+
+        // Clean up overlay key handler (C3)
+        if (this._overlayKeyHandler) {
+            document.removeEventListener('keydown', this._overlayKeyHandler);
+            this._overlayKeyHandler = null;
+        }
+
+        // Cancel planet fade animation (C4)
+        if (this._fadeRAF) {
+            cancelAnimationFrame(this._fadeRAF);
+            this._fadeRAF = null;
+        }
+
+        // Clean up notification drain timer (H15)
+        if (this._drainTimerId) {
+            clearTimeout(this._drainTimerId);
+            this._drainTimerId = null;
+        }
+        this._notifActive = false;
+
+        // Clean up mute key handler (H16)
+        if (this._muteKeyHandler) {
+            const muteKey = document.getElementById('muteKey');
+            if (muteKey) muteKey.removeEventListener('click', this._muteKeyHandler);
+            this._muteKeyHandler = null;
+        }
+
         // Clear any active notifications
         const notifications = document.querySelectorAll('.game-notification');
         notifications.forEach(n => n.remove());
-        
+
         console.log('[UISystem] Destroyed');
     }
 }

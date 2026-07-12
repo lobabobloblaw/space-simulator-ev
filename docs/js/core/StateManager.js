@@ -1,4 +1,5 @@
 import { getEventBus, GameEvents } from './EventBus.js';
+import { validateSaveData } from '../utils/SaveUtils.js';
 
 /**
  * @typedef {Object} RenderSettings
@@ -91,7 +92,7 @@ export class StateManager {
                 shopMenuOpen: false,
                 missionMenuOpen: false
             },
-            
+
             // Game systems
             currentPlanet: null,
             currentMission: null,
@@ -99,9 +100,16 @@ export class StateManager {
                 trader: 0,
                 pirate: 0,
                 patrol: 0
+            },
+
+            // Diagnostics (frame timing, save stats) - moved from window globals
+            diagnostics: {
+                lastFrameMs: 0,
+                lastSaveSizeBytes: 0,
+                lastSaveSizeKB: 0
             }
         };
-        
+
         // Create proxies for nested objects to track changes
         this.createStateProxy();
     }
@@ -231,17 +239,107 @@ export class StateManager {
     }
     
     /**
+     * Get default state structure
+     * @returns {Object} Default state object
+     */
+    getDefaultState() {
+        return {
+            // Game meta
+            paused: false,
+            gameTime: 0,
+            deltaTime: 0,
+            fps: 60,
+
+            // Player ship
+            ship: {
+                x: 0,
+                y: 0,
+                angle: 0,
+                vx: 0,
+                vy: 0,
+                health: 100,
+                maxHealth: 100,
+                shield: 0,
+                maxShield: 0,
+                credits: 1000,
+                cargo: [],
+                weapons: [],
+                currentWeaponIndex: 0,
+                kills: 0,
+                pirateKills: 0,
+                missionKills: 0,
+                hasWarning: false,
+                isHostileToPatrols: false
+            },
+
+            // Camera
+            camera: {
+                x: 0,
+                y: 0,
+                zoom: 1
+            },
+
+            // Input state
+            input: {
+                keys: new Set(),
+                mouse: { x: 0, y: 0, pressed: false },
+                touch: { active: false, x: 0, y: 0 }
+            },
+
+            // Entities
+            planets: [],
+            asteroids: [],
+            npcShips: [],
+            projectiles: [],
+            explosions: [],
+            particles: [],
+
+            // UI state
+            ui: {
+                currentMenu: null,
+                messages: [],
+                landingMenuOpen: false,
+                shopMenuOpen: false,
+                missionMenuOpen: false
+            },
+
+            // Game systems
+            currentPlanet: null,
+            currentMission: null,
+            reputation: {
+                trader: 0,
+                pirate: 0,
+                patrol: 0
+            }
+        };
+    }
+
+    /**
      * Reset state to defaults
      * @param {string} section - Optional section to reset (e.g., 'ship')
      */
     reset(section = null) {
+        const defaults = this.getDefaultState();
+
         if (section) {
             // Reset specific section
-            // Implementation depends on having default values stored
-            console.warn(`Reset for section ${section} not yet implemented`);
+            if (defaults[section] !== undefined) {
+                // Deep clone to avoid shared references between resets
+                this.state[section] = structuredClone(defaults[section]);
+                console.log(`[StateManager] Reset section: ${section}`);
+                this.eventBus.emit('state.reset', { section });
+            } else {
+                console.warn(`[StateManager] Unknown section: ${section}`);
+            }
         } else {
-            // Full reset would reinitialize everything
-            this.constructor.call(this);
+            // Full reset - preserve proxy by replacing properties
+            Object.keys(this.state).forEach(key => {
+                if (defaults[key] !== undefined) {
+                    this.state[key] = structuredClone(defaults[key]);
+                }
+            });
+            console.log('[StateManager] Full state reset');
+            this.eventBus.emit('state.reset', { section: 'all' });
         }
     }
     
@@ -286,24 +384,27 @@ export class StateManager {
     }
     
     /**
-     * Save current state to localStorage
+     * @deprecated Use EventBus.emit(GameEvents.GAME_SAVE) instead.
+     * SaveSystemAdapterFixed provides robust save handling with race condition
+     * prevention, progressive fallback, and frame gating.
+     *
+     * This legacy method is retained for backwards compatibility only.
      */
     saveToStorage() {
-        try {
-            const saveData = {
-                ship: this.state.ship,
-                reputation: this.state.reputation,
-                gameTime: this.state.gameTime
-            };
-            localStorage.setItem('galaxyTraderSave', JSON.stringify(saveData));
-            this.eventBus.emit(GameEvents.GAME_SAVE);
-            return true;
-        } catch (error) {
-            console.error('Failed to save game:', error);
-            return false;
-        }
+        console.warn('[StateManager] saveToStorage() is deprecated. Use EventBus.emit(GameEvents.GAME_SAVE) instead.');
+        // Emit event to trigger the robust SaveSystemAdapterFixed
+        this.eventBus.emit(GameEvents.GAME_SAVE, { reason: 'manual' });
+        return true; // Assume success; SaveSystemAdapterFixed handles errors
     }
     
+    /**
+     * Validate parsed save data structure.
+     * Delegates to shared SaveUtils validator.
+     */
+    _validateSaveData(data) {
+        return validateSaveData(data);
+    }
+
     /**
      * Load state from localStorage
      */
@@ -311,7 +412,20 @@ export class StateManager {
         try {
             const saveData = localStorage.getItem('galaxyTraderSave');
             if (saveData) {
-                const data = JSON.parse(saveData);
+                let data;
+                try {
+                    data = JSON.parse(saveData);
+                } catch (parseError) {
+                    console.error('[StateManager] Failed to parse save data:', parseError);
+                    return false;
+                }
+
+                // Validate parsed data structure
+                if (!this._validateSaveData(data)) {
+                    console.error('[StateManager] Save data validation failed');
+                    return false;
+                }
+
                 this.update({
                     'ship': { ...this.state.ship, ...data.ship },
                     'reputation': { ...this.state.reputation, ...data.reputation },

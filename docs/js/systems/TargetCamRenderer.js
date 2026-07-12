@@ -61,8 +61,8 @@ export default class TargetCamRenderer {
     this._queuedBuild = null;         // latest requested build params to coalesce
     // Idle gating to avoid off-render work causing 'other' spikes
     this._idleLightStreak = 0;
-    this._idleLightNeed = (GameConstants?.TARGET_CAM?.IDLE_LIGHT_STREAK ?? 6);
-    this._idleLightMs = (GameConstants?.TARGET_CAM?.IDLE_LIGHT_MS ?? 16);
+    this._idleLightNeed = (GameConstants?.TARGET_CAM?.IDLE_LIGHT_STREAK ?? 4);
+    this._idleLightMs = (GameConstants?.TARGET_CAM?.IDLE_LIGHT_MS ?? 34);
   }
 
   /*
@@ -237,6 +237,21 @@ export default class TargetCamRenderer {
         ctx.beginPath(); ctx.moveTo(0, -hCss/2); ctx.lineTo(0, hCss/2); ctx.stroke();
         ctx.restore();
       } catch(_) {}
+
+      // Optional diagnostic center dot for alignment QA
+      if (typeof window !== 'undefined' && window.TC_CENTER_DOT) {
+        try {
+          ctx.save();
+          // Draw a crisp 1px cross and tiny dot at exact center in CSS pixels
+          ctx.strokeStyle = 'rgba(255,0,0,0.7)';
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(4, 0); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(0, 4); ctx.stroke();
+          ctx.fillRect(-0.5, -0.5, 1, 1);
+          ctx.restore();
+        } catch(_) {}
+      }
 
       // Direction ring/wedge
       let ang = 0;
@@ -583,6 +598,7 @@ export default class TargetCamRenderer {
       const key = `${sid}|${qdw}|${qdh}|${sx??-1}|${sy??-1}|${sw??-1}|${sh??-1}|tinted`;
       let tint = this._maskCache.get(key);
       if (!tint && allowBuild) {
+        // Cache miss - create new tinted canvas
         const mc = document.createElement('canvas'); mc.width = Math.max(1, qdw); mc.height = Math.max(1, qdh);
         const mctx = mc.getContext('2d'); mctx.imageSmoothingEnabled = false;
         if (sw && sh && sx!==null && sy!==null) mctx.drawImage(src, sx|0, sy|0, sw, sh, 0, 0, qdw, qdh);
@@ -591,6 +607,13 @@ export default class TargetCamRenderer {
         this._maskCache.set(key, mc); this._maskOrder.push(key);
         if (this._maskOrder.length > this._maskCap) { const oldest = this._maskOrder.shift(); this._maskCache.delete(oldest); }
         tint = mc;
+      } else if (tint) {
+        // Cache hit - move to end of LRU order
+        const idx = this._maskOrder.indexOf(key);
+        if (idx !== -1) {
+          this._maskOrder.splice(idx, 1);
+          this._maskOrder.push(key);
+        }
       }
       return tint || null;
     } catch(_) { return null; }

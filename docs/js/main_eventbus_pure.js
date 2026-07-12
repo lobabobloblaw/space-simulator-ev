@@ -7,6 +7,14 @@ import { getEventBus, GameEvents } from './core/EventBus.js';
 import { getStateManager } from './core/StateManager.js';
 import { GameLoop } from './core/GameLoop.js';
 
+// Roguelike systems
+import { getMetaStateManager } from './core/MetaStateManager.js';
+import { getRunSystem, RunEvents } from './systems/RunSystem.js';
+import { getMainMenuUI } from './ui/MainMenuUI.js';
+import { getDeathScreenUI } from './ui/DeathScreenUI.js';
+import { shipClasses } from './data/gameData.js';
+import { validateSaveData } from './utils/SaveUtils.js';
+
 // Import systems
 import InputSystem from './systems/InputSystem.js';
 import PhysicsSystem from './systems/PhysicsSystem.js';
@@ -19,6 +27,7 @@ import SpawnSystem from './systems/SpawnSystem.js';
 import SaveSystemAdapterFixed from './systems/SaveSystemAdapterFixed.js';
 import TradingSystem from './systems/TradingSystem.js';
 import ShopSystem from './systems/ShopSystem.js';  // Shop system for outfitter
+import MissionSystem from './systems/MissionSystem.js';  // Mission system for quests
 import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personalities
 import DebugSystem from './systems/DebugSystem.js';
 import TargetingSystem from './systems/TargetingSystem.js';
@@ -31,6 +40,28 @@ import { GameConstants } from './utils/Constants.js';
 console.log('[EventBus] Module loaded - Starting pure EventBus game initialization...');
 console.log('[EventBus] Current URL:', window.location.href);
 console.log('[EventBus] Script base path:', import.meta.url);
+
+// Parse lightweight URL toggles and planet sprite overrides (optional)
+try {
+    const qs = new URLSearchParams(window.location.search || '');
+    // Enable sprite-based planets via ?use_planet_sprites=1
+    if (qs.get('use_planet_sprites') === '1' || qs.get('planetSprites') === '1') {
+        window.USE_PLANET_SPRITES = true;
+    }
+    // Per-planet sprite swap: ?planet.terra_nova=terra_nova_alt
+    const overrides = {};
+    for (const [k, vRaw] of qs.entries()) {
+        if (!k || !k.startsWith('planet.')) continue;
+        const name = k.slice('planet.'.length).trim().toLowerCase();
+        const val = String(vRaw || '').trim();
+        if (!name || !val) continue;
+        overrides[name.replace(/\s+/g, '_')] = val.replace(/\s+/g, '_');
+    }
+    if (Object.keys(overrides).length) {
+        window.PLANET_SPRITE_OVERRIDES = Object.assign({}, window.PLANET_SPRITE_OVERRIDES || {}, overrides);
+        console.log('[EventBus] Planet sprite overrides from URL:', window.PLANET_SPRITE_OVERRIDES);
+    }
+} catch(_) { /* non-fatal */ }
 window.eventBusModuleLoaded = true;
 
 // Arm a LongTask observer as early as possible when LT_TRACE is enabled
@@ -75,6 +106,8 @@ async function loadGameData() {
     return { planetsData, missionsData };
 }
 
+// validateSaveData imported from utils/SaveUtils.js
+
 function loadSaveOrDefaults(state) {
     const skipSave = /(?:^|[?&])(fresh|nosave)=1(?:&|$)/.test(window.location.search || '');
     const savedData = skipSave ? null : localStorage.getItem('galaxyTraderSave');
@@ -82,6 +115,13 @@ function loadSaveOrDefaults(state) {
     if (savedData) {
         try {
             const save = JSON.parse(savedData);
+
+            // Validate parsed structure before using
+            if (!validateSaveData(save)) {
+                console.warn('[EventBus] Save data validation failed, using defaults');
+                return { shipData: null, missionData: null };
+            }
+
             shipData = save.ship || null;
             missionData = save.missionSystem || null;
             console.log('[EventBus] Found save during init - loading credits:', shipData?.credits);
@@ -293,6 +333,24 @@ async function initializeGameState() {
  * Setup event handlers for game logic
  */
 function setupEventHandlers() {
+    // Pause toggle (H7: GAME_PAUSE_TOGGLE had no listener in active code)
+    eventBus.on(GameEvents.GAME_PAUSE_TOGGLE, () => {
+        const state = stateManager.state;
+        if (state.ship.isDestroyed) return;
+        state.paused = !state.paused;
+        eventBus.emit(state.paused ? GameEvents.GAME_PAUSE : GameEvents.GAME_RESUME);
+    });
+
+    // Direct pause/resume handlers (used by blur, landing, etc.)
+    // Guard against re-entrancy: StateManager proxy emits GAME_PAUSE when
+    // state.paused changes, so only set if not already in the target state.
+    eventBus.on(GameEvents.GAME_PAUSE, () => {
+        if (!stateManager.state.paused) stateManager.state.paused = true;
+    });
+    eventBus.on(GameEvents.GAME_RESUME, () => {
+        if (stateManager.state.paused) stateManager.state.paused = false;
+    });
+
     // Ship damage handling
     eventBus.on(GameEvents.SHIP_DAMAGE, (data) => {
         const state = stateManager.state;
@@ -301,7 +359,7 @@ function setupEventHandlers() {
         }
     });
     
-    // Ship death handling (add brief destruct sequence before explosion)
+    // Ship death handling - ROGUELIKE PERMADEATH
     eventBus.on(GameEvents.SHIP_DEATH, () => {
         const state = stateManager.state;
         const now = performance.now ? performance.now() : Date.now();
@@ -321,11 +379,13 @@ function setupEventHandlers() {
             state.ship.isDestroyed = true;
             // Clear sequence marker
             delete state.ship.deathSeq;
-            eventBus.emit(GameEvents.UI_MESSAGE, {
-                message: 'SHIP DESTROYED - Press R to respawn',
-                type: 'error',
-                duration: (GameConstants?.UI?.NOTIF_SHIP_DESTROYED_MS ?? 5000)
-            });
+
+            // ROGUELIKE: End run instead of allowing respawn
+            // RunSystem will emit RUN_END which DeathScreenUI listens to
+            const runSystem = getRunSystem();
+            if (runSystem.isRunActive()) {
+                runSystem.endRun('death');
+            }
         }, 600);
     });
     
@@ -384,17 +444,70 @@ function setupEventHandlers() {
         }
     });
 
-    // Allow respawn via 'R' after death
-    eventBus.on(GameEvents.INPUT_KEY_DOWN, (data) => {
+    // ROGUELIKE: 'R' respawn disabled - permadeath mode
+    // The death screen handles retry via UI buttons
+
+    // Zone advancement (press Z when ready to advance)
+    eventBus.on(GameEvents.INPUT_ZONE_ADVANCE, () => {
         try {
-            const key = (data?.key || '').toLowerCase();
-            const state = stateManager.state;
-            if (key === 'r' && state.ship?.isDestroyed) {
-                respawnPlayer();
+            const runSystem = getRunSystem();
+            if (runSystem && runSystem.isRunActive() && runSystem.canAdvance()) {
+                const previousZone = runSystem.getCurrentZone();
+                if (runSystem.advanceZone()) {
+                    const newZone = runSystem.getCurrentZone();
+                    eventBus.emit(GameEvents.UI_MESSAGE, {
+                        message: `Entering ${newZone.name}...`,
+                        type: 'warning',
+                        duration: 3000
+                    });
+                    // Clear existing NPCs for zone transition
+                    const state = stateManager.state;
+                    // Fail active escort missions before clearing NPCs
+                    if (state.ship.missions?.active) {
+                        const escortMissions = state.ship.missions.active.filter(m => m.type === 'escort');
+                        for (const em of escortMissions) {
+                            eventBus.emit(GameEvents.MISSION_FAILED, { missionId: em.id, reason: 'Escort lost during zone transition' });
+                        }
+                    }
+                    state.npcShips = [];
+                    state.projectiles = [];
+                    console.log(`[Roguelike] Advanced from ${previousZone.name} to ${newZone.name}`);
+                }
+            } else if (runSystem && runSystem.isRunActive()) {
+                eventBus.emit(GameEvents.UI_MESSAGE, {
+                    message: 'Requirements not met to advance',
+                    type: 'info',
+                    duration: 1500
+                });
             }
-        } catch (_) {}
+        } catch(e) { console.warn('[Roguelike] Zone advance error:', e); }
     });
-    
+
+    // Boss spawn handling - called when zone boss should appear
+    eventBus.on(RunEvents.ZONE_BOSS_SPAWN, (data) => {
+        try {
+            const { boss: bossData, zoneId } = data;
+            if (!bossData || !systems.spawn) return;
+            const state = stateManager.state;
+
+            // Prevent double boss spawn
+            if (state.npcShips.some(n => n.type === 'boss')) return;
+
+            // Clear regular NPCs for boss fight
+            state.npcShips = state.npcShips.filter(n => n.type === 'boss');
+
+            // Spawn the boss
+            systems.spawn.spawnBoss(bossData);
+
+            // Show boss announcement
+            eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `${bossData.name} has appeared!`,
+                type: 'warning',
+                duration: 4000
+            });
+        } catch(e) { console.warn('[Roguelike] Boss spawn error:', e); }
+    });
+
     // NPC death handling
     eventBus.on(GameEvents.NPC_DEATH, (data) => {
         const state = stateManager.state;
@@ -424,12 +537,52 @@ function setupEventHandlers() {
                     ship: state.ship
                 });
             }
+
+            // ROGUELIKE: Boss death handling
+            if (data.npc.type === 'boss') {
+                const runSystem = getRunSystem();
+                if (runSystem && runSystem.isRunActive()) {
+                    // Record boss defeat
+                    runSystem.recordBossDefeat(data.npc.bossId);
+
+                    // Show boss death message
+                    if (data.npc.deathMessage) {
+                        eventBus.emit(GameEvents.UI_MESSAGE, {
+                            message: data.npc.deathMessage,
+                            type: 'success',
+                            duration: 4000
+                        });
+                    }
+
+                    // Check for victory condition (Void King defeated)
+                    if (data.npc.victoryTrigger) {
+                        setTimeout(() => {
+                            runSystem.endRun('victory');
+                        }, 2000);
+                    }
+
+                    // Handle boss unlocks
+                    if (data.npc.unlocks) {
+                        const meta = runSystem.getMetaStateManager();
+                        if (meta && data.npc.unlocks.ship) {
+                            meta.unlockShip(data.npc.unlocks.ship);
+                            eventBus.emit(GameEvents.UI_MESSAGE, {
+                                message: `Unlocked: ${data.npc.unlocks.ship}`,
+                                type: 'success',
+                                duration: 3000
+                            });
+                        }
+                    }
+                }
+            }
         }
-        
+
+        // Larger explosion for bosses
+        const explosionSize = data.npc.type === 'boss' ? 'large' : 'medium';
         eventBus.emit(GameEvents.EXPLOSION, {
             x: data.npc.x,
             y: data.npc.y,
-            size: 'medium'
+            size: explosionSize
         });
     });
     
@@ -603,7 +756,15 @@ async function initializeSystems() {
     } catch (e) {
         console.error('❌ ShopSystem failed:', e);
     }
-    
+
+    try {
+        systems.mission = new MissionSystem();
+        await systems.mission.init();
+        console.log('✅ MissionSystem initialized');
+    } catch (e) {
+        console.error('❌ MissionSystem failed:', e);
+    }
+
     try {
         systems.npc = new NPCSystem();
         await systems.npc.init();
@@ -650,16 +811,40 @@ async function initGame() {
             ver.textContent = v ? `v${v}` : '';
         }
         if (overlay) overlay.style.display = 'flex'; // always show overlay so version text is visible
+        const adjustVersionSize = () => {
+            try {
+                if (!ver || !img) return;
+                const w = img.getBoundingClientRect().width || 0;
+                if (!w) return;
+                // Constrain version width to logo width
+                ver.style.maxWidth = Math.round(w) + 'px';
+                // Reduce font-size until it fits (bounds: 10→7px)
+                const pad = 4;
+                for (let fs = 10; fs >= 7; fs--) {
+                    ver.style.fontSize = fs + 'px';
+                    // Slightly reduce letter-spacing on smaller sizes
+                    ver.style.letterSpacing = (fs <= 8 ? '0.2px' : '0.4px');
+                    // Force reflow then measure
+                    // eslint-disable-next-line no-unused-expressions
+                    ver.offsetWidth;
+                    if (ver.scrollWidth <= (w - pad)) break;
+                }
+            } catch(_) { /* ignore */ }
+        };
         if (img) {
             const setImgVis = () => {
                 try {
                     if (img.naturalWidth > 0) { img.style.display = 'block'; }
                     else { img.style.display = 'none'; }
                 } catch(_) {}
+                // Adjust version size after we know the logo width
+                try { requestAnimationFrame(adjustVersionSize); } catch(_) { setTimeout(adjustVersionSize, 0); }
             };
             setImgVis();
             img.addEventListener('load', setImgVis, { once: true });
             img.addEventListener('error', () => { try { img.style.display = 'none'; } catch(_) {} }, { once: true });
+            // Re-adjust on window resize
+            try { window.addEventListener('resize', () => { requestAnimationFrame(adjustVersionSize); }); } catch(_) {}
         }
     } catch(_) {}
     
@@ -703,6 +888,7 @@ async function initGame() {
             if (__marks.list.length > __marks.cap) __marks.list.splice(0, __marks.list.length - __marks.cap);
         } catch(_) {}
     };
+    let __profFrameCount = 0;
     const loop = new GameLoop({
         onUpdate: (deltaTime) => {
             const state = stateManager.state;
@@ -713,16 +899,22 @@ async function initGame() {
             
             // Update systems
             if (!state.paused) {
-                const doProf = !!(typeof window !== 'undefined' && (window.UPDATE_PROF_LOG || window.UPDATE_PROF_OVERLAY));
+                // Performance optimization: Sample profiling every N frames to reduce overhead
+                // Default: profile 1 in 60 frames (~once per second at 60fps)
+                const profSampleRate = (typeof window !== 'undefined' && Number(window.UPDATE_PROF_SAMPLE)) || 60;
+                const profEnabled = !!(typeof window !== 'undefined' && (window.UPDATE_PROF_LOG || window.UPDATE_PROF_OVERLAY));
+                const shouldProfile = profEnabled && (__profFrameCount % profSampleRate === 0);
+                __profFrameCount = (__profFrameCount + 1) % 1000000;
+
                 const now0 = performance.now ? performance.now() : Date.now();
                 let totalMs = 0; const breakdown = {}; let worstK = null, worstV = -1;
                 for (const [key, system] of Object.entries(systems)) {
                     if (!system || typeof system.update !== 'function') continue;
                     mark('u:' + key);
-                    const t0 = doProf ? (performance.now ? performance.now() : Date.now()) : 0;
+                    const t0 = shouldProfile ? (performance.now ? performance.now() : Date.now()) : 0;
                     system.update(state, deltaTime);
                     mark('u:' + key + ':done');
-                    if (doProf) {
+                    if (shouldProfile) {
                         const dt = (performance.now ? performance.now() : Date.now()) - t0;
                         breakdown[key] = Number(dt.toFixed(2));
                         totalMs += dt;
@@ -863,12 +1055,14 @@ async function initGame() {
     const stationBtn = document.getElementById('stationBtn');
     const tradeBtn = document.getElementById('tradeBtn');
     const outfitterBtn = document.getElementById('outfitterBtn');
-    
+    const missionsBtn = document.getElementById('missionsBtn');
+    const shipyardBtn = document.getElementById('shipyardBtn');
+
     if (departBtn) departBtn.onclick = () => eventBus.emit(GameEvents.MENU_CLOSE);
     if (stationBtn) stationBtn.onclick = () => eventBus.emit(GameEvents.MENU_OPEN, { panel: 'landing' });
     if (tradeBtn) tradeBtn.onclick = () => {
         const state = stateManager.state;
-        eventBus.emit(GameEvents.MENU_OPEN, { 
+        eventBus.emit(GameEvents.MENU_OPEN, {
             panel: 'trading',
             ship: state.ship,
             commodities: gameDataModule.commodities
@@ -876,16 +1070,117 @@ async function initGame() {
     };
     if (outfitterBtn) outfitterBtn.onclick = () => {
         const state = stateManager.state;
-        eventBus.emit(GameEvents.MENU_OPEN, { 
+        eventBus.emit(GameEvents.MENU_OPEN, {
             panel: 'shop',
             ship: state.ship,
             shopInventory: gameDataModule.shopInventory
         });
     };
+    if (missionsBtn) missionsBtn.onclick = () => {
+        const state = stateManager.state;
+        eventBus.emit(GameEvents.MENU_OPEN, {
+            panel: 'missions',
+            ship: state.ship
+        });
+    };
+    if (shipyardBtn) shipyardBtn.onclick = () => {
+        const state = stateManager.state;
+        eventBus.emit(GameEvents.MENU_OPEN, {
+            panel: 'shipyard',
+            ship: state.ship
+        });
+    };
     
-    // Start game loop
+    // ==================== ROGUELIKE INITIALIZATION ====================
+    // Initialize roguelike systems
+    const metaManager = getMetaStateManager();
+    const runSystem = getRunSystem();
+    runSystem.init();
+
+    const mainMenuUI = getMainMenuUI();
+    const deathScreenUI = getDeathScreenUI();
+    mainMenuUI.init();
+    deathScreenUI.init();
+
+    // Helper to initialize ship for a new run
+    const initShipForRun = (shipId) => {
+        const state = stateManager.state;
+        const shipData = shipClasses[shipId] || shipClasses.shuttle;
+
+        // Reset ship state from class data
+        state.ship.class = shipId;
+        state.ship.x = 0;
+        state.ship.y = 0;
+        state.ship.vx = 0;
+        state.ship.vy = 0;
+        state.ship.angle = 0;
+        state.ship.health = shipData.maxHealth || 100;
+        state.ship.maxHealth = shipData.maxHealth || 100;
+        state.ship.shield = shipData.maxShield || 0;
+        state.ship.maxShield = shipData.maxShield || 0;
+        state.ship.thrust = shipData.thrust || 0.012;
+        state.ship.maxSpeed = shipData.maxSpeed || 0.8;
+        state.ship.cargoCapacity = shipData.cargoCapacity || 10;
+        state.ship.cargo = [];
+        state.ship.credits = shipData.startingCredits || 250;
+        state.ship.weapons = shipData.startingWeapons ? [...shipData.startingWeapons] : [];
+        state.ship.currentWeapon = 0;
+        state.ship.kills = 0;
+        state.ship.pirateKills = 0;
+        state.ship.isDestroyed = false;
+        state.ship.isLanded = false;
+        state.ship.landedPlanet = null;
+        state.ship.fuel = state.ship.maxFuel || 100;
+
+        // Clear game entities for fresh run
+        state.npcShips = [];
+        state.projectiles = [];
+        state.explosions = [];
+
+        console.log('[Roguelike] Ship initialized for run:', shipId);
+    };
+
+    // Wire up main menu callbacks
+    mainMenuUI.onStartRun = (shipId) => {
+        console.log('[Roguelike] Starting new run with ship:', shipId);
+        runSystem.startNewRun(shipId);
+        initShipForRun(shipId);
+        mainMenuUI.hide();
+        stateManager.state.paused = false;
+    };
+
+    mainMenuUI.onContinueRun = () => {
+        console.log('[Roguelike] Continuing saved run');
+        const runData = runSystem.resumeRun();
+        if (runData) {
+            mainMenuUI.hide();
+            stateManager.state.paused = false;
+        }
+    };
+
+    // Wire up death screen callbacks
+    deathScreenUI.onRetry = (shipId) => {
+        console.log('[Roguelike] Retry with ship:', shipId);
+        runSystem.startNewRun(shipId);
+        initShipForRun(shipId);
+        stateManager.state.paused = false;
+    };
+
+    deathScreenUI.onMainMenu = () => {
+        console.log('[Roguelike] Returning to main menu');
+        mainMenuUI.show();
+    };
+
+    // Start game loop (paused initially until menu action)
+    stateManager.state.paused = true;
     loop.start();
-    
+
+    // Show main menu
+    mainMenuUI.show();
+
+    console.log('[Roguelike] Main menu displayed, waiting for player action');
+    // ==================== END ROGUELIKE INITIALIZATION ====================
+
     // Start first mission
     const state = stateManager.state;
     
@@ -931,6 +1226,24 @@ async function initGame() {
     console.log('[EventBus] All systems use StateManager - no window globals');
     console.log('[EventBus] Controls: W/A/S/D = Move, F = Fire, L = Land, M = Toggle Sound, F5 = Save, F9 = Load, F12 = Clear Save');
 }
+
+// Global unhandled promise rejection handler
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('[UnhandledRejection]', event.reason);
+    try {
+        eventBus.emit(GameEvents.UI_MESSAGE, {
+            message: 'An error occurred. Please refresh if issues persist.',
+            type: 'error',
+            duration: 5000
+        });
+    } catch (e) {
+        console.error('[UnhandledRejection] Failed to show error message:', e);
+    }
+    // Only suppress console errors in production; keep visible during local dev
+    if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        event.preventDefault();
+    }
+});
 
 // Handle window resize
 window.addEventListener('resize', () => {

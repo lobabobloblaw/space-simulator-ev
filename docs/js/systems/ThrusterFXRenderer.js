@@ -2,7 +2,9 @@
 // Draws in local ship space (caller has already applied translate/rotate)
 
 export default class ThrusterFXRenderer {
-  constructor() {}
+  constructor() {
+    this._glowCache = new Map(); // keyed by rounded glowR
+  }
 
   frameIndex(now, quality) {
     // Quality-aware stepping; slower on low
@@ -11,7 +13,7 @@ export default class ThrusterFXRenderer {
   }
 
   draw(ctx, effectsAtlas, quality, opts) {
-    const { offsetX, offsetY, baseTarget, outerScaleComp = 1, alignFactor = 0.45 } = opts;
+    const { offsetX, offsetY, baseTarget, outerScaleComp = 1, alignFactor = 0.45, thicknessFactor = 1.0 } = opts;
     const frames = effectsAtlas?.frames;
     if (!effectsAtlas?.image || !frames || !frames['effects/thruster_0']) {
       // Procedural fallback plume when atlas not available
@@ -46,7 +48,7 @@ export default class ThrusterFXRenderer {
     const scale = target / denom;
     // Subtle length jitter so FX feels alive
     const jitter = (Math.random() * 0.08) + 0.96; // 0.96..1.04
-    const dw = sw * scale * jitter, dh = sh * scale * (0.95 + Math.random() * 0.1);
+    const dw = sw * scale * jitter, dh = sh * scale * (0.95 + Math.random() * 0.1) * Math.max(0.35, Math.min(1.5, thicknessFactor));
     if (!isFinite(dw) || !isFinite(dh) || dw <= 0 || dh <= 0) return;
 
     ctx.save();
@@ -54,20 +56,38 @@ export default class ThrusterFXRenderer {
     try {
       ctx.globalCompositeOperation = 'lighter';
       ctx.translate(offsetX - dw * alignFactor, offsetY);
-      // Base
+      // Base pass at computed size
       ctx.drawImage(effectsAtlas.image, frm.x, frm.y, sw, sh, -dw / 2, -dh / 2, dw, dh);
-      // Slight bright overlay
+      // Slight bright overlay without scaling the context (preserve pixel art)
       ctx.globalAlpha = 0.7;
-      ctx.scale(1.15, 1.05);
-      ctx.drawImage(effectsAtlas.image, frm.x, frm.y, sw, sh, -dw / 2, -dh / 2, dw, dh);
-      // Cyan core glow (adds distinct look vs vector gradient)
+      const overlayDw = dw * 1.15;
+      const overlayDh = dh * 1.05;
+      ctx.drawImage(
+        effectsAtlas.image,
+        frm.x,
+        frm.y,
+        sw,
+        sh,
+        -overlayDw / 2,
+        -overlayDh / 2,
+        overlayDw,
+        overlayDh
+      );
+      // Cyan core glow (adds distinct look vs vector gradient) — cached by rounded glowR (M17)
       ctx.globalAlpha = 0.5;
       const glowR = Math.max(6, Math.min(24, dw * 0.6));
-      const gg = ctx.createRadialGradient(-dw * 0.1, 0, glowR * 0.2, -dw * 0.1, 0, glowR);
-      gg.addColorStop(0, 'rgba(140,200,255,0.9)');
-      gg.addColorStop(1, 'rgba(140,200,255,0)');
+      const cacheKey = Math.round(glowR);
+      let gg = this._glowCache.get(cacheKey);
+      if (!gg) {
+        gg = ctx.createRadialGradient(0, 0, cacheKey * 0.2, 0, 0, cacheKey);
+        gg.addColorStop(0, 'rgba(140,200,255,0.9)');
+        gg.addColorStop(1, 'rgba(140,200,255,0)');
+        this._glowCache.set(cacheKey, gg);
+        if (this._glowCache.size > 32) this._glowCache.delete(this._glowCache.keys().next().value);
+      }
       ctx.fillStyle = gg;
-      ctx.beginPath(); ctx.arc(-dw * 0.1, 0, glowR, 0, Math.PI * 2); ctx.fill();
+      ctx.translate(-dw * 0.1, 0);
+      ctx.beginPath(); ctx.arc(0, 0, glowR, 0, Math.PI * 2); ctx.fill();
     } finally {
       ctx.globalAlpha = 1.0;
       ctx.globalCompositeOperation = prevComp;

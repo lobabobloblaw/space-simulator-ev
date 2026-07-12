@@ -2,6 +2,7 @@ import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
 import ShipCatalog from './ShipCatalog.js';
+import { getRunSystem } from './RunSystem.js';
 
 /**
  * SpawnSystem - Handles spawning of NPCs, asteroids, and pickups
@@ -66,6 +67,19 @@ export class SpawnSystem {
                 credits: 150,
                 behavior: "aggressive",
                 weapon: { type: "plasma", damage: 15, cooldown: 25 }
+            },
+            elite_pirate: {
+                size: 14,
+                color: "#ff2222",
+                maxSpeed: 0.55,
+                thrust: 0.006,
+                turnSpeed: 0.018,
+                health: 120,
+                maxHealth: 120,
+                credits: 300,
+                behavior: "aggressive",
+                weapon: { type: "plasma", damage: 20, cooldown: 20 },
+                isElite: true
             }
         };
         
@@ -416,7 +430,7 @@ export class SpawnSystem {
                     this.eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'pickup' });
                     this.eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
                     // Also emit generic collected event for any listeners
-                    this.eventBus.emit(GameEvents.PICKUP_COLLECTED, { pickup, by: 'player' });
+                    this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, { pickup, by: 'player' });
                 }
             }
         } catch(_) {}
@@ -671,25 +685,65 @@ export class SpawnSystem {
      */
     spawnNPC() {
         const state = this.stateManager.state;
-        
-        // Select NPC type based on weights, with temporary suppression for recent-death type(s)
+
+        // Get zone data for difficulty scaling
+        let zone = null;
+        let difficultyMult = 1.0;
+        try {
+            const runSystem = getRunSystem();
+            if (runSystem && runSystem.isRunActive()) {
+                zone = runSystem.getCurrentZone();
+                difficultyMult = zone?.difficultyMultiplier || 1.0;
+            }
+        } catch(_) {}
+
+        // Build spawn weights based on zone or defaults
         const now = performance.now ? performance.now() : Date.now();
-        const base = this.spawnWeights;
-        const adj = { freighter: base.freighter, trader: base.trader, patrol: base.patrol, pirate: base.pirate };
+        let adj = {};
+
+        if (zone && zone.enemyTypes) {
+            // Use zone-specific enemy types and weights
+            const pirateWeight = zone.pirateSpawnWeight || 0.3;
+            const eliteChance = zone.eliteChance || 0;
+
+            for (const enemyType of zone.enemyTypes) {
+                if (enemyType === 'pirate') {
+                    adj.pirate = pirateWeight;
+                } else if (enemyType === 'elite_pirate') {
+                    adj.elite_pirate = pirateWeight * eliteChance;
+                } else if (enemyType === 'trader') {
+                    adj.trader = (1 - pirateWeight) * 0.4;
+                } else if (enemyType === 'freighter') {
+                    adj.freighter = (1 - pirateWeight) * 0.3;
+                } else if (enemyType === 'patrol') {
+                    adj.patrol = (1 - pirateWeight) * 0.3;
+                }
+            }
+        } else {
+            // Default spawn weights when not in roguelike mode
+            const base = this.spawnWeights;
+            adj = { freighter: base.freighter, trader: base.trader, patrol: base.patrol, pirate: base.pirate };
+        }
+
+        // Apply cooldowns for recent-death type(s)
         for (const t of Object.keys(adj)) {
             if (this._recentTypeCooldown[t] && now < this._recentTypeCooldown[t]) {
-                // Zero weight to avoid this type during cooldown window
                 adj[t] = 0;
             }
         }
         // Also zero pirates globally if under the recent pirate suppression window
         if (now < (this._recentPirateSuppressUntil || 0)) {
             adj.pirate = 0;
+            adj.elite_pirate = 0;
         }
-        // Normalize and pick; if everything zeroed, fall back to base weights
+
+        // Normalize and pick
         let sum = Object.values(adj).reduce((a,b)=>a+b,0);
         let pickFrom = adj;
-        if (sum <= 0) { pickFrom = base; sum = Object.values(base).reduce((a,b)=>a+b,0); }
+        if (sum <= 0) {
+            pickFrom = this.spawnWeights;
+            sum = Object.values(this.spawnWeights).reduce((a,b)=>a+b,0);
+        }
         let r = Math.random() * sum;
         let type = 'trader';
         let acc = 0;
@@ -697,8 +751,24 @@ export class SpawnSystem {
             acc += w;
             if (r < acc) { type = t; break; }
         }
-        
-        const template = this.npcTypes[type];
+
+        // Get template and apply difficulty scaling
+        const baseTemplate = this.npcTypes[type];
+        if (!baseTemplate) {
+            console.warn('[SpawnSystem] Unknown NPC type:', type);
+            return;
+        }
+
+        // Clone template and apply difficulty multiplier
+        const template = { ...baseTemplate };
+        if (difficultyMult > 1.0) {
+            template.health = Math.round(template.health * difficultyMult);
+            template.maxHealth = Math.round(template.maxHealth * difficultyMult);
+            if (template.weapon) {
+                template.weapon = { ...template.weapon };
+                template.weapon.damage = Math.round(template.weapon.damage * (1 + (difficultyMult - 1) * 0.5));
+            }
+        }
         
         // Determine spawn location based on type
         let spawnX, spawnY, initialVx, initialVy;
@@ -746,13 +816,13 @@ export class SpawnSystem {
                 // Always show an arrival flash at spawn so ships never blink in
                 spawnEffect = 'arrive';
             }
-        } else if (type === 'pirate') {
-            // Pirates spawn at edges but with varied trajectories
+        } else if (type === 'pirate' || type === 'elite_pirate') {
+            // Pirates/Elites spawn at edges but with varied trajectories
             const spawnAngle = Math.random() * Math.PI * 2;
             const distance = 1000 + Math.random() * 500;
             spawnX = state.ship.x + Math.cos(spawnAngle) * distance;
             spawnY = state.ship.y + Math.sin(spawnAngle) * distance;
-            
+
             // Random trajectory - not always toward player
             const trajectoryType = Math.random();
             if (trajectoryType < 0.3) {
@@ -837,6 +907,9 @@ export class SpawnSystem {
         const state2 = this.stateManager.state;
         if (!state2.npcShips) state2.npcShips = [];
         state2.nextEntityId = state2.nextEntityId || 1;
+        // Validate spawn position to prevent NaN propagation
+        if (!Number.isFinite(spawnX)) spawnX = 0;
+        if (!Number.isFinite(spawnY)) spawnY = 0;
         const npc = {
             id: state2.nextEntityId++,
             x: spawnX,
@@ -879,7 +952,84 @@ export class SpawnSystem {
         
         try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log(`[SpawnSystem] Spawned ${type} NPC`); } catch(_) {}
     }
-    
+
+    /**
+     * Spawn a boss NPC
+     * @param {Object} bossData - Boss definition from zones.js
+     */
+    spawnBoss(bossData) {
+        if (!bossData) return null;
+
+        const state = this.stateManager.state;
+        if (!state.npcShips) state.npcShips = [];
+        state.nextEntityId = state.nextEntityId || 1;
+
+        // Spawn boss at edge of screen, facing player
+        const ship = state.ship;
+        const spawnAngle = Math.random() * Math.PI * 2;
+        const spawnDist = 800 + Math.random() * 200;
+        const spawnX = ship.x + Math.cos(spawnAngle) * spawnDist;
+        const spawnY = ship.y + Math.sin(spawnAngle) * spawnDist;
+
+        // Boss faces player
+        const angleToPlayer = Math.atan2(ship.y - spawnY, ship.x - spawnX);
+
+        const boss = {
+            id: state.nextEntityId++,
+            x: spawnX,
+            y: spawnY,
+            vx: 0,
+            vy: 0,
+            angle: angleToPlayer,
+            type: 'boss',
+            bossId: bossData.id,
+            name: bossData.name,
+            title: bossData.title,
+            size: bossData.size || 28,
+            color: '#ff0000',
+            maxSpeed: bossData.maxSpeed || 0.6,
+            thrust: bossData.thrust || 0.004,
+            turnSpeed: bossData.turnSpeed || 0.012,
+            health: bossData.health || 400,
+            maxHealth: bossData.maxHealth || 400,
+            credits: bossData.drops?.credits || 2000,
+            behavior: 'boss',
+            weapon: bossData.weapon ? { ...bossData.weapon } : { type: 'plasma', damage: 18, cooldown: 18 },
+            phases: bossData.phases || [],
+            spawnMessage: bossData.spawnMessage,
+            phase2Message: bossData.phase2Message,
+            phase3Message: bossData.phase3Message,
+            deathMessage: bossData.deathMessage,
+            victoryTrigger: bossData.victoryTrigger || false,
+            unlocks: bossData.unlocks,
+            weaponCooldown: 0,
+            lifetime: 0,
+            thrusting: false,
+            _lastPhase: -1
+        };
+
+        state.npcShips.push(boss);
+
+        // Create dramatic warp-in effect
+        if (state.warpEffects) {
+            if (!state.pools) state.pools = {};
+            if (!state.pools.warpEffects) state.pools.warpEffects = [];
+            const effect = state.pools.warpEffects.pop() || {};
+            effect.x = spawnX;
+            effect.y = spawnY;
+            effect.type = 'arrive';
+            effect.lifetime = 0;
+            effect.maxLifetime = 45; // Longer than normal for dramatic effect
+            state.warpEffects.push(effect);
+        }
+
+        // Emit spawn event
+        this.eventBus.emit(GameEvents.NPC_SPAWN, { npc: boss, type: 'boss' });
+
+        console.log(`[SpawnSystem] Spawned boss: ${bossData.name}`);
+        return boss;
+    }
+
     /**
      * Update spawn system
      */
@@ -894,6 +1044,9 @@ export class SpawnSystem {
             if (dist < (GameConstants?.NPC?.NEARBY_RADIUS ?? 1000)) nearbyCount++;
         }
         
+        // Block regular spawning during boss fight (M2)
+        if (state.npcShips.some(n => n.type === 'boss' || n.behavior === 'boss')) return;
+
         // Check if we should spawn new NPCs
         if (!state.npcSpawnState) {
             state.npcSpawnState = {

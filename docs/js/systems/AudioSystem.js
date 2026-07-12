@@ -63,12 +63,15 @@ export class AudioSystem {
             // Create audio context
             this.context = new (window.AudioContext || window.webkitAudioContext)();
             
-            // Resume context on first user interaction
-            document.addEventListener('click', () => {
+            // Resume context on first user interaction (M12: also keyboard/touch, not just click)
+            const resumeCtx = () => {
                 if (this.context && this.context.state === 'suspended') {
                     this.context.resume();
                 }
-            }, { once: true });
+            };
+            document.addEventListener('click', resumeCtx, { once: true });
+            document.addEventListener('keydown', resumeCtx, { once: true });
+            document.addEventListener('touchstart', resumeCtx, { once: true });
             
             // Subscribe to audio events
             this.subscribeToEvents();
@@ -120,13 +123,13 @@ export class AudioSystem {
         
         // Combat events
         this.eventBus.on(GameEvents.WEAPON_FIRED, this.handleWeaponFire);
-        this.eventBus.on(GameEvents.ENTITY_DESTROYED, this.handleExplosion);
-        this.eventBus.on(GameEvents.PROJECTILE_HIT, this.handleCollision);
+        this.eventBus.on(GameEvents.EXPLOSION, this.handleExplosion);
+        this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, this.handleCollision);
         
         // Ship events
         this.eventBus.on(GameEvents.SHIP_THRUST, this.handleThrust);
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleLanding);
-        this.eventBus.on(GameEvents.PICKUP_COLLECTED, this.handlePickup);
+        this.eventBus.on(GameEvents.PHYSICS_PICKUP_COLLECTED, this.handlePickup);
         this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit.bind(this));
 
         // Music/Radio controls
@@ -827,11 +830,11 @@ export class AudioSystem {
         this.eventBus.off(GameEvents.AUDIO_TOGGLE, this.handleToggleSound);
         this.eventBus.off(GameEvents.AUDIO_PLAY, this.handlePlaySound);
         this.eventBus.off(GameEvents.WEAPON_FIRED, this.handleWeaponFire);
-        this.eventBus.off(GameEvents.ENTITY_DESTROYED, this.handleExplosion);
-        this.eventBus.off(GameEvents.PROJECTILE_HIT, this.handleCollision);
+        this.eventBus.off(GameEvents.EXPLOSION, this.handleExplosion);
+        this.eventBus.off(GameEvents.PHYSICS_PROJECTILE_HIT, this.handleCollision);
         this.eventBus.off(GameEvents.SHIP_THRUST, this.handleThrust);
         this.eventBus.off(GameEvents.SHIP_LANDED, this.handleLanding);
-        this.eventBus.off(GameEvents.PICKUP_COLLECTED, this.handlePickup);
+        this.eventBus.off(GameEvents.PHYSICS_PICKUP_COLLECTED, this.handlePickup);
         this.eventBus.off(GameEvents.SHIELD_HIT, this.handleShieldHit);
         
         console.log('[AudioSystem] Destroyed');

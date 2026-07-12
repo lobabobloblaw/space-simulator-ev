@@ -1,6 +1,8 @@
 // Procedural 2D ship silhouettes with simple panel lines and cockpits
 // Usage: ShipDesigns.draw(ctx, designKey, size, palette)
 
+const _gradCache = new Map();
+
 export const ShipDesigns = {
     draw(ctx, design = 'delta', size = 10, palette = {}) {
         const colors = {
@@ -10,10 +12,16 @@ export const ShipDesigns = {
             cockpit: palette.cockpit || 'rgba(120,200,255,0.85)'
         };
 
-        // Base gradient along x-axis (nose→tail)
-        const grad = ctx.createLinearGradient(size, 0, -size, 0);
-        grad.addColorStop(0, colors.hullA);
-        grad.addColorStop(1, colors.hullB);
+        // Base gradient along x-axis — cached by (size, hullA, hullB) (M18)
+        const gKey = `${size}|${colors.hullA}|${colors.hullB}`;
+        let grad = _gradCache.get(gKey);
+        if (!grad) {
+            grad = ctx.createLinearGradient(size, 0, -size, 0);
+            grad.addColorStop(0, colors.hullA);
+            grad.addColorStop(1, colors.hullB);
+            _gradCache.set(gKey, grad);
+            if (_gradCache.size > 64) _gradCache.delete(_gradCache.keys().next().value);
+        }
         ctx.fillStyle = grad;
         ctx.strokeStyle = colors.stroke;
         ctx.lineWidth = 1;

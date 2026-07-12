@@ -86,6 +86,18 @@ export default class WebGLRenderSystem {
       this._resizeObserver.observe(this.canvas);
     } catch(_) {}
 
+    // Handle WebGL context loss/restoration (H11)
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.gl = null;
+      console.warn('[WebGLRenderSystem] WebGL context lost');
+    }, false);
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      console.log('[WebGLRenderSystem] WebGL context restored — re-initializing');
+      this.gl = this.canvas.getContext('webgl') || this.canvas.getContext('experimental-webgl');
+      if (this.gl) this.init();
+    }, false);
+
     console.log('[WebGLRenderSystem] Initialized');
   }
 

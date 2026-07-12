@@ -1,5 +1,6 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import { getRunSystem } from './RunSystem.js';
 import { ProceduralPlanetRenderer } from './proceduralPlanetRenderer.js';
 import PlanetSpriteRenderer from './PlanetSpriteRenderer.js';
 import ExplosionRenderer from './ExplosionRenderer.js';
@@ -8,8 +9,9 @@ import HUDRenderer from './HUDRenderer.js';
 import { withWorld, withScreen, toWhiteMaskCanvas } from './RenderHelpers.js';
 import { MathUtils } from '../utils/MathUtils.js';
 import { resolveViewportSprite } from './SpriteResolver.js';
-import { getFrameCanvasFromState } from './AssetSystem.js';
-import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES } from './SpriteMappings.js';
+import { getFrameCanvasFromState, getPlanetSpriteFromState } from './AssetSystem.js';
+import { isImageReady } from './AssetReadiness.js';
+import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES, spriteThrusterAnchors as THRUSTER_ANCHORS } from './SpriteMappings.js';
 import ShipDesigns from './ShipDesigns.js';
 import TargetCamRenderer from './TargetCamRenderer.js';
 import FactionVisuals from './FactionVisuals.js';
@@ -72,6 +74,7 @@ export class RenderSystem {
             const mode = modeOverride || (GameConstants?.UI?.PLANETS?.MODE || 'procedural');
             this.planetRenderer = (mode === 'sprites') ? new PlanetSpriteRenderer(this.stateManager) : new ProceduralPlanetRenderer();
         } catch(_) { this.planetRenderer = new ProceduralPlanetRenderer(); }
+        // No selective per-planet renderer; rely on configured renderer only
         
         // Don't generate stars here - we'll use the ones from state
         
@@ -85,6 +88,9 @@ export class RenderSystem {
         // Debug throttle state
         this._dbg = { last: new Map() };
         this._prof = { armed: 0, cooldownUntil: 0, lastLogTs: 0 }; // auto one-shot profiler frames when a spike is detected
+
+        // Cached pickup glow gradients (centered at origin, keyed by type+radius)
+        this._pickupGradients = new Map();
 
         // Bind methods
         this.handleCanvasResize = this.handleCanvasResize.bind(this);
@@ -104,6 +110,19 @@ export class RenderSystem {
         this.thrusterFX = new ThrusterFXRenderer();
         this.hud = new HUDRenderer(this.ctx, this.camera, this.screenCenter);
 
+        // Optional per-planet sprite caches (QA-only swap paths)
+        this._terraSprite = { ready: false, started: false, canvas: null, w: 0, h: 0, forRadius: 0 };
+        this._crimsonSprite = { ready: false, started: false, canvas: null, w: 0, h: 0, forRadius: 0 };
+        this._iceSprite = { ready: false, started: false, canvas: null, w: 0, h: 0, forRadius: 0 };
+        this._miningSprite = { ready: false, started: false, canvas: null, w: 0, h: 0, forRadius: 0 };
+        this._terraSpriteDrawnLogged = false;
+        this._crimsonSpriteDrawnLogged = false;
+        this._iceSpriteDrawnLogged = false;
+        this._miningSpriteDrawnLogged = false;
+        // Optional animated planet caches (QA-only); frames are pre-scaled canvases
+        this._terraAnim = { ready: false, started: false, frames: [], fps: 12, w: 0, h: 0, t0: 0 };
+        this._crimsonAnim = { ready: false, started: false, frames: [], fps: 12, w: 0, h: 0, t0: 0 };
+
         // Local minimal atlas for target-cam fallback silhouettes
         this._viewportAtlas = null;
         // Track pending async planet generations to avoid repeat scheduling
@@ -111,7 +130,7 @@ export class RenderSystem {
         // Preload target-cam sprite images (direct paths) to ensure availability
         this._targetCamSprites = {};
         try {
-            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/shuttle_1'];
+            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/freighter_1','ships/trader_0','ships/trader_1','ships/shuttle_0','ships/shuttle_1'];
             ids.forEach(id => { this._targetCamSprites[id] = this._ensureDirectSpriteImage(id); });
         } catch(_) {}
 
@@ -280,11 +299,108 @@ export class RenderSystem {
         setTimeout(() => {
             const state = this.stateManager.state;
             if (state.planets && state.planets.length > 0) {
-                console.log('[RenderSystem] Initializing procedural planets:', state.planets.length);
-                this.planetRenderer.initializePlanets(state.planets);
+                try {
+                    console.log('[RenderSystem] Initializing planets:', state.planets.length);
+                    this.planetRenderer.initializePlanets(state.planets);
+                } catch(_) {}
             }
             try { this.buildTargetCamCache(); } catch(_) {}
         }, 100);
+
+        // QA-only Terra/Crimson sprite prep (off-screen), guarded by persisted toggle
+        try {
+            if (this._terraSpriteEnabled()) {
+                try { console.log('[TerraSprite] toggle ON — scheduling prep'); } catch(_) {}
+                const schedule = () => {
+                    try {
+                        const st = this.stateManager.state;
+                        const terra = (st.planets || []).find(p => p && p.name === 'Terra Nova');
+                        if (!terra) return;
+                        try { console.log('[TerraSprite] init schedule — calling _prepTerraSprite'); } catch(_) {}
+                        this._prepTerraSprite(terra.radius);
+                    } catch(_) {}
+                };
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+                    setTimeout(() => window.requestIdleCallback(schedule, { timeout: 1200 }), 1200);
+                } else {
+                    setTimeout(schedule, 1200);
+                }
+            }
+            if (this._crimsonSpriteEnabled()) {
+                try { console.log('[CrimsonSprite] toggle ON — scheduling prep'); } catch(_) {}
+                const scheduleC = () => {
+                    try {
+                        const st = this.stateManager.state;
+                        const crimson = (st.planets || []).find(p => p && p.name === 'Crimson Moon');
+                        if (!crimson) return;
+                        try { console.log('[CrimsonSprite] init schedule — calling _prepCrimsonSprite'); } catch(_) {}
+                        this._prepCrimsonSprite(crimson.radius);
+                    } catch(_) {}
+                };
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+                    setTimeout(() => window.requestIdleCallback(scheduleC, { timeout: 1200 }), 1200);
+                } else {
+                    setTimeout(scheduleC, 1200);
+                }
+            }
+            if (this._iceSpriteEnabled()) {
+                try { console.log('[IceSprite] toggle ON — scheduling prep'); } catch(_) {}
+                const scheduleIce = () => {
+                    try {
+                        const st = this.stateManager.state;
+                        const ice = (st.planets || []).find(p => p && p.name === 'Ice World');
+                        if (!ice) return;
+                        this._prepIceSprite(ice.radius);
+                    } catch(_) {}
+                };
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+                    setTimeout(() => window.requestIdleCallback(scheduleIce, { timeout: 1200 }), 1200);
+                } else {
+                    setTimeout(scheduleIce, 1200);
+                }
+            }
+            if (this._miningSpriteEnabled()) {
+                try { console.log('[MiningSprite] toggle ON — scheduling prep'); } catch(_) {}
+                const scheduleMining = () => {
+                    try {
+                        const st = this.stateManager.state;
+                        const mining = (st.planets || []).find(p => p && p.name === 'Mining Station');
+                        if (!mining) return;
+                        this._prepMiningSprite(mining.radius);
+                    } catch(_) {}
+                };
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+                    setTimeout(() => window.requestIdleCallback(scheduleMining, { timeout: 1200 }), 1200);
+                } else {
+                    setTimeout(scheduleMining, 1200);
+                }
+            }
+            // Optional animated planet preps (Terra/Crimson) behind QA toggles
+            if (this._terraAnimEnabled()) {
+                try { console.log('[TerraAnim] toggle ON — scheduling prep'); } catch(_) {}
+                const sA = () => {
+                    try {
+                        const st = this.stateManager.state;
+                        const terra = (st.planets || []).find(p => p && p.name === 'Terra Nova');
+                        if (!terra) return;
+                        this._prepTerraAnim(terra.radius);
+                    } catch(_) {}
+                };
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') setTimeout(() => window.requestIdleCallback(sA, { timeout: 1500 }), 1400); else setTimeout(sA, 1400);
+            }
+            if (this._crimsonAnimEnabled()) {
+                try { console.log('[CrimsonAnim] toggle ON — scheduling prep'); } catch(_) {}
+                const sB = () => {
+                    try {
+                        const st = this.stateManager.state;
+                        const crimson = (st.planets || []).find(p => p && p.name === 'Crimson Moon');
+                        if (!crimson) return;
+                        this._prepCrimsonAnim(crimson.radius);
+                    } catch(_) {}
+                };
+                if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') setTimeout(() => window.requestIdleCallback(sB, { timeout: 1500 }), 1400); else setTimeout(sB, 1400);
+            }
+        } catch(_) {}
 
         try { this.targetCam.init(); } catch(_) {}
         
@@ -293,34 +409,217 @@ export class RenderSystem {
 
     buildTargetCamCache() {
         try {
-            const assets = this.stateManager?.state?.assets;
-            if (!assets || !assets.atlases || !assets.atlases.placeholder) return;
-            const atlas = assets.atlases.placeholder;
-            const src = atlas.canvas || atlas.image;
-            if (!src) return;
-            const frames = atlas.frames || {};
-            const wanted = new Set([
-                'ships/pirate_0','ships/patrol_0','ships/interceptor_0','ships/freighter_0','ships/trader_0','ships/shuttle_0','ships/raider_0'
-            ]);
-            for (const [key, fr] of Object.entries(frames)) {
-                if (!wanted.has(key)) continue;
+            const state = this.stateManager?.state;
+            if (!state) return;
+            const wanted = [
+                'ships/pirate_0',
+                'ships/patrol_0',
+                'ships/interceptor_0',
+                'ships/freighter_0',
+                'ships/trader_0',
+                'ships/shuttle_0',
+                'ships/raider_0'
+            ];
+            const built = [];
+            for (const key of wanted) {
                 if (this._tcFrameCache[key]) continue;
-                const c = document.createElement('canvas');
-                c.width = fr.w; c.height = fr.h;
-                const cctx = c.getContext('2d');
-                if (src instanceof HTMLCanvasElement) {
-                  cctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
-                } else if (src && src.naturalWidth > 0) {
-                  cctx.drawImage(src, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
-                } else {
-                  continue;
-                }
-                this._tcFrameCache[key] = c;
+                const canvas = getFrameCanvasFromState(state, key);
+                if (!canvas) continue;
+                this._tcFrameCache[key] = canvas;
+                built.push(key);
             }
-            if (Object.keys(this._tcFrameCache).length) {
-                console.log('[RenderSystem] TargetCam cache built for', Object.keys(this._tcFrameCache));
+            if (built.length) {
+                console.log('[RenderSystem] TargetCam cache built for', built);
             }
         } catch(_) {}
+    }
+
+    /**
+     * Generic: prepare an off-screen, scaled planet sprite once, guarded by toggle.
+     * @param {string} planetName - Planet name for getPlanetSpriteFromState
+     * @param {string} cacheKey - Property name on `this` (e.g. '_terraSprite')
+     * @param {function} enabledFn - Returns true if toggle is on
+     * @param {string} logPrefix - Console log prefix (e.g. '[TerraSprite]')
+     * @param {number} targetRadius - Planet radius to scale to
+     */
+    _prepPlanetSprite(planetName, cacheKey, enabledFn, logPrefix, targetRadius) {
+        try {
+            if (!enabledFn()) {
+                // Clean up canvas when toggle disabled (free memory)
+                if (this[cacheKey] && this[cacheKey].canvas) {
+                    this[cacheKey] = { ready: false, started: false, canvas: null, w: 0, h: 0, forRadius: 0 };
+                }
+                return;
+            }
+            const dw = Math.max(2, Math.round(targetRadius * 2));
+            const dh = dw;
+            if (this[cacheKey] && this[cacheKey].ready && this[cacheKey].w === dw && this[cacheKey].h === dh) return;
+            if (this[cacheKey]) this[cacheKey].started = true;
+            const img = getPlanetSpriteFromState(this.stateManager.state, planetName);
+            if (!img) return;
+            try { console.log(logPrefix, 'prep start', { dw, dh }); } catch(_) {}
+
+            const finalize = () => {
+                if (!isImageReady(img)) return;
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = dw; c.height = dh;
+                    const cctx = c.getContext('2d');
+                    try { cctx.imageSmoothingEnabled = true; cctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                    cctx.drawImage(img, 0, 0, dw, dh);
+                    this[cacheKey] = { ready: true, canvas: c, w: dw, h: dh, forRadius: targetRadius };
+                    try { console.log(logPrefix, 'scaled and cached'); } catch(_) {}
+                } catch(_) {}
+            };
+
+            const decodeAndFinalize = () => {
+                try {
+                    if (typeof img.decode === 'function') {
+                        img.decode().then(finalize).catch(finalize);
+                    } else {
+                        finalize();
+                    }
+                } catch(_) { finalize(); }
+            };
+
+            if (isImageReady(img)) {
+                decodeAndFinalize();
+                return;
+            }
+
+            const onLoad = () => {
+                try { console.log(logPrefix, 'image loaded'); } catch(_) {}
+                decodeAndFinalize();
+            };
+            const onError = (e) => { try { console.warn(logPrefix, 'image error', e); } catch(_) {}; };
+            try { img.addEventListener('load', onLoad, { once: true }); } catch(_) { img.onload = onLoad; }
+            try { img.addEventListener('error', onError, { once: true }); } catch(_) { img.onerror = onError; }
+        } catch(_) {}
+    }
+
+    /**
+     * Generic: prepare animated planet frames from a JSON manifest (QA-only).
+     * @param {string} manifestPath - Relative path under assets/planets/ (e.g. 'terra_nova_anim.json')
+     * @param {string} cacheKey - Property name on `this` (e.g. '_terraAnim')
+     * @param {function} enabledFn - Returns true if toggle is on
+     * @param {string} logPrefix - Console log prefix
+     * @param {number} targetRadius - Planet radius to scale to
+     */
+    _prepPlanetAnim(manifestPath, cacheKey, enabledFn, logPrefix, targetRadius) {
+        try {
+            if (!enabledFn()) return;
+            const A = this[cacheKey];
+            const dw = Math.max(2, Math.round(targetRadius * 2));
+            const dh = dw;
+            if (A && A.ready && A.w === dw && A.h === dh) return;
+            const docsRoot = new URL('../../', import.meta.url);
+            const href = new URL(manifestPath, docsRoot).href;
+            const start = async () => {
+                try {
+                    const res = await fetch(href, { cache: 'no-cache' });
+                    if (!res.ok) throw new Error('no anim manifest');
+                    const man = await res.json();
+                    const fps = Math.max(4, Math.min(30, Number(man.fps) || 12));
+                    const frames = Array.isArray(man.frames) ? man.frames : [];
+                    const scaled = [];
+                    for (let i = 0; i < frames.length; i++) {
+                        const srcRel = String(frames[i]).replace(/^\.\//, '');
+                        const src = new URL(srcRel, docsRoot).href;
+                        // eslint-disable-next-line no-await-in-loop
+                        const img = await new Promise((resolve, reject) => { const im = new Image(); im.crossOrigin='anonymous'; im.onload=()=>resolve(im); im.onerror=reject; im.src=src; });
+                        const c = document.createElement('canvas'); c.width = dw; c.height = dh; const cctx = c.getContext('2d');
+                        try { cctx.imageSmoothingEnabled = true; cctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        cctx.drawImage(img, 0, 0, dw, dh);
+                        scaled.push(c);
+                    }
+                    this[cacheKey] = { ready: scaled.length>0, started: true, frames: scaled, fps, w: dw, h: dh, t0: 0 };
+                    try { console.log(logPrefix, 'frames ready', { count: scaled.length, fps }); } catch(_) {}
+                } catch (e) {
+                    try { console.warn(logPrefix, 'manifest load failed', e); } catch(_) {}
+                }
+            };
+            if (!A.started) { this[cacheKey].started = true; start(); }
+        } catch(_) {}
+    }
+
+    // Convenience wrappers that call the generic methods
+    _prepTerraSprite(r) { this._prepPlanetSprite('Terra Nova', '_terraSprite', () => this._terraSpriteEnabled(), '[TerraSprite]', r); }
+    _prepCrimsonSprite(r) { this._prepPlanetSprite('Crimson Moon', '_crimsonSprite', () => this._crimsonSpriteEnabled(), '[CrimsonSprite]', r); }
+    _prepIceSprite(r) { this._prepPlanetSprite('Ice World', '_iceSprite', () => this._iceSpriteEnabled(), '[IceSprite]', r); }
+    _prepMiningSprite(r) { this._prepPlanetSprite('Mining Station', '_miningSprite', () => this._miningSpriteEnabled(), '[MiningSprite]', r); }
+    _prepTerraAnim(r) { this._prepPlanetAnim('assets/planets/terra_nova_anim.json', '_terraAnim', () => this._terraAnimEnabled(), '[TerraAnim]', r); }
+    _prepCrimsonAnim(r) { this._prepPlanetAnim('assets/planets/crimson_moon_anim.json', '_crimsonAnim', () => this._crimsonAnimEnabled(), '[CrimsonAnim]', r); }
+
+    _terraSpriteEnabled() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.USE_TERRA_SPRITE) return true;
+            try { if (localStorage.getItem('gt.useTerraSprite') === 'true') return true; } catch(_) {}
+            try {
+                const qs = (typeof location !== 'undefined' && location && location.search) ? location.search : '';
+                if (/(?:[?&])(use_terra_sprite|terra)=1(?:&|$)/.test(qs)) return true;
+            } catch(_) {}
+            return false;
+        } catch(_) { return false; }
+    }
+
+    _crimsonSpriteEnabled() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.USE_CRIMSON_SPRITE) return true;
+            try { if (localStorage.getItem('gt.useCrimsonSprite') === 'true') return true; } catch(_) {}
+            try {
+                const qs = (typeof location !== 'undefined' && location && location.search) ? location.search : '';
+                if (/(?:[?&])(use_crimson_sprite|crimson)=1(?:&|$)/.test(qs)) return true;
+            } catch(_) {}
+            return false;
+        } catch(_) { return false; }
+    }
+
+    _iceSpriteEnabled() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.USE_ICE_SPRITE) return true;
+            try { if (localStorage.getItem('gt.useIceSprite') === 'true') return true; } catch(_) {}
+            try {
+                const qs = (typeof location !== 'undefined' && location && location.search) ? location.search : '';
+                if (/(?:[?&])(use_ice_sprite|ice)=1(?:&|$)/.test(qs)) return true;
+            } catch(_) {}
+            return false;
+        } catch(_) { return false; }
+    }
+
+    _miningSpriteEnabled() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.USE_MINING_SPRITE) return true;
+            try { if (localStorage.getItem('gt.useMiningSprite') === 'true') return true; } catch(_) {}
+            try {
+                const qs = (typeof location !== 'undefined' && location && location.search) ? location.search : '';
+                if (/(?:[?&])(use_mining_sprite|mining|station)=1(?:&|$)/.test(qs)) return true;
+            } catch(_) {}
+            return false;
+        } catch(_) { return false; }
+    }
+
+    _terraAnimEnabled() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.USE_TERRA_ANIM) return true;
+            try { if (localStorage.getItem('gt.useTerraAnim') === 'true') return true; } catch(_) {}
+            try { const qs = (typeof location !== 'undefined' && location && location.search) ? location.search : ''; if (/(?:[?&])(use_terra_anim|terra_anim)=1(?:&|$)/.test(qs)) return true; } catch(_) {}
+            return false;
+        } catch(_) { return false; }
+    }
+
+    _crimsonAnimEnabled() {
+        try {
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            if (g && g.USE_CRIMSON_ANIM) return true;
+            try { if (localStorage.getItem('gt.useCrimsonAnim') === 'true') return true; } catch(_) {}
+            try { const qs = (typeof location !== 'undefined' && location && location.search) ? location.search : ''; if (/(?:[?&])(use_crimson_anim|crimson_anim)=1(?:&|$)/.test(qs)) return true; } catch(_) {}
+            return false;
+        } catch(_) { return false; }
     }
 
     // Target-cam diagnostics removed
@@ -561,7 +860,9 @@ export class RenderSystem {
             }
             // Enforce boot ramp quality briefly
             if (now < (this._bootUntil || 0)) this.quality = 'medium';
-            // Expose for profiler overlay/log
+            // Expose for profiler overlay/log and SaveSystem frame gating
+            if (state.diagnostics) state.diagnostics.lastFrameMs = frameMs;
+            // Keep window.__lastFrameMs for backwards compat with QA toggles
             if (typeof window !== 'undefined') window.__lastFrameMs = frameMs;
             // Auto-arm one-shot profile capture on spike without user toggles (disable via window.RENDER_PROF_AUTO_DISABLED = true)
             // Auto-arming is OFF by default; enable with window.RENDER_PROF_AUTO_ENABLED = true
@@ -576,8 +877,14 @@ export class RenderSystem {
         // Ensure sane defaults at frame start
         try { this.ctx.setTransform(1, 0, 0, 1, 0, 0); } catch(_) {}
         this.ctx.globalAlpha = 1;
+        this.ctx.globalCompositeOperation = 'source-over';
         this.ctx.shadowBlur = 0;
         this.ctx.lineWidth = 1;
+        this.ctx.fillStyle = '#000';
+        this.ctx.strokeStyle = '#fff';
+        this.ctx.font = '14px sans-serif';
+        this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'alphabetic';
 
         // Update camera to follow ship
         this.camera.x = state.ship.x;
@@ -630,7 +937,9 @@ export class RenderSystem {
             withScreen(this.ctx, () => {
                 const mult = (GameConstants?.PHYSICS?.DAMAGE_FLASH_ALPHA_MULT ?? 0.3);
                 this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * mult})`;
-                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                // Use CSS dimensions (canvas.width/height are physical pixels, divide by DPR for screen space)
+                const dpr = this.canvas.__dpr || 1;
+                this.ctx.fillRect(0, 0, this.canvas.width / dpr, this.canvas.height / dpr);
             });
             const decay = (GameConstants?.PHYSICS?.DAMAGE_FLASH_DECAY ?? 0.05);
             state.ship.damageFlash -= decay;
@@ -668,6 +977,30 @@ export class RenderSystem {
                 this.hud.drawPlayerHealth(state);
                 // Optional QA build tag (top-right); gated by window.HUD_SHOW_BUILD_TAG
                 this.hud.drawBuildTag();
+
+                // Zone indicator (roguelike mode)
+                try {
+                    const runSystem = getRunSystem();
+                    if (runSystem && runSystem.isRunActive()) {
+                        const zone = runSystem.getCurrentZone();
+                        const stats = runSystem.getRunStats();
+                        if (zone) {
+                            this.hud.drawZoneIndicator({
+                                zoneName: zone.name,
+                                difficulty: zone.difficulty,
+                                canAdvance: runSystem.canAdvance(),
+                                requirements: zone.advanceRequirements,
+                                kills: stats.kills,
+                                credits: state.ship?.credits || 0
+                            });
+                        }
+                        // Boss health bar (if boss is active)
+                        const boss = (state.npcShips || []).find(n => n.type === 'boss');
+                        if (boss) {
+                            this.hud.drawBossHealthBar(boss);
+                        }
+                    }
+                } catch(_) {}
             } else {
                 __appliedOtherGuard = true; // skip HUD this frame
             }
@@ -1477,32 +1810,36 @@ export class RenderSystem {
     renderNebula() {
         // Only draw nebula on high quality; it uses large radial gradients
         if (this.quality !== 'high') return;
-        
-        this.ctx.globalAlpha = 0.03;
-        
-        // Purple nebula cloud
-        const nebulaGradient1 = this.ctx.createRadialGradient(
-            -this.camera.x * 0.05 + 200, -this.camera.y * 0.05 - 300, 100,
-            -this.camera.x * 0.05 + 200, -this.camera.y * 0.05 - 300, 600
-        );
-        nebulaGradient1.addColorStop(0, 'rgba(200, 100, 255, 0.4)');
-        nebulaGradient1.addColorStop(0.5, 'rgba(100, 50, 200, 0.2)');
-        nebulaGradient1.addColorStop(1, 'transparent');
-        this.ctx.fillStyle = nebulaGradient1;
-        this.ctx.fillRect(-2000, -2000, 4000, 4000);
-        
-        // Blue nebula cloud
-        const nebulaGradient2 = this.ctx.createRadialGradient(
-            -this.camera.x * 0.05 - 500, -this.camera.y * 0.05 + 400, 150,
-            -this.camera.x * 0.05 - 500, -this.camera.y * 0.05 + 400, 800
-        );
-        nebulaGradient2.addColorStop(0, 'rgba(100, 200, 255, 0.3)');
-        nebulaGradient2.addColorStop(0.5, 'rgba(50, 100, 200, 0.15)');
-        nebulaGradient2.addColorStop(1, 'transparent');
-        this.ctx.fillStyle = nebulaGradient2;
-        this.ctx.fillRect(-2000, -2000, 4000, 4000);
-        
-        this.ctx.globalAlpha = 1;
+
+        // Wrap in save/restore to protect globalAlpha
+        this.ctx.save();
+        try {
+            this.ctx.globalAlpha = 0.03;
+
+            // Purple nebula cloud
+            const nebulaGradient1 = this.ctx.createRadialGradient(
+                -this.camera.x * 0.05 + 200, -this.camera.y * 0.05 - 300, 100,
+                -this.camera.x * 0.05 + 200, -this.camera.y * 0.05 - 300, 600
+            );
+            nebulaGradient1.addColorStop(0, 'rgba(200, 100, 255, 0.4)');
+            nebulaGradient1.addColorStop(0.5, 'rgba(100, 50, 200, 0.2)');
+            nebulaGradient1.addColorStop(1, 'transparent');
+            this.ctx.fillStyle = nebulaGradient1;
+            this.ctx.fillRect(-2000, -2000, 4000, 4000);
+
+            // Blue nebula cloud
+            const nebulaGradient2 = this.ctx.createRadialGradient(
+                -this.camera.x * 0.05 - 500, -this.camera.y * 0.05 + 400, 150,
+                -this.camera.x * 0.05 - 500, -this.camera.y * 0.05 + 400, 800
+            );
+            nebulaGradient2.addColorStop(0, 'rgba(100, 200, 255, 0.3)');
+            nebulaGradient2.addColorStop(0.5, 'rgba(50, 100, 200, 0.15)');
+            nebulaGradient2.addColorStop(1, 'transparent');
+            this.ctx.fillStyle = nebulaGradient2;
+            this.ctx.fillRect(-2000, -2000, 4000, 4000);
+        } finally {
+            this.ctx.restore();
+        }
     }
     
     /**
@@ -1512,69 +1849,81 @@ export class RenderSystem {
         const state = this.stateManager.state;
         if (!state.stars) return;
         if (this._starBootSkip > 0) { this._starBootSkip -= 1; return; }
-        const tick = (this._starTick = (this._starTick + 1) & 1);
-        const q = this.quality;
-        // Far stars (minimal parallax)
-        if (q !== 'low') for (let star of state.stars.far || []) {
-            const screenX = star.x - this.camera.x * 0.05;
-            const screenY = star.y - this.camera.y * 0.05;
-            
-            // Wrap stars for infinite field
-            const wrappedX = ((screenX + 6000) % 12000) - 6000;
-            const wrappedY = ((screenY + 6000) % 12000) - 6000;
-            
-            this.ctx.globalAlpha = star.brightness;
-            this.ctx.fillStyle = star.color || '#ffffff';
-            
-            if (star.size > 2 && q === 'high') {
-                this.ctx.shadowColor = star.color || '#ffffff';
-                this.ctx.shadowBlur = star.size;
-                this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-                this.ctx.shadowBlur = 0;
-            } else {
+
+        // Wrap in save/restore to protect globalAlpha and shadowBlur
+        this.ctx.save();
+        try {
+            // Stable, quality-based sampling (no per-frame alternation)
+            const q = this.quality;
+            const farArr = state.stars.far || [];
+            const midArr = state.stars.mid || [];
+            const nearArr = state.stars.near || [];
+            const stepFar = (q === 'low') ? 2 : 1; // draw ~1/2 on low
+            const stepMid = (q === 'low') ? 3 : 1; // draw ~1/3 on low
+            const stepNear = (q === 'low') ? 4 : 1; // draw ~1/4 on low
+
+            // Far stars (minimal parallax)
+            for (let i = 0; i < farArr.length; i += stepFar) { const star = farArr[i];
+                const screenX = star.x - this.camera.x * 0.05;
+                const screenY = star.y - this.camera.y * 0.05;
+
+                // Wrap stars for infinite field
+                const wrappedX = ((screenX + 6000) % 12000) - 6000;
+                const wrappedY = ((screenY + 6000) % 12000) - 6000;
+
+                this.ctx.globalAlpha = star.brightness;
+                this.ctx.fillStyle = star.color || '#ffffff';
+
+                if (star.size > 2 && q === 'high') {
+                    this.ctx.shadowColor = star.color || '#ffffff';
+                    this.ctx.shadowBlur = star.size;
+                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+                    this.ctx.shadowBlur = 0;
+                } else {
+                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+                }
+            }
+
+            // Mid stars with twinkling
+            for (let i = 0; i < midArr.length; i += stepMid) { const star = midArr[i];
+                const screenX = star.x - this.camera.x * 0.2;
+                const screenY = star.y - this.camera.y * 0.2;
+
+                const wrappedX = ((screenX + 4000) % 8000) - 4000;
+                const wrappedY = ((screenY + 4000) % 8000) - 4000;
+
+                // Twinkling effect
+                star.twinkle = (star.twinkle || 0) + (star.twinkleSpeed || 0.02);
+                const twinkle = Math.sin(star.twinkle) * 0.1 + 0.9;
+
+                this.ctx.globalAlpha = star.brightness * twinkle;
+                this.ctx.fillStyle = star.color || '#ffffff';
                 this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
             }
-        }
-        
-        // Mid stars with twinkling — draw every frame for consistency across quality (except low)
-        if (q !== 'low') for (let star of state.stars.mid || []) {
-            const screenX = star.x - this.camera.x * 0.2;
-            const screenY = star.y - this.camera.y * 0.2;
-            
-            const wrappedX = ((screenX + 4000) % 8000) - 4000;
-            const wrappedY = ((screenY + 4000) % 8000) - 4000;
-            
-            // Twinkling effect
-            star.twinkle += star.twinkleSpeed || 0.02;
-            const twinkle = Math.sin(star.twinkle) * 0.1 + 0.9;
-            
-            this.ctx.globalAlpha = star.brightness * twinkle;
-            this.ctx.fillStyle = star.color || '#ffffff';
-            this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-        }
-        
-        // Near stars — draw every frame for consistency across quality (except low)
-        if (q !== 'low') for (let star of state.stars.near || []) {
-            const screenX = star.x - this.camera.x * 0.4;
-            const screenY = star.y - this.camera.y * 0.4;
-            
-            const wrappedX = ((screenX + 3000) % 6000) - 3000;
-            const wrappedY = ((screenY + 3000) % 6000) - 3000;
-            
-            this.ctx.globalAlpha = star.brightness;
-            this.ctx.fillStyle = star.color || '#ffffff';
-            
-            if (star.size > 1 && q === 'high') {
-                this.ctx.shadowColor = '#ffffff';
-                this.ctx.shadowBlur = 2;
-                this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-                this.ctx.shadowBlur = 0;
-            } else {
-                this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+
+            // Near stars
+            for (let i = 0; i < nearArr.length; i += stepNear) { const star = nearArr[i];
+                const screenX = star.x - this.camera.x * 0.4;
+                const screenY = star.y - this.camera.y * 0.4;
+
+                const wrappedX = ((screenX + 3000) % 6000) - 3000;
+                const wrappedY = ((screenY + 3000) % 6000) - 3000;
+
+                this.ctx.globalAlpha = star.brightness;
+                this.ctx.fillStyle = star.color || '#ffffff';
+
+                if (star.size > 1 && q === 'high') {
+                    this.ctx.shadowColor = '#ffffff';
+                    this.ctx.shadowBlur = 2;
+                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+                    this.ctx.shadowBlur = 0;
+                } else {
+                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+                }
             }
+        } finally {
+            this.ctx.restore();
         }
-        
-        this.ctx.globalAlpha = 1;
     }
     
     /**
@@ -1596,26 +1945,168 @@ export class RenderSystem {
             if ((planet.x + pad) < vx0 || (planet.x - pad) > vx1 || (planet.y + pad) < vy0 || (planet.y - pad) > vy1) {
                 continue;
             }
-            // Renderer-agnostic readiness and async prep
-            const ready = (typeof this.planetRenderer.isReady === 'function')
-                ? this.planetRenderer.isReady(planet)
-                : (this.planetRenderer.planetCache?.has(planet.name) || false);
-            if (!ready) {
-                if (!this._pendingPlanets.has(planet.name)) {
-                    this._pendingPlanets.add(planet.name);
-                    setTimeout(() => {
+            let drewPlanet = false;
+            // QA Terra animated sprite (takes precedence), then static sprite (both OFF by default)
+            try {
+                const terraAnimOn = this._terraAnimEnabled();
+                const terraStaticOn = this._terraSpriteEnabled();
+                if (planet.name === 'Terra Nova' && (terraAnimOn || terraStaticOn)) {
+                    if (terraAnimOn && this._terraAnim && this._terraAnim.ready && Array.isArray(this._terraAnim.frames) && this._terraAnim.frames.length > 0) {
+                        const A = this._terraAnim;
+                        if (!A.t0) A.t0 = performance.now ? performance.now() : Date.now();
+                        const nowTs = performance.now ? performance.now() : Date.now();
+                        const idx = Math.floor(((nowTs - A.t0) / (1000 / Math.max(1, A.fps)))) % A.frames.length;
+                        const frame = A.frames[idx];
+                        const dw = A.w, dh = A.h;
+                        this.ctx.save();
+                        try { this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        this.ctx.drawImage(frame, planet.x - dw/2, planet.y - dh/2);
+                        this.ctx.restore();
+                        drewPlanet = true;
+                    } else if (terraStaticOn && this._terraSprite && this._terraSprite.ready) {
+                        const dw = this._terraSprite.w, dh = this._terraSprite.h;
+                        this.ctx.save();
+                        try { this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        this.ctx.drawImage(this._terraSprite.canvas, planet.x - dw/2, planet.y - dh/2);
+                        this.ctx.restore();
+                        if (!this._terraSpriteDrawnLogged) { try { console.log('[TerraSprite] drawing cached sprite'); } catch(_) {} this._terraSpriteDrawnLogged = true; }
+                        // Optional QA badge
                         try {
-                            if (typeof this.planetRenderer.prepareAsync === 'function') {
-                                this.planetRenderer.prepareAsync(planet);
-                            } else {
-                                this.planetRenderer.generateProceduralPlanet(planet);
+                            const g = (typeof window !== 'undefined') ? window : globalThis;
+                            if (g && g.SHOW_PLANET_SPRITE_BADGE) {
+                                this.ctx.save();
+                                this.ctx.fillStyle = '#0ff';
+                                this.ctx.font = '10px "JetBrains Mono", monospace';
+                                this.ctx.textAlign = 'center';
+                                this.ctx.fillText('SP', planet.x, planet.y - planet.radius - 6);
+                                this.ctx.restore();
                             }
-                        } finally { this._pendingPlanets.delete(planet.name); }
-                    }, 0);
+                        } catch(_) {}
+                        // Name/distance overlays still run below; skip procedural draw for Terra
+                        drewPlanet = true;
+                    } else {
+                        if (terraAnimOn && !this._terraAnim.started) {
+                            this._terraAnim.started = true;
+                            try { console.log('[TerraAnim] first in-view prep start'); } catch(_) {}
+                            try { this._prepTerraAnim(planet.radius); } catch(_) {}
+                        }
+                        if (terraStaticOn && !this._terraSprite.started) {
+                            this._terraSprite.started = true;
+                            try { console.log('[TerraSprite] first in-view prep start'); } catch(_) {}
+                            try { this._prepTerraSprite(planet.radius); } catch(_) {}
+                        }
+                    }
                 }
-                continue; // skip drawing until ready
+            } catch(_) {}
+
+            // QA Crimson animated/static sprite swap (OFF by default; enable via toggle/query)
+            if (!drewPlanet) try {
+                const crimsonAnimOn = this._crimsonAnimEnabled();
+                const crimsonStaticOn = this._crimsonSpriteEnabled();
+                if (planet.name === 'Crimson Moon' && (crimsonAnimOn || crimsonStaticOn)) {
+                    if (crimsonAnimOn && this._crimsonAnim && this._crimsonAnim.ready && Array.isArray(this._crimsonAnim.frames) && this._crimsonAnim.frames.length > 0) {
+                        const A = this._crimsonAnim;
+                        if (!A.t0) A.t0 = performance.now ? performance.now() : Date.now();
+                        const nowTs = performance.now ? performance.now() : Date.now();
+                        const idx = Math.floor(((nowTs - A.t0) / (1000 / Math.max(1, A.fps)))) % A.frames.length;
+                        const frame = A.frames[idx];
+                        const dw = A.w, dh = A.h;
+                        this.ctx.save();
+                        try { this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        this.ctx.drawImage(frame, planet.x - dw/2, planet.y - dh/2);
+                        this.ctx.restore();
+                        drewPlanet = true;
+                    } else if (crimsonStaticOn && this._crimsonSprite && this._crimsonSprite.ready) {
+                        const dw = this._crimsonSprite.w, dh = this._crimsonSprite.h;
+                        this.ctx.save();
+                        try { this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        this.ctx.drawImage(this._crimsonSprite.canvas, planet.x - dw/2, planet.y - dh/2);
+                        this.ctx.restore();
+                        if (!this._crimsonSpriteDrawnLogged) { try { console.log('[CrimsonSprite] drawing cached sprite'); } catch(_) {} this._crimsonSpriteDrawnLogged = true; }
+                        try {
+                            const g = (typeof window !== 'undefined') ? window : globalThis;
+                            if (g && g.SHOW_PLANET_SPRITE_BADGE) {
+                                this.ctx.save();
+                                this.ctx.fillStyle = '#0ff';
+                                this.ctx.font = '10px "JetBrains Mono", monospace';
+                                this.ctx.textAlign = 'center';
+                                this.ctx.fillText('SP', planet.x, planet.y - planet.radius - 6);
+                                this.ctx.restore();
+                            }
+                        } catch(_) {}
+                        drewPlanet = true;
+                    } else {
+                        if (crimsonAnimOn && !this._crimsonAnim.started) {
+                            this._crimsonAnim.started = true;
+                            try { console.log('[CrimsonAnim] first in-view prep start'); } catch(_) {}
+                            try { this._prepCrimsonAnim(planet.radius); } catch(_) {}
+                        }
+                        if (crimsonStaticOn && !this._crimsonSprite.started) {
+                            this._crimsonSprite.started = true;
+                            try { console.log('[CrimsonSprite] first in-view prep start'); } catch(_) {}
+                            try { this._prepCrimsonSprite(planet.radius); } catch(_) {}
+                        }
+                    }
+                }
+            } catch(_) {}
+            // QA Ice World static sprite swap (OFF by default)
+            if (!drewPlanet) try {
+                const iceStaticOn = this._iceSpriteEnabled();
+                if (planet.name === 'Ice World' && iceStaticOn) {
+                    if (this._iceSprite && this._iceSprite.ready) {
+                        const dw = this._iceSprite.w, dh = this._iceSprite.h;
+                        this.ctx.save();
+                        try { this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        this.ctx.drawImage(this._iceSprite.canvas, planet.x - dw/2, planet.y - dh/2);
+                        this.ctx.restore();
+                        if (!this._iceSpriteDrawnLogged) { try { console.log('[IceSprite] drawing cached sprite'); } catch(_) {} this._iceSpriteDrawnLogged = true; }
+                        drewPlanet = true;
+                    } else if (!this._iceSprite.started) {
+                        this._iceSprite.started = true;
+                        this._prepIceSprite(planet.radius);
+                    }
+                }
+            } catch(_) {}
+            // QA Mining Station static sprite swap (OFF by default)
+            if (!drewPlanet) try {
+                const miningStaticOn = this._miningSpriteEnabled();
+                if (planet.name === 'Mining Station' && miningStaticOn) {
+                    if (this._miningSprite && this._miningSprite.ready) {
+                        const dw = this._miningSprite.w, dh = this._miningSprite.h;
+                        this.ctx.save();
+                        try { this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+                        this.ctx.drawImage(this._miningSprite.canvas, planet.x - dw/2, planet.y - dh/2);
+                        this.ctx.restore();
+                        if (!this._miningSpriteDrawnLogged) { try { console.log('[MiningSprite] drawing cached sprite'); } catch(_) {} this._miningSpriteDrawnLogged = true; }
+                        drewPlanet = true;
+                    } else if (!this._miningSprite.started) {
+                        this._miningSprite.started = true;
+                        this._prepMiningSprite(planet.radius);
+                    }
+                }
+            } catch(_) {}
+            if (!drewPlanet) {
+                // Renderer-agnostic readiness and async prep
+                const ready = (typeof this.planetRenderer.isReady === 'function')
+                    ? this.planetRenderer.isReady(planet)
+                    : (this.planetRenderer.planetCache?.has(planet.name) || false);
+                if (!ready) {
+                    if (!this._pendingPlanets.has(planet.name)) {
+                        this._pendingPlanets.add(planet.name);
+                        setTimeout(() => {
+                            try {
+                                if (typeof this.planetRenderer.prepareAsync === 'function') {
+                                    this.planetRenderer.prepareAsync(planet);
+                                } else if (typeof this.planetRenderer.generateProceduralPlanet === 'function') {
+                                    this.planetRenderer.generateProceduralPlanet(planet);
+                                }
+                            } finally { this._pendingPlanets.delete(planet.name); }
+                        }, 0);
+                    }
+                    continue; // skip drawing until ready
+                }
+                this.planetRenderer.renderPlanet(this.ctx, planet, Date.now());
             }
-            this.planetRenderer.renderPlanet(this.ctx, planet, Date.now());
             
             // Planet name (skip in boot ramp; skip on heavy frames; avoid blur unless high quality)
             this.ctx.save();
@@ -1737,24 +2228,31 @@ export class RenderSystem {
                 this.ctx.arc(pickup.x, pickup.y, coreR, 0, Math.PI * 2);
                 this.ctx.fill();
             } else {
-                // Glow effect — reduced size (≈1/3), plus subtle glitter
-                const glowGradient = this.ctx.createRadialGradient(
-                    pickup.x, pickup.y, 0,
-                    pickup.x, pickup.y, (pickup.type === 'ore' ? (ORE.GLOW_RADIUS||5) : (CRED.GLOW_RADIUS||5))
-                );
-                if (pickup.type === 'ore') {
-                    glowGradient.addColorStop(0, 'rgba(200, 200, 200, 0.8)');
-                    glowGradient.addColorStop(1, 'transparent');
-                } else {
-                    glowGradient.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
-                    glowGradient.addColorStop(1, 'transparent');
+                // Glow effect — use cached gradient centered at origin
+                const glowR = pickup.type === 'ore' ? (ORE.GLOW_RADIUS||5) : (CRED.GLOW_RADIUS||5);
+                const gradKey = pickup.type + '_' + glowR;
+                let glowGradient = this._pickupGradients.get(gradKey);
+                if (!glowGradient) {
+                    // Create gradient centered at origin (reusable via translate)
+                    glowGradient = this.ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+                    if (pickup.type === 'ore') {
+                        glowGradient.addColorStop(0, 'rgba(200, 200, 200, 0.8)');
+                        glowGradient.addColorStop(1, 'transparent');
+                    } else {
+                        glowGradient.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
+                        glowGradient.addColorStop(1, 'transparent');
+                    }
+                    this._pickupGradients.set(gradKey, glowGradient);
                 }
+                // Translate to pickup position and draw with cached gradient
+                this.ctx.save();
+                this.ctx.translate(pickup.x, pickup.y);
                 this.ctx.globalAlpha = pulse;
                 this.ctx.fillStyle = glowGradient;
                 this.ctx.beginPath();
-                const glowR = pickup.type === 'ore' ? (ORE.GLOW_RADIUS||5) : (CRED.GLOW_RADIUS||5);
-                this.ctx.arc(pickup.x, pickup.y, glowR, 0, Math.PI * 2);
+                this.ctx.arc(0, 0, glowR, 0, Math.PI * 2);
                 this.ctx.fill();
+                this.ctx.restore();
                 // Core
                 this.ctx.globalAlpha = 1;
                 this.ctx.fillStyle = pickup.type === 'ore' ? '#dddddd' : '#ffd700';
@@ -1838,12 +2336,23 @@ export class RenderSystem {
                     // Solid, cheaper fallback
                     this.ctx.fillStyle = isActive ? 'rgba(255,180,90,0.6)' : 'rgba(255,160,80,0.35)';
                 }
-                this.ctx.beginPath();
-                this.ctx.moveTo(-len, 0);
-                this.ctx.lineTo(0, -halfW);
-                this.ctx.lineTo(0, halfW);
-                this.ctx.closePath();
-                this.ctx.fill();
+                // Draw plumes using per-sprite anchors when available (keeps vector and sprite FX aligned)
+                const npcSpriteId = npc.spriteId || typeToSpriteId[npc.type] || 'ships/trader_0';
+                const anchorsV = THRUSTER_ANCHORS[npcSpriteId] || [ { x: -1.0, y: 0 } ];
+                const thinV = (npcSpriteId === 'ships/freighter_1' || npcSpriteId === 'ships/freighter_0') ? 0.65 : 1.0;
+                for (const a of anchorsV) {
+                    this.ctx.save();
+                    try {
+                        // Translate to anchor in local ship space; vector path may already be scaled
+                        this.ctx.translate(a.x * npc.size, a.y * npc.size);
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(-len, 0);
+                        this.ctx.lineTo(0, -halfW * thinV);
+                        this.ctx.lineTo(0, halfW * thinV);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                    } finally { this.ctx.restore(); }
+                }
                 // Optional sprite-based flame overlay if effects atlas is available (NPC overlay remains opt-in)
                 if (state.renderSettings && state.renderSettings.useEffectsSprites && state.renderSettings.useEffectsSpritesNPC) {
                     try {
@@ -1852,12 +2361,18 @@ export class RenderSystem {
                             const baseTarget = Math.max(10, npc.size * 1.2) * this.sizeMultiplier;
                             const typeScale = this.getTypeScale(npc.type) || 1.4;
                             const outerComp = canUseSprites ? 1 : (typeScale * this.sizeMultiplier);
-                            this.thrusterFX.draw(this.ctx, effects, this.quality, {
-                                offsetX: -npc.size,
-                                offsetY: 0,
-                                baseTarget,
-                                outerScaleComp: outerComp
-                            });
+                            // Use per-sprite anchors when available, else default center plume
+                            const anchors = THRUSTER_ANCHORS[npcSpriteId] || [ { x: -1.0, y: 0 } ];
+                            const thin = (npcSpriteId === 'ships/freighter_1' || npcSpriteId === 'ships/freighter_0') ? 0.65 : 1.0;
+                            for (const a of anchors) {
+                                this.thrusterFX.draw(this.ctx, effects, this.quality, {
+                                    offsetX: (a.x * npc.size),
+                                    offsetY: (a.y * npc.size),
+                                    baseTarget,
+                                    outerScaleComp: outerComp,
+                                    thicknessFactor: thin
+                                });
+                            }
                         }
                     } catch(_) {}
                 }
@@ -1965,7 +2480,10 @@ export class RenderSystem {
                         'ships/pirate_0': 'ships/raider_0',
                         'ships/interceptor_0': 'ships/raider_0',
                         'ships/patrol_0': 'ships/trader_0',
+                        'ships/patrol_1': 'ships/trader_0',
                         'ships/freighter_0': 'ships/trader_0',
+                        'ships/freighter_1': 'ships/trader_0',
+                        'ships/trader_1': 'ships/trader_0',
                         'ships/shuttle_0': 'ships/trader_0'
                     };
                     const alt = alias[spriteId];
@@ -2189,45 +2707,51 @@ export class RenderSystem {
         for (let proj of projectiles) {
             // Frustum cull projectiles outside the viewport with margin
             if (proj.x < viewLeft || proj.x > viewRight || proj.y < viewTop || proj.y > viewBottom) continue;
-            // Trail effect
-            let seg = Math.max(3, Math.min(12, proj.trailLen || 5));
-            const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
-            if (this.quality === 'low' || heavy) seg = Math.min(seg, 5);
-            const trailGradient = this.ctx.createLinearGradient(
-                proj.x - proj.vx * seg, proj.y - proj.vy * seg,
-                proj.x, proj.y
-            );
-            
-            // Color based on type
-            let color = '#ffff00';
-            if (proj.type === 'plasma') {
-                color = '#00ffff';
-            } else if (proj.type === 'rapid') {
-                color = '#ff8800';
-            } else if (proj.type === 'mining') {
-                color = '#888888';
+
+            // Wrap each projectile in save/restore to prevent state leaks
+            this.ctx.save();
+            try {
+                // Trail effect
+                let seg = Math.max(3, Math.min(12, proj.trailLen || 5));
+                const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
+                if (this.quality === 'low' || heavy) seg = Math.min(seg, 5);
+                const trailGradient = this.ctx.createLinearGradient(
+                    proj.x - proj.vx * seg, proj.y - proj.vy * seg,
+                    proj.x, proj.y
+                );
+
+                // Color based on type
+                let color = '#ffff00';
+                if (proj.type === 'plasma') {
+                    color = '#00ffff';
+                } else if (proj.type === 'rapid') {
+                    color = '#ff8800';
+                } else if (proj.type === 'mining') {
+                    color = '#888888';
+                }
+
+                trailGradient.addColorStop(0, 'transparent');
+                trailGradient.addColorStop(1, color);
+
+                this.ctx.strokeStyle = trailGradient;
+                this.ctx.lineWidth = Math.max(1.2, Math.min(heavy ? 3 : 4, proj.trailWidth || 3));
+                this.ctx.beginPath();
+                this.ctx.moveTo(proj.x - proj.vx * seg, proj.y - proj.vy * seg);
+                this.ctx.lineTo(proj.x, proj.y);
+                this.ctx.stroke();
+
+                // Core with glow
+                if (this.quality !== 'low') {
+                    this.ctx.shadowColor = color;
+                    this.ctx.shadowBlur = 5;
+                }
+                this.ctx.fillStyle = color;
+                this.ctx.beginPath();
+                this.ctx.arc(proj.x, proj.y, proj.type === 'plasma' ? 4 : 2, 0, Math.PI * 2);
+                this.ctx.fill();
+            } finally {
+                this.ctx.restore();
             }
-            
-            trailGradient.addColorStop(0, 'transparent');
-            trailGradient.addColorStop(1, color);
-            
-            this.ctx.strokeStyle = trailGradient;
-            this.ctx.lineWidth = Math.max(1.2, Math.min(heavy ? 3 : 4, proj.trailWidth || 3));
-            this.ctx.beginPath();
-            this.ctx.moveTo(proj.x - proj.vx * seg, proj.y - proj.vy * seg);
-            this.ctx.lineTo(proj.x, proj.y);
-            this.ctx.stroke();
-            
-            // Core with glow
-            if (this.quality !== 'low') {
-                this.ctx.shadowColor = color;
-                this.ctx.shadowBlur = 5;
-            }
-            this.ctx.fillStyle = color;
-            this.ctx.beginPath();
-            this.ctx.arc(proj.x, proj.y, proj.type === 'plasma' ? 4 : 2, 0, Math.PI * 2);
-            this.ctx.fill();
-            this.ctx.shadowBlur = 0;
         }
     }
     
@@ -2279,12 +2803,23 @@ export class RenderSystem {
                 thrustGradient.addColorStop(1, `rgba(255, 255, 255, ${mult * 1.5 * flicker})`);
                 
                 this.ctx.fillStyle = thrustGradient;
-                this.ctx.beginPath();
-                this.ctx.moveTo(-ship.size - 15 - Math.random() * 7, 0);
-                this.ctx.lineTo(-ship.size, -4);
-                this.ctx.lineTo(-ship.size, 4);
-                this.ctx.closePath();
-                this.ctx.fill();
+                // Use per-sprite anchors (Y) for vector thrust wedges to match sprite FX
+                const classMapV = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_1', trader:'ships/trader_1', patrol:'ships/patrol_1', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
+                const playerSpriteIdV = state.ship.spriteId || classMapV[state.ship.class] || 'ships/trader_1';
+                const anchorsPV = THRUSTER_ANCHORS[playerSpriteIdV] || [ { x: -1.0, y: 0 } ];
+                for (const a of anchorsPV) {
+                    this.ctx.save();
+                    try {
+                        // Only Y offset needed; X is already anchored at -ship.size in the path below
+                        if (a.y) this.ctx.translate(0, a.y * ship.size);
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(-ship.size - 15 - Math.random() * 7, 0);
+                        this.ctx.lineTo(-ship.size, -4);
+                        this.ctx.lineTo(-ship.size, 4);
+                        this.ctx.closePath();
+                        this.ctx.fill();
+                    } finally { this.ctx.restore(); }
+                }
             }
         }
         
@@ -2310,7 +2845,7 @@ export class RenderSystem {
         const assets = this.stateManager.state.assets;
         if (rs && rs.useSprites && assets && assets.ready) {
             // Map ship class to sprite id
-            const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_0', trader:'ships/trader_0', patrol:'ships/patrol_1', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
+            const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_1', trader:'ships/trader_1', patrol:'ships/patrol_1', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
             const spriteId = state.ship.spriteId || classMap[state.ship.class] || 'ships/trader_0';
             const has = !!(assets.sprites && assets.sprites[spriteId]);
             this._dbgLog('player-try', '[RenderSystem] Player try', state.ship.class, '->', spriteId, 'hasPNG', has);
@@ -2345,7 +2880,10 @@ export class RenderSystem {
                         'ships/pirate_0': 'ships/raider_0',
                         'ships/interceptor_0': 'ships/raider_0',
                         'ships/patrol_0': 'ships/trader_0',
+                        'ships/patrol_1': 'ships/trader_0',
                         'ships/freighter_0': 'ships/trader_0',
+                        'ships/freighter_1': 'ships/trader_0',
+                        'ships/trader_1': 'ships/trader_0',
                         'ships/shuttle_0': 'ships/trader_0'
                     };
                     const alt = alias[spriteId];
@@ -2445,13 +2983,21 @@ export class RenderSystem {
                     // Shorter plume per feedback (~half previous length)
                     const baseTarget = Math.max(20, ship.size * 2.2 * this.sizeMultiplier + 8);
                     const outerComp = spritesOnPlayer ? 1 : (1.6 * this.sizeMultiplier);
-                    this.thrusterFX.draw(this.ctx, effects, this.quality, {
-                        offsetX: -ship.size,
-                        offsetY: 0,
-                        baseTarget,
-                        outerScaleComp: outerComp,
-                        alignFactor: 0.25
-                    });
+                    // Determine per-sprite anchors (supports twin nacelles on freighter_1)
+                    const classMap = { interceptor:'ships/interceptor_0', freighter:'ships/freighter_1', trader:'ships/trader_1', patrol:'ships/patrol_1', pirate:'ships/pirate_0', shuttle:'ships/shuttle_0' };
+                    const playerSpriteId = state.ship.spriteId || classMap[state.ship.class] || 'ships/trader_1';
+                    const anchors = THRUSTER_ANCHORS[playerSpriteId] || [ { x: -1.0, y: 0 } ];
+                    const thin = (playerSpriteId === 'ships/freighter_1' || playerSpriteId === 'ships/freighter_0') ? 0.65 : 1.0;
+                    for (const a of anchors) {
+                        this.thrusterFX.draw(this.ctx, effects, this.quality, {
+                            offsetX: (a.x * ship.size),
+                            offsetY: (a.y * ship.size),
+                            baseTarget,
+                            outerScaleComp: outerComp,
+                            alignFactor: 0.25,
+                            thicknessFactor: thin
+                        });
+                    }
                 } catch(_) {}
                 // Add a thin cyan beam for unmistakable FX ON difference (independent of atlas)
                 this.ctx.save();
@@ -2560,8 +3106,9 @@ export class RenderSystem {
         const warpEffects = state.warpEffects || [];
         
         for (let effect of warpEffects) {
+            this.ctx.save();
             const progress = effect.lifetime / effect.maxLifetime;
-            
+
             if (effect.type === 'arrive') {
                 // Arrival flash
                 const radius = 5 + (60 * (1 - progress));
@@ -2673,9 +3220,10 @@ export class RenderSystem {
                     this.ctx.stroke();
                 }
             }
+            this.ctx.restore();
         }
     }
-    
+
     /**
      * Render minimap
      */
@@ -2713,6 +3261,28 @@ export class RenderSystem {
             this.minimapCtx.setTransform(dpr,0,0,dpr,0,0);
         } catch(_) {}
         
+        // In-canvas backdrop: match TargetCam's centered gradient + crosshair to avoid CSS drift
+        try {
+            this.minimapCtx.save();
+            // Draw in CSS pixels at center
+            this.minimapCtx.translate(centerX, centerY);
+            const rBack = Math.min(w, h) * 0.5;
+            const g = this.minimapCtx.createRadialGradient(0, 0, 0, 0, 0, rBack);
+            g.addColorStop(0.0, 'rgba(0, 180, 255, 0.14)');
+            g.addColorStop(0.35, 'rgba(0, 130, 255, 0.08)');
+            g.addColorStop(0.65, 'rgba(0, 0, 0, 0.00)');
+            g.addColorStop(1.0, 'rgba(0, 0, 0, 0.85)');
+            this.minimapCtx.globalAlpha = 1;
+            this.minimapCtx.fillStyle = g;
+            this.minimapCtx.fillRect(-w/2, -h/2, w, h);
+            // Crosshair lines
+            this.minimapCtx.strokeStyle = 'rgba(170, 238, 255, 0.3)';
+            this.minimapCtx.lineWidth = 1;
+            this.minimapCtx.beginPath(); this.minimapCtx.moveTo(-w/2, 0); this.minimapCtx.lineTo(w/2, 0); this.minimapCtx.stroke();
+            this.minimapCtx.beginPath(); this.minimapCtx.moveTo(0, -h/2); this.minimapCtx.lineTo(0, h/2); this.minimapCtx.stroke();
+            this.minimapCtx.restore();
+        } catch(_) {}
+
         // Range circles gated by radar level (featureless at level 0)
         const radarLevel = state.ship?.radarLevel || 0;
         if (radarLevel >= 1) {
@@ -2731,6 +3301,7 @@ export class RenderSystem {
         const planets = state.planets || [];
         if (radarLevel >= 1) {
             // Basic separation: planets as slightly larger dots (still white at lvl1)
+            this.minimapCtx.save();
             this.minimapCtx.fillStyle = '#ffffff';
             this.minimapCtx.shadowColor = '#ffffff';
             this.minimapCtx.shadowBlur = radarLevel >= 2 ? 3 : 0;
@@ -2743,7 +3314,7 @@ export class RenderSystem {
                     this.minimapCtx.fill();
                 }
             }
-            this.minimapCtx.shadowBlur = 0;
+            this.minimapCtx.restore();
         }
 
         // NPCs
@@ -2804,16 +3375,27 @@ export class RenderSystem {
             const w = wDev / dpr;
             const h = hDev / dpr;
             this.minimapCtx.setTransform(1,0,0,1,0,0);
-            // Clear to transparent in device pixels, then overlay static
+            // Clear to transparent in device pixels, then draw backdrop
             this.minimapCtx.clearRect(0, 0, wDev, hDev);
             // Switch to CSS pixel coordinates for overlay shapes
             this.minimapCtx.setTransform(dpr,0,0,dpr,0,0);
-            // Faint range ring so panel looks active during ramp
+            // In-canvas gradient + crosshair (parity with TargetCam)
+            const cx = w * 0.5, cy = h * 0.5; const rBack = Math.min(w,h) * 0.5;
             try {
-                const cx = w * 0.5, cy = h * 0.5; const r = Math.min(w,h) * 0.45;
-                this.minimapCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+                this.minimapCtx.save();
+                this.minimapCtx.translate(cx, cy);
+                const grd = this.minimapCtx.createRadialGradient(0,0,0,0,0,rBack);
+                grd.addColorStop(0.0, 'rgba(0, 180, 255, 0.14)');
+                grd.addColorStop(0.35, 'rgba(0, 130, 255, 0.08)');
+                grd.addColorStop(0.65, 'rgba(0, 0, 0, 0.00)');
+                grd.addColorStop(1.0, 'rgba(0, 0, 0, 0.85)');
+                this.minimapCtx.fillStyle = grd;
+                this.minimapCtx.fillRect(-w/2, -h/2, w, h);
+                this.minimapCtx.strokeStyle = 'rgba(170, 238, 255, 0.3)';
                 this.minimapCtx.lineWidth = 1;
-                this.minimapCtx.beginPath(); this.minimapCtx.arc(cx, cy, r, 0, Math.PI*2); this.minimapCtx.stroke();
+                this.minimapCtx.beginPath(); this.minimapCtx.moveTo(-w/2, 0); this.minimapCtx.lineTo(w/2, 0); this.minimapCtx.stroke();
+                this.minimapCtx.beginPath(); this.minimapCtx.moveTo(0, -h/2); this.minimapCtx.lineTo(0, h/2); this.minimapCtx.stroke();
+                this.minimapCtx.restore();
             } catch(_) {}
             // Optional static overlay (can be disabled via window.MINIMAP_STATIC=false or UI_PANEL_STATIC=false)
             const g = (typeof window !== 'undefined') ? window : globalThis;

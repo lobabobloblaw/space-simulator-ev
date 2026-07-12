@@ -56,7 +56,7 @@ export class WeaponSystem {
         
         // Combat events
         this.eventBus.on(GameEvents.PHYSICS_COLLISION, this.handleCollision.bind(this));
-        this.eventBus.on(GameEvents.ENTITY_DESTROYED, this.handleEntityDestroyed);
+        this.eventBus.on(GameEvents.NPC_DESTROYED, this.handleEntityDestroyed);
     }
     
     /**
@@ -133,6 +133,7 @@ export class WeaponSystem {
      */
     fireProjectile(shooter, angle, isPlayer, weapon) {
         if (!shooter || !weapon) return;
+        if (!Number.isFinite(shooter.x) || !Number.isFinite(shooter.y)) return;
         
         // Apply weapon-specific spread (degrees)
         // Base spread per-weapon (degrees)
@@ -276,6 +277,8 @@ export class WeaponSystem {
             if (npcShips) {
                 for (let npc of npcShips) {
                     if (proj.shooter === npc) continue;
+                    // Skip faction allies for NPC projectiles (M3: prevent friendly fire)
+                    if (!proj.isPlayer && proj.shooter && proj.shooter.behavior === npc.behavior) continue;
                     const r2 = (npc.size || 0) * (npc.size || 0);
                     if (MathUtils.distanceSquared(proj.x, proj.y, npc.x, npc.y) < r2) {
                         this.handleProjectileHitNPC(proj, npc, explosions);
@@ -473,6 +476,9 @@ export class WeaponSystem {
             return keys[checkKey] || keys['Key' + checkKey.toUpperCase()];
         };
         
+        // Block firing while landed (H9)
+        if (ship.isLanded) return;
+
         // Fire weapon
         if (hasKey('f') && ship.weaponCooldown <= 0 && ship.weapons && ship.weapons.length > 0) {
             const weapon = ship.weapons[ship.currentWeapon];
@@ -648,7 +654,7 @@ export class WeaponSystem {
         this.eventBus.off(GameEvents.WEAPON_FIRE, this.handleWeaponFire);
         this.eventBus.off(GameEvents.INPUT_SWITCH_WEAPON, this.handleWeaponSwitch);
         this.eventBus.off(GameEvents.PHYSICS_COLLISION, this.handleCollision);
-        this.eventBus.off(GameEvents.ENTITY_DESTROYED, this.handleEntityDestroyed);
+        this.eventBus.off(GameEvents.NPC_DESTROYED, this.handleEntityDestroyed);
         
         console.log('[WeaponSystem] Destroyed');
     }

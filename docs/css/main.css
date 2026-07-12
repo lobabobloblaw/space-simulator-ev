@@ -8,7 +8,7 @@
     --border-subtle: #2a2a2a;
     --text-primary: #ffffff;
     --text-secondary: #888888;
-    --text-dim: #555555;
+    --text-dim: #777777; /* Changed from #555555 for WCAG AA compliance (4.5:1 contrast on dark backgrounds) */
     
     /* Accent colors - cyberpunk cyan */
     --accent-primary: #00ffff;
@@ -64,11 +64,13 @@ body {
     filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
 }
 .logo-overlay .version {
-    font-size: 10px;
+    font-size: 9px;
     color: var(--text-primary);
     letter-spacing: 0.4px;
     text-shadow: 0 0 3px rgba(0,0,0,0.6);
     opacity: 0.9;
+    white-space: nowrap;
+    overflow: hidden;
 }
 
 /* Ship destroyed: dim and desaturate HUD widgets, disable radio interaction */
@@ -699,37 +701,7 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
     contain: content;
 }
 
-/* Keep CSS crosshair + gradient only on minimap; TargetCam draws its own */
-#minimap {
-    background: radial-gradient(circle at center,
-        var(--accent-subtle) 0%,
-        transparent 40%,
-        var(--bg-black) 70%);
-}
-
-#minimap::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 100%;
-    height: 1px;
-    background: var(--accent-border);
-    transform: translate(-50%, -50%);
-    opacity: 0.3;
-}
-
-#minimap::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 1px;
-    height: 100%;
-    background: var(--accent-border);
-    transform: translate(-50%, -50%);
-    opacity: 0.3;
-}
+/* Minimap background/crosshair now drawn in-canvas for perfect centering parity */
 
 #minimapCanvas, #centerViewportCanvas {
     width: 100%;
@@ -888,8 +860,8 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
     box-shadow: 0 0 20px var(--accent-subtle);
 }
 
-/* Trading and Shop Panels */
-#tradingPanel, #shopPanel {
+/* Trading, Shop, Missions, and Shipyard Panels */
+#tradingPanel, #shopPanel, #missionsPanel, #shipyardPanel {
     display: none;
     flex: 1;
     flex-direction: column;
@@ -897,6 +869,8 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
     height: 100%;  /* Full height of content area */
     background: var(--bg-black);
     min-width: 350px;  /* Ensure readability */
+    max-height: 100%;  /* Prevent overflow */
+    overflow: hidden;
 }
 
 /* Trading Panel specific structure */
@@ -921,6 +895,11 @@ body.ui-heavy #radioViz::after { animation: scan-sweep 1.2s linear infinite; }
 /* Shop Panel adopts same header/content split as Trading */
 #shopPanel {
     padding: 0; /* mirror trading panel */
+}
+
+/* Missions and Shipyard panels use same structure */
+#missionsPanel, #shipyardPanel {
+    padding: 0;
 }
 
 /* Trading System Styles */
@@ -1318,3 +1297,288 @@ body.ship-destroyed #tutorialHint { display: none !important; }
     border-left: 3px solid var(--accent-primary);
 }
 /* No special portrait overrides in earlier look */
+
+/* ==================== ROGUELIKE OVERLAYS ==================== */
+
+/* Main Menu Overlay */
+#mainMenuOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#mainMenuOverlay.hidden {
+    display: none;
+}
+
+.menu-content {
+    text-align: center;
+    max-width: 600px;
+    padding: var(--spacing-xl);
+}
+
+.menu-title {
+    font-family: 'Orbitron', 'JetBrains Mono', monospace;
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    letter-spacing: 8px;
+    text-shadow: 0 0 20px var(--accent-glow);
+    margin-bottom: var(--spacing-sm);
+}
+
+.menu-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary);
+    letter-spacing: 2px;
+    margin-bottom: var(--spacing-xl);
+}
+
+/* Ship Carousel */
+.ship-carousel {
+    display: flex;
+    gap: var(--spacing-md);
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: var(--spacing-lg);
+}
+
+.ship-option {
+    background: var(--bg-medium);
+    border: 2px solid var(--border-subtle);
+    padding: var(--spacing-md);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 140px;
+}
+
+.ship-option:hover {
+    border-color: var(--accent-border);
+    background: var(--bg-dark);
+}
+
+.ship-option.selected {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.ship-option.locked {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ship-option.locked:hover {
+    border-color: var(--border-subtle);
+    background: var(--bg-medium);
+}
+
+.ship-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.ship-stats {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.ship-locked-label {
+    font-size: 10px;
+    color: var(--status-warning);
+    margin-top: var(--spacing-xs);
+}
+
+/* Menu Buttons */
+.menu-buttons {
+    display: flex;
+    gap: var(--spacing-md);
+    justify-content: center;
+    margin-bottom: var(--spacing-lg);
+}
+
+.menu-btn {
+    font-family: 'Orbitron', 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border: 2px solid var(--border-subtle);
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.menu-btn:hover {
+    border-color: var(--accent-border);
+    background: var(--bg-medium);
+}
+
+.menu-btn.primary {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.menu-btn.primary:hover {
+    background: var(--accent-subtle);
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+/* Meta Stats */
+.meta-stats {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    gap: var(--spacing-lg);
+    justify-content: center;
+}
+
+.meta-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.meta-stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.meta-stat-label {
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+}
+
+/* Death Screen Overlay */
+#deathScreenOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(20, 0, 0, 0.95);
+    z-index: 10000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+#deathScreenOverlay.visible {
+    display: flex;
+}
+
+.death-content {
+    text-align: center;
+    max-width: 500px;
+    padding: var(--spacing-xl);
+}
+
+.death-title {
+    font-family: 'Orbitron', 'JetBrains Mono', monospace;
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--status-danger);
+    letter-spacing: 4px;
+    text-shadow: 0 0 20px rgba(255, 0, 64, 0.5);
+    margin-bottom: var(--spacing-sm);
+}
+
+.death-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Run Summary */
+.run-summary {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--spacing-xs) 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.stat-row:last-child {
+    border-bottom: none;
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.stat-value {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Death Unlocks */
+.death-unlocks {
+    background: var(--bg-medium);
+    border: 1px solid var(--status-success);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.unlock-title {
+    font-size: 12px;
+    color: var(--status-success);
+    letter-spacing: 2px;
+    margin-bottom: var(--spacing-sm);
+}
+
+.unlock-item {
+    font-size: 14px;
+    color: var(--text-primary);
+    padding: var(--spacing-xs) 0;
+}
+
+.death-buttons {
+    display: flex;
+    gap: var(--spacing-md);
+    justify-content: center;
+}
+
+/* Responsive adjustments for overlays */
+@media (max-width: 768px) {
+    .menu-title {
+        font-size: 32px;
+        letter-spacing: 4px;
+    }
+
+    .ship-carousel {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .ship-option {
+        width: 200px;
+    }
+
+    .menu-buttons, .death-buttons {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .menu-btn {
+        width: 200px;
+    }
+}

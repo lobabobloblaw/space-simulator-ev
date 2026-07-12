@@ -1,4 +1,4 @@
-import { getEventBus } from '../core/EventBus.js';
+import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 
 /**
@@ -98,8 +98,8 @@ export default class DebugSystem {
         } else if (key === 'f6') {
             const ship = this.stateManager.state.ship;
             ship.credits = (ship.credits || 0) + 9999;
-            this.eventBus.emit('ui.update', { ship });
-            this.eventBus.emit('ui.message', { message: 'Credits +9999 (debug)', type: 'info', duration: 1200 });
+            this.eventBus.emit(GameEvents.UI_UPDATE, { ship });
+            this.eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Credits +9999 (debug)', type: 'info', duration: 1200 });
         } else if (key === 'f7') {
             this.grantWeapon('weapon2'); // Rapid
         } else if (key === 'f8') {
@@ -127,7 +127,7 @@ export default class DebugSystem {
         const next = order[(order.indexOf(current) + 1) % order.length];
         dbg.renderQuality = next;
         this.eventBus.emit('render.quality', { quality: next });
-        this.eventBus.emit('ui.message', { message: `Render quality: ${next}`, type: 'info', duration: 1000 });
+        this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Render quality: ${next}`, type: 'info', duration: 1000 });
     }
 
     handleFPS(stats) {
@@ -182,34 +182,64 @@ export default class DebugSystem {
         const spriteCulling = !!(s.renderSettings && s.renderSettings.spriteCulling);
         const useEffectsSprites = !!(s.renderSettings && s.renderSettings.useEffectsSprites);
         const spriteCount = (s.assets && s.assets.sprites) ? Object.keys(s.assets.sprites).length : 0;
-        this.panel.innerHTML = `
-            <div style="color:#0ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Debug</div>
-            <div>FPS: ${fps.current||0} (avg ${fps.average||0}) • U:${fps.update||0}ms R:${fps.render||0}ms</div>
-            <div>NPCs: ${counts.npcs} • Proj: ${counts.proj} • Ast: ${counts.ast} • Exp: ${counts.exp}</div>
-            <div>Ship: (${ship.x|0}, ${ship.y|0}) v=${speed} hp=${ship.health||0}/${ship.maxHealth||0} sh=${ship.shield||0}</div>
-            <div>Weapon: ${wepStr}</div>
-            <div>Rep: T${rep.trader||0} / PTRL${rep.patrol||0} / PIR${rep.pirate||0}</div>
-            <div>Spread: x${(dbg.spreadMult??1).toFixed(1)} ( [ / ] )</div>
-            <div>Quality: ${dbg.renderQuality||'high'} (F3 to cycle)</div>
-            <div>Sprites: ${useSprites ? 'ON' : 'OFF'} • Loaded: ${spriteCount}</div>
-            <div>Overlay: Culling ${spriteCulling?'ON':'OFF'} • FX Thrusters ${useEffectsSprites?'ON':'OFF'}</div>
-            <div>Render Lint: ${dbg.renderLint?'ON':'OFF'} • Trace ${dbg.renderLintTrace?'ON':'OFF'} • Reset ${dbg.renderLintReset?'ON':'OFF'} • Warns ${dbg.renderLintCount||0}${dbg.renderLintLastStage?(' ['+dbg.renderLintLastStage+']'):''}</div>
-            <div style="margin-top:6px; color:#aaa;">1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo</div>
-            <div style="color:#8ac;">[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj</div>
-            <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                <button data-dbg="credits" style="font-size:10px; padding:2px 6px;">+9999cr</button>
-                <button data-dbg="rapid" style="font-size:10px; padding:2px 6px;">Grant Rapid</button>
-                <button data-dbg="plasma" style="font-size:10px; padding:2px 6px;">Grant Plasma</button>
-                <button data-dbg="mining" style="font-size:10px; padding:2px 6px;">Grant Mining</button>
-                <button data-dbg="switch" style="font-size:10px; padding:2px 6px;">Next Weapon</button>
-                <button data-dbg="sprites" style="font-size:10px; padding:2px 6px;">Toggle Sprites</button>
-                <button data-dbg="culling" style="font-size:10px; padding:2px 6px;">Toggle Culling</button>
-                <button data-dbg="fx" style="font-size:10px; padding:2px 6px;">Toggle FX</button>
-                <button data-dbg="lint" style="font-size:10px; padding:2px 6px;">Lint</button>
-                <button data-dbg="linttrace" style="font-size:10px; padding:2px 6px;">Trace</button>
-                <span style="color:#faa; margin-left:auto;">G:God ${dbg.godMode?'ON':'OFF'}</span>
-            </div>
-        `;
+
+        // Build debug panel using DOM API (XSS-safe)
+        this.panel.textContent = ''; // Clear existing content
+
+        const makeDiv = (text, style = '') => {
+            const div = document.createElement('div');
+            if (style) div.style.cssText = style;
+            div.textContent = text;
+            return div;
+        };
+
+        const makeButton = (label, dbgAction) => {
+            const btn = document.createElement('button');
+            btn.textContent = label;
+            btn.setAttribute('data-dbg', dbgAction);
+            btn.style.cssText = 'font-size:10px; padding:2px 6px;';
+            return btn;
+        };
+
+        // Header
+        this.panel.appendChild(makeDiv('Debug', 'color:#0ff; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;'));
+
+        // Stats rows
+        this.panel.appendChild(makeDiv(`FPS: ${fps.current||0} (avg ${fps.average||0}) • U:${fps.update||0}ms R:${fps.render||0}ms`));
+        this.panel.appendChild(makeDiv(`NPCs: ${counts.npcs} • Proj: ${counts.proj} • Ast: ${counts.ast} • Exp: ${counts.exp}`));
+        this.panel.appendChild(makeDiv(`Ship: (${ship.x|0}, ${ship.y|0}) v=${speed} hp=${ship.health||0}/${ship.maxHealth||0} sh=${ship.shield||0}`));
+        this.panel.appendChild(makeDiv(`Weapon: ${wepStr}`));
+        this.panel.appendChild(makeDiv(`Rep: T${rep.trader||0} / PTRL${rep.patrol||0} / PIR${rep.pirate||0}`));
+        this.panel.appendChild(makeDiv(`Spread: x${(dbg.spreadMult??1).toFixed(1)} ( [ / ] )`));
+        this.panel.appendChild(makeDiv(`Quality: ${dbg.renderQuality||'high'} (F3 to cycle)`));
+        this.panel.appendChild(makeDiv(`Sprites: ${useSprites ? 'ON' : 'OFF'} • Loaded: ${spriteCount}`));
+        this.panel.appendChild(makeDiv(`Overlay: Culling ${spriteCulling?'ON':'OFF'} • FX Thrusters ${useEffectsSprites?'ON':'OFF'}`));
+        this.panel.appendChild(makeDiv(`Render Lint: ${dbg.renderLint?'ON':'OFF'} • Trace ${dbg.renderLintTrace?'ON':'OFF'} • Reset ${dbg.renderLintReset?'ON':'OFF'} • Warns ${dbg.renderLintCount||0}${dbg.renderLintLastStage?(' ['+dbg.renderLintLastStage+']'):''}`));
+
+        // Key hints
+        this.panel.appendChild(makeDiv('1:Hitboxes 2:Vectors 3:NPC Info 4:Particles 5:ProjInfo', 'margin-top:6px; color:#aaa;'));
+        this.panel.appendChild(makeDiv(`[${dbg.drawHitboxes?'x':' '}] Hitboxes • [${dbg.drawVectors?'x':' '}] Vectors • [${dbg.drawNPCInfo?'x':' '}] NPC Info • [${dbg.showProjInfo?'x':' '}] Proj`, 'color:#8ac;'));
+
+        // Button row
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;';
+        btnRow.appendChild(makeButton('+9999cr', 'credits'));
+        btnRow.appendChild(makeButton('Grant Rapid', 'rapid'));
+        btnRow.appendChild(makeButton('Grant Plasma', 'plasma'));
+        btnRow.appendChild(makeButton('Grant Mining', 'mining'));
+        btnRow.appendChild(makeButton('Next Weapon', 'switch'));
+        btnRow.appendChild(makeButton('Toggle Sprites', 'sprites'));
+        btnRow.appendChild(makeButton('Toggle Culling', 'culling'));
+        btnRow.appendChild(makeButton('Toggle FX', 'fx'));
+        btnRow.appendChild(makeButton('Lint', 'lint'));
+        btnRow.appendChild(makeButton('Trace', 'linttrace'));
+
+        const godSpan = document.createElement('span');
+        godSpan.style.cssText = 'color:#faa; margin-left:auto;';
+        godSpan.textContent = `G:God ${dbg.godMode?'ON':'OFF'}`;
+        btnRow.appendChild(godSpan);
+
+        this.panel.appendChild(btnRow);
         // Bind quick action buttons (debounced + suppress auto-refresh briefly)
         try {
             const btnC = this.panel.querySelector('button[data-dbg="credits"]');
@@ -246,21 +276,21 @@ export default class DebugSystem {
             };
             arm(btnC, async () => {
                 const ship = this.stateManager.state.ship; ship.credits = (ship.credits||0)+9999;
-                this.eventBus.emit('ui.update', { ship });
-                this.eventBus.emit('ui.message', { message: 'Credits +9999 (debug)', type: 'info', duration: 1200 });
+                this.eventBus.emit(GameEvents.UI_UPDATE, { ship });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: 'Credits +9999 (debug)', type: 'info', duration: 1200 });
                 this.renderOverlay();
             });
             arm(btnR, async () => this.grantWeapon('weapon2'));
             arm(btnP, async () => this.grantWeapon('weapon3'));
             arm(btnM, async () => this.grantWeapon('mining'));
-            arm(btnS, async () => { this.eventBus.emit('input.switchWeapon'); });
+            arm(btnS, async () => { this.eventBus.emit(GameEvents.INPUT_SWITCH_WEAPON); });
             arm(btnSpr, async () => {
                 const st = this.stateManager.state;
                 st.renderSettings = st.renderSettings || {};
                 const next = !st.renderSettings.useSprites;
                 st.renderSettings.useSprites = next;
-                this.eventBus.emit('render.useSprites', { enabled: next });
-                this.eventBus.emit('ui.message', { message: `Sprites ${next ? "ON" : "OFF"}`, type: "info", duration: 1000 });
+                this.eventBus.emit(GameEvents.RENDER_USE_SPRITES, { enabled: next });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Sprites ${next ? "ON" : "OFF"}`, type: "info", duration: 1000 });
                 this.renderOverlay();
             });
             arm(btnCull, async () => {
@@ -270,7 +300,7 @@ export default class DebugSystem {
                 st.renderSettings.spriteCulling = next;
                 try { localStorage.setItem('gt.render.spriteCulling', String(next)); } catch(_) {}
                 this.eventBus.emit('render.spriteCulling', { enabled: next });
-                this.eventBus.emit('ui.message', { message: `Sprite culling ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Sprite culling ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
                 this.renderOverlay();
             });
             arm(btnFx, async () => {
@@ -280,25 +310,25 @@ export default class DebugSystem {
                 st.renderSettings.useEffectsSprites = next;
                 try { localStorage.setItem('gt.render.useEffectsSprites', String(next)); } catch(_) {}
                 this.eventBus.emit('render.useEffectsSprites', { enabled: next });
-                this.eventBus.emit('ui.message', { message: `FX thrusters ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `FX thrusters ${next ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
                 this.renderOverlay();
             });
             arm(btnLint, async () => {
                 const st = this.stateManager.state;
                 st.debug.renderLint = !st.debug.renderLint;
-                this.eventBus.emit('ui.message', { message: `Render Lint ${st.debug.renderLint ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Render Lint ${st.debug.renderLint ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
                 this.renderOverlay();
             });
             arm(btnTrace, async () => {
                 const st = this.stateManager.state;
                 st.debug.renderLintTrace = !st.debug.renderLintTrace;
-                this.eventBus.emit('ui.message', { message: `Lint Trace ${st.debug.renderLintTrace ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Lint Trace ${st.debug.renderLintTrace ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
                 this.renderOverlay();
             });
             arm(btnReset, async () => {
                 const st = this.stateManager.state;
                 st.debug.renderLintReset = !st.debug.renderLintReset;
-                this.eventBus.emit('ui.message', { message: `Lint Auto-Reset ${st.debug.renderLintReset ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
+                this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Lint Auto-Reset ${st.debug.renderLintReset ? 'ON' : 'OFF'}`, type: 'info', duration: 900 });
                 this.renderOverlay();
             });
             
@@ -353,8 +383,8 @@ export default class DebugSystem {
             if (d < bestD) { bestD = d; best = p; }
         }
         if (best) {
-            this.eventBus.emit('ship.landed', { ship: s.ship, planet: best });
-            this.eventBus.emit('game.pause');
+            this.eventBus.emit(GameEvents.SHIP_LANDED, { ship: s.ship, planet: best });
+            this.eventBus.emit(GameEvents.GAME_PAUSE);
         }
     }
 
@@ -417,8 +447,8 @@ export default class DebugSystem {
             }
             ship.currentWeapon = ship.weapons.findIndex(w => w.type === wType);
             ship.weaponCooldown = 0;
-            this.eventBus.emit('ui.update', { ship });
-            this.eventBus.emit('ui.message', { message: `Granted ${wType.toUpperCase()} (debug)`, type: 'info', duration: 1200 });
+            this.eventBus.emit(GameEvents.UI_UPDATE, { ship });
+            this.eventBus.emit(GameEvents.UI_MESSAGE, { message: `Granted ${wType.toUpperCase()} (debug)`, type: 'info', duration: 1200 });
             this.renderOverlay();
         } catch (e) {}
     }

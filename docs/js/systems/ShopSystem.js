@@ -1,10 +1,11 @@
 /**
- * Shop System - Handles weapon and upgrade purchases at stations
+ * Shop System - Handles weapon, upgrade, and ship purchases at stations
  */
 
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
-import { shopInventory } from '../data/gameData.js';
+import { getMetaStateManager } from '../core/MetaStateManager.js';
+import { shopInventory, shipClasses } from '../data/gameData.js';
 
 export default class ShopSystem {
     constructor() {
@@ -25,6 +26,12 @@ export default class ShopSystem {
             this.buyUpgrade(data.itemId);
         });
 
+        // Handle ship purchase events
+        this.eventBus.on(GameEvents.SHIP_BUY, (data) => {
+            if (!data || !data.shipId) return;
+            this.buyShip(data.shipId);
+        });
+
         // No globals; UI emits events for actions
 
         console.log('[ShopSystem] Initialized');
@@ -33,6 +40,7 @@ export default class ShopSystem {
     buyUpgrade(itemId) {
         const state = this.stateManager.state;
         const ship = state.ship;
+        if (ship.isDestroyed) return;
         const item = this.currentShopInventory[itemId] || shopInventory[itemId];
         
         if (!item) {
@@ -146,6 +154,125 @@ export default class ShopSystem {
                 });
             }
         }
+    }
+
+    buyShip(shipId) {
+        const state = this.stateManager.state;
+        const ship = state.ship;
+        if (ship.isDestroyed) return;
+        const newShipClass = shipClasses[shipId];
+
+        if (!newShipClass) {
+            console.error('[ShopSystem] Ship class not found:', shipId);
+            return;
+        }
+
+        // Check if player is already flying this ship
+        if (ship.shipClass === shipId) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: 'You are already flying this ship!',
+                type: 'warning',
+                duration: 2000
+            });
+            return;
+        }
+
+        // Check if player can afford it
+        if (ship.credits < newShipClass.price) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Insufficient credits! Need §${newShipClass.price}`,
+                type: 'error',
+                duration: 2000
+            });
+            return;
+        }
+
+        // Check requirements
+        if (ship.kills < newShipClass.requiredKills) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Requires ${newShipClass.requiredKills} kills to purchase`,
+                type: 'error',
+                duration: 2000
+            });
+            return;
+        }
+
+        const meta = getMetaStateManager();
+        const lifetimeCredits = meta?.getStats?.()?.totalCreditsEarned || 0;
+        if (lifetimeCredits < newShipClass.requiredCredits) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Must have earned §${newShipClass.requiredCredits} total (earned: §${lifetimeCredits})`,
+                type: 'error',
+                duration: 2000
+            });
+            return;
+        }
+
+        // Save current cargo (will be transferred to new ship)
+        const currentCargo = ship.cargo || [];
+        const currentWeapons = ship.weapons || [];
+        const currentCredits = ship.credits;
+        const currentKills = ship.kills;
+        const currentMissions = ship.missions || { active: [], completed: [], available: [] };
+        const currentMissionStates = ship.missionStates || {};
+
+        // Calculate trade-in value of old ship (50% of purchase price)
+        const oldShipClass = shipClasses[ship.shipClass || 'shuttle'];
+        const tradeInValue = oldShipClass ? Math.floor(oldShipClass.price * 0.5) : 0;
+        const finalPrice = Math.max(0, newShipClass.price - tradeInValue);
+
+        if (currentCredits < finalPrice) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Insufficient credits after trade-in! Need §${finalPrice}`,
+                type: 'error',
+                duration: 2000
+            });
+            return;
+        }
+
+        // Apply new ship stats
+        ship.shipClass = shipId;
+        ship.maxSpeed = newShipClass.maxSpeed;
+        ship.thrust = newShipClass.thrust;
+        ship.turnSpeed = newShipClass.turnSpeed;
+        ship.maxHealth = newShipClass.maxHealth;
+        ship.health = newShipClass.maxHealth; // Full repair on purchase
+        ship.maxShield = newShipClass.maxShield;
+        ship.shield = newShipClass.maxShield; // Full shield on purchase
+        ship.cargoCapacity = newShipClass.cargoCapacity;
+        ship.weaponSlots = newShipClass.weaponSlots;
+        ship.size = newShipClass.size;
+        ship.width = newShipClass.width;
+        ship.color = newShipClass.color;
+
+        // Deduct final price
+        ship.credits = currentCredits - finalPrice;
+
+        // Restore persistent data
+        ship.cargo = currentCargo.slice(0, ship.cargoCapacity); // Trim if new ship has less cargo
+        ship.weapons = currentWeapons.slice(0, ship.weaponSlots); // Trim if new ship has fewer weapon slots
+        ship.kills = currentKills;
+        ship.missions = currentMissions;
+        ship.missionStates = currentMissionStates;
+
+        // Restore current weapon index if valid
+        if (ship.currentWeaponIndex >= ship.weapons.length) {
+            ship.currentWeaponIndex = Math.max(0, ship.weapons.length - 1);
+        }
+
+        // Play purchase sound
+        this.eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'buy' });
+
+        // Show success message
+        this.eventBus.emit(GameEvents.UI_MESSAGE, {
+            message: `Purchased ${newShipClass.name}! ${tradeInValue > 0 ? `(Trade-in: §${tradeInValue})` : ''}`,
+            type: 'success',
+            duration: 3000
+        });
+
+        // Update UI
+        this.eventBus.emit(GameEvents.UI_UPDATE, { ship: ship });
+        this.eventBus.emit(GameEvents.SHIP_UPGRADE, { ship: ship });
     }
 
     update(state, deltaTime) {

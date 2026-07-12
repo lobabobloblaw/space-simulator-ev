@@ -6,7 +6,40 @@
 export class ProceduralPlanetRenderer {
     constructor() {
         this.planetCache = new Map();
+        this.cacheAccessOrder = []; // Track LRU order
+        this.MAX_CACHE_SIZE = 6; // Cap at 6 planets (~270KB each = ~1.6MB max)
         this.permutation = this.generatePermutation();
+    }
+
+    /**
+     * Evict least recently used planet from cache if over limit
+     */
+    _evictIfNeeded() {
+        while (this.planetCache.size >= this.MAX_CACHE_SIZE && this.cacheAccessOrder.length > 0) {
+            const oldest = this.cacheAccessOrder.shift();
+            if (this.planetCache.has(oldest)) {
+                // Clear canvas references to help GC
+                const cache = this.planetCache.get(oldest);
+                if (cache) {
+                    cache.texture = null;
+                    cache.normalMap = null;
+                    cache.cloudMap = null;
+                }
+                this.planetCache.delete(oldest);
+                console.log(`[ProceduralPlanetRenderer] Evicted planet cache: ${oldest}`);
+            }
+        }
+    }
+
+    /**
+     * Update LRU access order when a planet is accessed
+     */
+    _touchCache(name) {
+        const idx = this.cacheAccessOrder.indexOf(name);
+        if (idx !== -1) {
+            this.cacheAccessOrder.splice(idx, 1);
+        }
+        this.cacheAccessOrder.push(name);
     }
     
     /**
@@ -181,8 +214,11 @@ export class ProceduralPlanetRenderer {
         
         // Apply spherical distortion to make it look 3D
         this.applySphericalDistortion(cache, planet, size);
-        
+
+        // LRU eviction before adding new entry
+        this._evictIfNeeded();
         this.planetCache.set(planet.name, cache);
+        this._touchCache(planet.name);
     }
     
     /**
@@ -637,7 +673,10 @@ export class ProceduralPlanetRenderer {
     renderPlanet(ctx, planet, time) {
         const cache = this.planetCache.get(planet.name);
         if (!cache) return;
-        
+
+        // Update LRU access order
+        this._touchCache(planet.name);
+
         const features = cache.features;
         
         ctx.save();
