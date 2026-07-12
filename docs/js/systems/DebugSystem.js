@@ -176,7 +176,10 @@ export default class DebugSystem {
         };
         const rep = s.reputation || { trader: 0, patrol: 0, pirate: 0 };
         const weapon = (ship.weapons && ship.weapons[ship.currentWeapon]) || null;
-        const wepStr = weapon ? `${weapon.type} (cd:${ship.weaponCooldown||0})` : 'none';
+        // weapon.type is restored verbatim from localStorage saves — escape it
+        // before interpolating into innerHTML (tampered saves could inject markup)
+        const esc = (v) => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const wepStr = weapon ? `${esc(weapon.type)} (cd:${ship.weaponCooldown||0})` : 'none';
 
         const useSprites = !!(s.renderSettings && s.renderSettings.useSprites);
         const spriteCulling = !!(s.renderSettings && s.renderSettings.spriteCulling);

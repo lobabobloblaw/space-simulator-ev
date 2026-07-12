@@ -164,6 +164,10 @@ export class StateManager {
      * Emit specific game events based on state changes
      */
     emitSpecificEvents(path, newValue, oldValue) {
+        // Only emit on actual changes; no-op writes (e.g. paused = false when
+        // already false) must not re-fire events or handlers that set state
+        // in response would recurse forever.
+        if (newValue === oldValue) return;
         switch(path) {
             case 'ship.health':
                 if (newValue < oldValue) {

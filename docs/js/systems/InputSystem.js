@@ -221,7 +221,9 @@ export class InputSystem {
         // F5 = Quick Save
         if (key === 'f5') {
             e.preventDefault();
-            this.eventBus.emit(GameEvents.GAME_SAVE);
+            // Mark as a manual save so the save system runs a full, immediate
+            // save instead of deferring it like a background autosave
+            this.eventBus.emit(GameEvents.GAME_SAVE, { reason: 'manual' });
         }
         // F9 = Quick Load
         else if (key === 'f9') {

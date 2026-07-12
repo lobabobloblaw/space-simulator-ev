@@ -1,0 +1,29 @@
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Syntax-check game modules
+        run: |
+          set -e
+          for f in $(find docs/js -name '*.js' -not -path '*/vendor/*'); do
+            cp "$f" /tmp/check.mjs
+            node --check /tmp/check.mjs || { echo "SYNTAX FAIL: $f"; exit 1; }
+          done
+      - name: Run smoke test
+        run: npm test

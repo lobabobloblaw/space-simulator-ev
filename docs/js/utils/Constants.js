@@ -174,7 +174,7 @@ export const GameConstants = {
             trader: 300
         },
         
-        PURSUIT_TIMEOUT: 300,      // Frames before giving up pursuit
+        PURSUIT_TIMEOUT: 300,      // Frames before giving up pursuit (NPCSystem pursuitTimer)
         FLEE_DISTANCE: 200,        // Distance to maintain when fleeing
         PATROL_RADIUS: 300,        // Radius of patrol patterns
         
@@ -462,7 +462,7 @@ export const GameConstants = {
         ANGLE_EPS_RAD: 0.12,        // Angle epsilon for rebuild
         HEAVY_FRAME_MS: 24,         // Consider frames > this heavy
         IDLE_LIGHT_STREAK: 6,       // Required consecutive light frames before building
-        IDLE_LIGHT_MS: 16,          // A light frame is <= this
+        IDLE_LIGHT_MS: 18,          // A light frame is <= this (must exceed ~16.7ms vsync frames or 60Hz displays never build)
         RETRY_BUILD_MS: 150         // Retry delay when skipping build
     },
 
