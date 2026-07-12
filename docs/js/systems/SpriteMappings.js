@@ -3,6 +3,8 @@
 // Primary type -> sprite id mapping
 export const typeToSpriteId = {
   pirate: 'ships/pirate_0',
+  elite_pirate: 'ships/pirate_0',
+  void_hunter: 'ships/pirate_0',
   trader: 'ships/trader_1',
   patrol: 'ships/patrol_1',
   freighter: 'ships/freighter_1',
@@ -14,6 +16,8 @@ export const typeToSpriteId = {
 // Alias mapping for placeholder/atlas coverage before dedicated art
 export const aliasSpriteForType = {
   pirate: 'ships/raider_0',
+  elite_pirate: 'ships/raider_0',
+  void_hunter: 'ships/raider_0',
   interceptor: 'ships/raider_0',
   patrol: 'ships/trader_0',
   freighter: 'ships/trader_0',

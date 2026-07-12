@@ -156,7 +156,7 @@ export const bosses = {
         // What defeating this boss unlocks
         unlocks: {
             type: 'upgrade',
-            id: 'shield_advanced'
+            id: 'shield2'   // must be a shopInventory key (see gameData.js)
         },
 
         // Dialogue

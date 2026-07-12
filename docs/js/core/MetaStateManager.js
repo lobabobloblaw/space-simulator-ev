@@ -13,7 +13,7 @@ const DEFAULT_META_STATE = {
     version: META_VERSION,
     unlocks: {
         ships: ['shuttle'],           // Starting ships available
-        upgrades: ['mining_laser']    // Upgrades that can appear in shops
+        upgrades: ['weapon1']         // shopInventory keys (weapon1 = Mining Laser)
     },
     stats: {
         totalRuns: 0,
@@ -38,13 +38,13 @@ const makeDefaultMeta = () => (typeof structuredClone === 'function'
 // All possible ship unlocks (for reference)
 export const ALL_SHIPS = ['shuttle', 'interceptor', 'corvette', 'freighter', 'gunship', 'battlecruiser'];
 
-// All possible upgrade unlocks (for reference)
+// All possible upgrade unlocks — ids are shopInventory keys (gameData.js)
 export const ALL_UPGRADES = [
-    'mining_laser', 'rapid_laser', 'plasma_cannon',
-    'shield_basic', 'shield_advanced',
-    'engine_1', 'engine_2', 'engine_3',
-    'cargo_expansion_1', 'cargo_expansion_2',
-    'radar_mk1', 'radar_mk2'
+    'weapon1', 'weapon2', 'weapon3',
+    'shield1', 'shield2',
+    'engine2', 'engine3',
+    'cargo1', 'cargo2',
+    'radar1', 'radar2'
 ];
 
 class MetaStateManager {

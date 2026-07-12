@@ -3,6 +3,7 @@ import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
 import ShipCatalog from './ShipCatalog.js';
 import { getRunSystem } from './RunSystem.js';
+import { npcTypes } from '../data/gameData.js';
 
 /**
  * SpawnSystem - Handles spawning of NPCs, asteroids, and pickups
@@ -18,70 +19,11 @@ export class SpawnSystem {
         this.spawnRadius = (GameConstants?.NPC?.SPAWN_DISTANCE_MAX ?? 1200);
         this.despawnRadius = (GameConstants?.NPC?.DESPAWN_DISTANCE ?? 3000);
         
-        // NPC types configuration
-        this.npcTypes = {
-            freighter: {
-                size: 18,
-                color: "#4488ff",
-                maxSpeed: 0.25,
-                thrust: 0.002,
-                turnSpeed: 0.008,
-                health: 80,
-                maxHealth: 80,
-                credits: 100,
-                behavior: "passive",
-                weapon: { type: "laser", damage: 5, cooldown: 30 }
-            },
-            trader: {
-                size: 12,
-                color: "#44ff88",
-                maxSpeed: 0.35,
-                thrust: 0.003,
-                turnSpeed: 0.01,
-                health: 60,
-                maxHealth: 60,
-                credits: 75,
-                behavior: "passive",
-                weapon: null
-            },
-            patrol: {
-                size: 14,
-                color: "#8888ff",
-                maxSpeed: 0.45,
-                thrust: 0.004,
-                turnSpeed: 0.012,
-                health: 100,
-                maxHealth: 100,
-                credits: 50,
-                behavior: "lawful",
-                weapon: { type: "rapid", damage: 7, cooldown: 8 }
-            },
-            pirate: {
-                size: 10,
-                color: "#ff4444",
-                maxSpeed: 0.5,
-                thrust: 0.005,
-                turnSpeed: 0.015,
-                health: 70,
-                maxHealth: 70,
-                credits: 150,
-                behavior: "aggressive",
-                weapon: { type: "plasma", damage: 15, cooldown: 25 }
-            },
-            elite_pirate: {
-                size: 14,
-                color: "#ff2222",
-                maxSpeed: 0.55,
-                thrust: 0.006,
-                turnSpeed: 0.018,
-                health: 120,
-                maxHealth: 120,
-                credits: 300,
-                behavior: "aggressive",
-                weapon: { type: "plasma", damage: 20, cooldown: 20 },
-                isElite: true
-            }
-        };
+        // NPC stat templates — cloned from the canonical gameData.npcTypes so
+        // the ShipCatalog annotations below don't mutate the shared module object
+        this.npcTypes = (typeof structuredClone === 'function')
+            ? structuredClone(npcTypes)
+            : JSON.parse(JSON.stringify(npcTypes));
         
         // Annotate templates with standardized metadata (no feel changes)
         try {
@@ -711,6 +653,8 @@ export class SpawnSystem {
                     adj.pirate = pirateWeight;
                 } else if (enemyType === 'elite_pirate') {
                     adj.elite_pirate = pirateWeight * eliteChance;
+                } else if (enemyType === 'void_hunter') {
+                    adj.void_hunter = pirateWeight * (eliteChance || 0.5);
                 } else if (enemyType === 'trader') {
                     adj.trader = (1 - pirateWeight) * 0.4;
                 } else if (enemyType === 'freighter') {
@@ -816,7 +760,7 @@ export class SpawnSystem {
                 // Always show an arrival flash at spawn so ships never blink in
                 spawnEffect = 'arrive';
             }
-        } else if (type === 'pirate' || type === 'elite_pirate') {
+        } else if (type === 'pirate' || type === 'elite_pirate' || type === 'void_hunter') {
             // Pirates/Elites spawn at edges but with varied trajectories
             const spawnAngle = Math.random() * Math.PI * 2;
             const distance = 1000 + Math.random() * 500;

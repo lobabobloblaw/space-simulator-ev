@@ -2,58 +2,83 @@
  * All game data and configuration
  */
 
+// Canonical NPC stat table — SpawnSystem clones this at construction and the
+// debug spawner reads it directly. Values are the live, balanced numbers
+// (this table previously carried a stale older design that nothing spawned).
 export const npcTypes = {
-    freighter: { 
-        color: "#8B7355", 
-        behavior: "passive",
+    freighter: {
+        size: 18,
+        color: "#4488ff",
         maxSpeed: 0.25,
         thrust: 0.002,
-        turnSpeed: 0.006,
-        size: 22,
-        width: 28,
-        credits: 800,
-        health: 150,
-        maxHealth: 150,
-        weapon: { type: "laser", damage: 3, cooldown: 40 }
-    },
-    trader: { 
-        color: "#95A5A6", 
+        turnSpeed: 0.008,
+        health: 80,
+        maxHealth: 80,
+        credits: 100,
         behavior: "passive",
+        weapon: { type: "laser", damage: 5, cooldown: 30 }
+    },
+    trader: {
+        size: 12,
+        color: "#44ff88",
+        maxSpeed: 0.35,
+        thrust: 0.003,
+        turnSpeed: 0.01,
+        health: 60,
+        maxHealth: 60,
+        credits: 75,
+        behavior: "passive",
+        weapon: null
+    },
+    patrol: {
+        size: 14,
+        color: "#8888ff",
         maxSpeed: 0.45,
         thrust: 0.004,
         turnSpeed: 0.012,
-        size: 12,
-        width: 14,
-        credits: 200,
-        health: 50,
-        maxHealth: 50,
-        weapon: null
+        health: 100,
+        maxHealth: 100,
+        credits: 50,
+        behavior: "lawful",
+        weapon: { type: "rapid", damage: 7, cooldown: 8 }
     },
-    pirate: { 
-        color: "#E74C3C", 
+    pirate: {
+        size: 10,
+        color: "#ff4444",
+        maxSpeed: 0.5,
+        thrust: 0.005,
+        turnSpeed: 0.015,
+        health: 70,
+        maxHealth: 70,
+        credits: 150,
         behavior: "aggressive",
-        maxSpeed: 0.7,
+        weapon: { type: "plasma", damage: 15, cooldown: 25 }
+    },
+    elite_pirate: {
+        size: 14,
+        color: "#ff2222",
+        maxSpeed: 0.55,
+        thrust: 0.006,
+        turnSpeed: 0.018,
+        health: 120,
+        maxHealth: 120,
+        credits: 300,
+        behavior: "aggressive",
+        weapon: { type: "plasma", damage: 20, cooldown: 20 },
+        isElite: true
+    },
+    void_hunter: {
+        size: 12,
+        color: "#a06bff",
+        maxSpeed: 0.65,
         thrust: 0.007,
         turnSpeed: 0.02,
-        size: 11,
-        width: 12,
-        credits: 150,
-        health: 80,
-        maxHealth: 80,
-        weapon: { type: "laser", damage: 10, cooldown: 18 }
-    },
-    patrol: { 
-        color: "#1E3A5F",
-        behavior: "lawful",
-        maxSpeed: 1.2,
-        thrust: 0.015,
-        turnSpeed: 0.08,
-        size: 16,
-        width: 18,
-        credits: 100,
         health: 150,
         maxHealth: 150,
-        weapon: { type: "rapid", damage: 6, cooldown: 20 }
+        credits: 400,
+        behavior: "aggressive",
+        weapon: { type: "void", damage: 12, cooldown: 24 },
+        isElite: true
     }
 };
 

@@ -360,7 +360,7 @@ class RunSystem {
         this._runStats.kills++;
 
         // Track by type
-        if (data.npc?.type === 'pirate' || data.npc?.type === 'elite_pirate') {
+        if (data.npc?.type === 'pirate' || data.npc?.type === 'elite_pirate' || data.npc?.type === 'void_hunter') {
             this._runStats.pirateKills++;
         } else if (data.npc?.type === 'trader' || data.npc?.type === 'freighter') {
             this._runStats.traderKills++;
