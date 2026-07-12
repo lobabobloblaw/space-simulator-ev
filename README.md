@@ -34,6 +34,16 @@ python3 -m http.server 8000
 # Browse to http://localhost:8000/docs/
 ```
 
+### Version Stamping (optional)
+
+Stamp the on-screen version (`GameConstants.META.VERSION`) from your current git tag/commit and date:
+
+```bash
+bash scripts/stamp_version.sh
+```
+
+This prefers `git describe --tags` and appends `+YYYY-MM-DD`. If there are no tags, it falls back to `g<shortsha>+YYYY-MM-DD`. If git is unavailable, it uses the UTC date only. The value appears in the top-left logo overlay.
+
 ## Deployment
 
 Changes pushed to the `main` branch are automatically deployed to GitHub Pages (~1–10 minutes delay).
@@ -42,6 +52,12 @@ Changes pushed to the `main` branch are automatically deployed to GitHub Pages (
 git add docs/
 git commit -m "Your changes"
 git push
+```
+
+Or use the helper script (auto-stamps version before pushing):
+
+```bash
+bash scripts/deploy.sh
 ```
 
 ## Controls
@@ -57,24 +73,41 @@ git push
 
 ## Features
 
-- Dynamic trading economy across 4 planets
-- Multiple weapon types and ship upgrades
-- NPC behaviors (pirates, traders, patrols, freighters)
-- Save/load system
-- Mission system
-- Cyberpunk UI with particle effects
-- HiDPI crispness: DPR-aware canvases and transforms
-- TargetCam: in-canvas gradient + crosshair; pixel-perfect at UI snap sizes
+- **Ship Progression**: 6 purchasable ships with distinct roles (fighter, hauler, balanced, endgame)
+- **Mission System**: 26 hand-crafted missions + infinite procedural generation
+  - Delivery/courier missions with time limits
+  - Bounty/combat contracts (2-25 kill requirements)
+  - Escort missions (VIP transport, convoy protection)
+- **Dynamic Economy**: Trading across 4 planets with price variations
+- **Combat**: Multiple weapon types, ship upgrades, NPC AI (pirates, traders, patrols)
+- **Tutorial System**: Progressive 5-stage tutorial for new players
+- **Save/Load**: Full game state persistence (F5/F9/F12)
+- **Cyberpunk UI**: Particle effects, damage flash, screen shake
+- **HiDPI Support**: DPR-aware canvases and crisp rendering
+- **TargetCam**: In-canvas gradient + crosshair, pixel-perfect alignment
 
-## Latest Updates (Session 65–66)
+## Latest Updates (Session 69 — Phase 1 MVP)
 
-- HiDPI: Canvases sized by devicePixelRatio; `withWorld/withScreen` apply DPR transforms.
-- TargetCam: moved gradient + crosshair into canvas; pixel-snapped center; backing store resync on UI snaps (80/70/60px); faint static always on.
-- Security/A11y: Added CSP meta; ARIA live region; DOM safety (removed innerHTML in landing details + trading lists).
-- Assets: LRU cap for atlas frame canvases; player-only sprite override support.
-- UI: Top-left logo overlay with version tag.
+**Major Content Expansion**:
+- **26 Missions**: Added 10 delivery, 8 bounty, 5 escort missions + procedural generator
+- **6 Ships**: Complete ship progression from Scout Shuttle to Phoenix Battlecruiser
+- **Mission Board UI**: Accept/complete/abandon missions at any planet ([5] key)
+- **Shipyard UI**: Purchase ships with stat comparison and requirements ([6] key)
+- **Tutorial System**: Restored 5-stage progressive tutorial with helpful guidance
+- **Game Feel**: 3x screen shake intensity, enhanced damage flash overlay
 
-See `INTERNAL_DEV_DOCS/targetcam_alignment.md` and `INTERNAL_DEV_DOCS/dpr_hidpi_notes.md` for details.
+**Technical**:
+- New systems: MissionSystem.js, MissionGenerator.js
+- Extended ShopSystem.js with ship purchase logic (trade-ins, requirements)
+- Enhanced UISystem.js with mission/shipyard panels and event delegation
+- Balance: Ships have meaningful trade-offs (speed vs cargo vs combat)
+
+**Previous Sessions (65–68)**:
+- Session 68: Strategic roadmap, AAA quality review
+- Session 66-67: TargetCam alignment, HiDPI rendering, security fixes
+- Session 65: CSP, ARIA, DOM safety improvements
+
+See `SESSION_69_HANDOFF.md` for complete details and `INTERNAL_DEV_DOCS/` for architecture.
 
 Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
 

@@ -15,17 +15,19 @@ Key Changes
 Files
 - CSS: `docs/css/main.css`
   - `#centerViewport` (TargetCam): outline used; no CSS crosshair/gradient (now in-canvas).
-  - `#minimap` retains CSS crosshair/gradient.
+  - `#minimap` moved to in-canvas gradient + crosshair for perfect parity; CSS overlays removed.
   - `#centerViewportCanvas` absolute fill; no baseline spacing.
 - TargetCam: `docs/js/systems/TargetCamRenderer.js`
   - Measures parent panel CSS `getBoundingClientRect()` each frame.
   - Resizes DPR backing store if mismatch.
   - Draws radial gradient + crosshair lines in-canvas before ring/wedge.
+  - Optional diagnostic center dot: enable with `window.TC_CENTER_DOT = true`.
   - Renders static both baseline (low) and FX (higher) levels.
 - RenderSystem: `docs/js/systems/RenderSystem.js`
   - Rounds panel CSS sizes for backing stores; added ResizeObserver to re-sync on snaps.
+  - Minimap now draws its own radial gradient + crosshair in canvas using CSS-pixel center.
 
 QA Tips
 - Test at 80/70/60px by resizing and by starting the app at different window sizes.
 - If any remaining nudge appears on a specific display/DPR, log `host.getBoundingClientRect()` and `canvas.width/height` to verify perfect parity.
-
+- For quick centering checks across DPRs, set `window.TC_CENTER_DOT = true` to draw a crisp center mark inside TargetCam.

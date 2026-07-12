@@ -25,6 +25,15 @@ UI/Images
 - `window.UI_TOASTS = true` — re‑enable floating toasts (default OFF; console readout remains primary)
 - `window.RADIO_STATIC = false` — disable faint static inside the radio dial
 
+Planets (QA)
+- Terra static sprite: `localStorage.setItem('gt.useTerraSprite','true')` (persist) or `?use_terra_sprite=1` (`?terra=1`)
+- Crimson static sprite: `localStorage.setItem('gt.useCrimsonSprite','true')` or `?use_crimson_sprite=1` (`?crimson=1`)
+- Ice World static sprite: `localStorage.setItem('gt.useIceSprite','true')` or `?use_ice_sprite=1` (`?ice=1`)
+- Mining Station static sprite: `localStorage.setItem('gt.useMiningSprite','true')` or `?use_mining_sprite=1` (`?mining=1` / `?station=1`)
+- Terra anim: `localStorage.setItem('gt.useTerraAnim','true')` or `?use_terra_anim=1`
+- Crimson anim: `localStorage.setItem('gt.useCrimsonAnim','true')` or `?use_crimson_anim=1`
+- Sprite badge: `window.SHOW_PLANET_SPRITE_BADGE = true` — draws a tiny `SP` above sprite planets
+
 Renderer Spike (optional)
 - Enable WebGL spike: `?webgl=1` (URL) or `localStorage.setItem('RENDER_WEBGL','1')`
 - Disable: remove `?webgl=1` and `localStorage.removeItem('RENDER_WEBGL')`

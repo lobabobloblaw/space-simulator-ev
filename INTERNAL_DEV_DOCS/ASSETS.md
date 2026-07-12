@@ -32,3 +32,10 @@ Responsible for preparing atlases and loading sprites/effects into `state.assets
 ## Future Convenience
 
 - `AssetSystem.getFrameCanvas(id)` (proposed): provide per‑frame canvases to avoid sub‑rect handling in renderers.
+ 
+## Ship Sprite Anchors
+
+- Per-sprite thruster anchors live in `docs/js/systems/SpriteMappings.js` as `spriteThrusterAnchors`.
+- Each anchor is `{ x, y }` in local ship space, normalized to `ship.size`.
+- Renderers use these anchors for both vector thrusters and sprite-based FX overlays.
+- Current example: `ships/freighter_1` defines two nacelle plumes (`y: ±1.16`).

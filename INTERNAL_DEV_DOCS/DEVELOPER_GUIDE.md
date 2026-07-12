@@ -135,3 +135,9 @@ The legacy monolithic bundle has been removed:
 Guidance:
 - New work must use modular systems under `docs/js/systems/`.
 - If you find stale references in experimental pages or scripts, replace with the modular entry or remove entirely.
+## Ship Thruster Anchors
+
+- When a ship’s exhaust is not centered (e.g., twin nacelles), define per-sprite anchors in `SpriteMappings.spriteThrusterAnchors`.
+- Anchors are normalized `{x,y}` in ship local space; renderers multiply by `ship.size` and apply rotation.
+- Both vector thrusters and sprite FX overlays consume these anchors automatically.
+- Example: freighter (`ships/freighter_1`) uses two anchors with wider vertical separation and slightly slimmer plume thickness for clarity.

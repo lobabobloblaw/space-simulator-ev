@@ -58,6 +58,10 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 
 - ExplosionRenderer: Uses flipbook if available, otherwise synthesized puffs.
 - ThrusterFXRenderer: Optional flame overlay from effects atlas; controlled by `render.useEffectsSprites`.
+  - Per-sprite anchors: twin/offset exhaust can be authored via `spriteThrusterAnchors` in `SpriteMappings.js`.
+    - Anchors are normalized to `ship.size` in local ship space (after outer rotate).
+    - When present, both vector wedges and FX overlays use the same anchors for perfect alignment.
+    - Example: freighter (`ships/freighter_1`) uses two anchors at roughly ±1.16·size on Y for nacelle plumes.
 - Ore pickups (Session 63/64): visuals are driven by `GameConstants.EFFECTS.PICKUPS` (core/glow radii, glitter size/alpha/line width) and `PICKUP_PULSE_SPEED`. Low‑quality path draws only a tiny core. These are drawn in world space inside `withWorld()` by `renderPickups()`.
 
 ## Planets
@@ -65,9 +69,11 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 - Renderer selection is gated via `GameConstants.UI.PLANETS.MODE` (default `'procedural'`).
 - Modes:
   - `procedural`: uses `ProceduralPlanetRenderer` (noise‑based with caching).
-  - `sprites`: uses `PlanetSpriteRenderer` (draws preloaded images; falls back to a shaded disc if not ready).
+- `sprites`: uses `PlanetSpriteRenderer` (draws preloaded images; falls back to a shaded disc if not ready).
 - QA override: `window.USE_PLANET_SPRITES = true|false` forces mode at runtime.
 - Asset path convention for sprites: `assets/planets/<slug>.png` (slug = lowercased planet name with spaces → `_`).
+- Per‑planet QA sprite swaps: Terra/Crimson have guarded static/animated sprite paths OFF by default. Enable via localStorage or query flags (see `planet_sprites.md`).
+- Stability: planet sprite prep occurs off‑screen (decode + pre‑scale) and swaps only when ready; procedural draws until the cache is available.
 
 ## HiDPI/Retina Notes
 
