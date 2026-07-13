@@ -41,6 +41,8 @@ export class StateManager {
             fps: 60,
             
             // Player ship
+            // initShip() in main_eventbus_pure.js builds the authoritative boot
+            // ship (this skeleton is overwritten wholesale at startup)
             ship: {
                 x: 0,
                 y: 0,
@@ -51,7 +53,7 @@ export class StateManager {
                 maxHealth: 100,
                 shield: 0,
                 maxShield: 0,
-                credits: 1000,
+                credits: 250,
                 cargo: [],
                 weapons: [],
                 currentWeapon: 0,
@@ -255,6 +257,8 @@ export class StateManager {
             fps: 60,
 
             // Player ship
+            // initShip() in main_eventbus_pure.js builds the authoritative boot
+            // ship (this skeleton is overwritten wholesale at startup)
             ship: {
                 x: 0,
                 y: 0,
@@ -265,7 +269,7 @@ export class StateManager {
                 maxHealth: 100,
                 shield: 0,
                 maxShield: 0,
-                credits: 1000,
+                credits: 250,
                 cargo: [],
                 weapons: [],
                 currentWeapon: 0,

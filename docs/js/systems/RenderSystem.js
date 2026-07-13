@@ -1091,11 +1091,6 @@ export class RenderSystem {
                 } catch(_) {}
             }
         }
-
-        // Render touch controls if needed
-        if (window.touchControls) {
-            window.touchControls.render();
-        }
     }
 
     /**

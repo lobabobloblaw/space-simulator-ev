@@ -603,64 +603,6 @@ function setupEventHandlers() {
 }
 
 /**
- * Respawn the player ship after destruction
- */
-function respawnPlayer() {
-    const state = stateManager.state;
-    const ship = state.ship;
-    
-    // Determine spawn point: last landed planet if available, else origin
-    let spawnX = 0, spawnY = 0;
-    let planet = ship.landedPlanet || null;
-    if (!planet && state.planets && state.planets.length > 0) {
-        // Choose nearest planet to current ship position
-        let best = null, bestD = Infinity;
-        for (const p of state.planets) {
-            const dx = ship.x - p.x, dy = ship.y - p.y;
-            const d = dx*dx + dy*dy;
-            if (d < bestD) { bestD = d; best = p; }
-        }
-        planet = best;
-    }
-    if (planet) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = (planet.radius || 40) + 80;
-        spawnX = planet.x + Math.cos(angle) * dist;
-        spawnY = planet.y + Math.sin(angle) * dist;
-    }
-    
-    // Reset ship state
-    ship.isDestroyed = false;
-    ship.health = ship.maxHealth;
-    if (ship.maxShield > 0) {
-        ship.shield = Math.floor(ship.maxShield * (GameConstants?.SHIP?.RESPAWN_SHIELD_FRACTION || 0.5));
-    }
-    ship.x = spawnX;
-    ship.y = spawnY;
-    ship.vx = 0;
-    ship.vy = 0;
-    ship.weaponCooldown = 0;
-    ship.landingCooldown = (GameConstants?.SHIP?.RESPAWN_LANDING_COOLDOWN ?? 30);
-    ship.isLanded = false;
-    ship.currentPlanet = planet || null;
-    
-    // Apply death penalty (credits)
-    const penalty = GameConstants?.SHIP?.DEATH_PENALTY ?? 100;
-    ship.credits = Math.max(0, (ship.credits || 0) - penalty);
-    
-    // Clear hostile projectiles around spawn
-    state.projectiles = [];
-    
-    // Notify systems
-    eventBus.emit(GameEvents.SHIP_RESPAWN, { ship });
-    eventBus.emit(GameEvents.UI_MESSAGE, {
-        message: 'Respawned near nearest planet',
-        type: 'info',
-        duration: 2000
-    });
-}
-
-/**
  * Initialize all game systems
  */
 async function initializeSystems() {

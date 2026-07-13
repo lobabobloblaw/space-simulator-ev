@@ -35,7 +35,6 @@ export class UISystem {
         // Bind music state handler to keep "this" context when called via EventBus
         this.handleMusicState = this.handleMusicState.bind(this);
         this.handleShipDestroyed = this.handleShipDestroyed.bind(this);
-        this.handleShipRespawn = this.handleShipRespawn.bind(this);
         this._handleThrustChanged = (e) => { try { this._thrustActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} };
         this._handleBrakeChanged = (e) => { try { this._brakeActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} };
         
@@ -158,7 +157,6 @@ export class UISystem {
         
         // Ship lifecycle
         this.eventBus.on(GameEvents.SHIP_DEATH, this.handleShipDestroyed);
-        this.eventBus.on(GameEvents.SHIP_RESPAWN, this.handleShipRespawn);
         
         // Tutorial
         this.eventBus.on(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
@@ -266,15 +264,6 @@ export class UISystem {
         } catch(_) {}
     }
     
-    handleShipRespawn() {
-        try {
-            document.body.classList.remove('ship-destroyed');
-            const rb = document.getElementById('shipRadio');
-            const title = document.getElementById('radioTitle');
-            if (rb) rb.classList.remove('offline');
-            if (title) title.textContent = 'SCANNING… 118.7 MHz CH-12';
-        } catch(_) {}
-    }
 
     updateMuteLabel(enabled) {
         const label = document.getElementById('muteActionLabel');
@@ -1932,7 +1921,6 @@ export class UISystem {
         this.eventBus.off(GameEvents.AUDIO_STATE_CHANGED, this.handleAudioStateChanged);
         this.eventBus.off(GameEvents.AUDIO_MUSIC_STATE, this.handleMusicState);
         this.eventBus.off(GameEvents.SHIP_DEATH, this.handleShipDestroyed);
-        this.eventBus.off(GameEvents.SHIP_RESPAWN, this.handleShipRespawn);
 
         // Clear all timers to prevent memory leaks
         if (this._radioStaticTimer) {
