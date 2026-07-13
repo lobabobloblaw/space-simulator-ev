@@ -14,18 +14,42 @@ uncommitted work.
 
 | Batch | Theme | Items | Done |
 |-------|-------|-------|------|
-| 0 | Secure the working tree | 3 | 0/3 |
-| 1 | High-severity defects | 4 | 0/4 |
-| 2 | Content correctness | 3 | 0/3 |
-| 3 | Dead code & hygiene | 6 | 0/6 |
+| 0 | Secure the working tree | 3 | 3/3 |
+| 1 | High-severity defects | 4 | 4/4 |
+| 2 | Content correctness | 3 | 3/3 |
+| 3 | Dead code & hygiene | 6 | 6/6 |
 | 4 | Verification & docs truth | 4 | 0/4 |
-| — | **Total** | **20** | **0/20** |
+| — | **Total** | **20** | **16/20** |
+
+### Execution notes — 2026-07-12 (batches 0–3 complete)
+
+- **Batch 0 surprise:** `origin/main` held four commits from a 2026-07-07
+  claude.ai/code session (branch `claude/project-review-3nliki`) that reviewed
+  and patched the **stale Aug-2025 codebase** — the cloud session never saw the
+  local 11 months. Merged (139e0bc) with local authoritative for all game code;
+  kept from remote: smoke-test CI (`tests/smoke.mjs` + workflow),
+  `PROJECT_REVIEW_2026-07.md`, vendor license relocation, root-cruft deletions,
+  and four compatible fixes (no-op state-event guard, DebugSystem HTML escape,
+  manual-save reason, TargetCam IDLE_LIGHT_MS 60Hz fix). Reverted its old-balance
+  `npcTypes` rewrite; restored `SpriteResolver.js` (our RenderSystem imports it)
+  and `PURSUIT_TIMEOUT` (our NPCSystem reads it).
+- **The inherited smoke test found four more live defects**, fixed in batch 1
+  alongside R1.1–R1.4: PhysicsSystem double-decremented the weapon cooldown
+  (2× fire rate), UISystem + TradingSystem each attached a trading click
+  delegate (1 click = 2 purchases), the death sequence was non-idempotent
+  (4 explosions per death), and the boot loader read a save schema the writer
+  never produced (reputation, active mission, and engine effects lost on
+  reload). Also: CSP `frame-ancestors` meta noise → `object-src 'none'`.
+- R3.2 (RenderLint.js) and R3.4 (server.pid) were already resolved by the merge.
+- **Smoke suite: 8/8 locally; CI (`smoke.yml`) runs on every push to main.**
+- Observed, deferred: `initShipForRun` doesn't reset `engineLevel`/upgrade
+  fields between runs (stale meta-ish leak) — fold into P3 unlock design.
 
 ---
 
 ## Batch 0: Secure the Working Tree (3 items) — BLOCKING
 
-### [ ] R0.1 — Commit the working tree in three commits
+### [x] R0.1 — Commit the working tree in three commits
 - **File:** repo root (110 porcelain entries: 38 M, 42 D, 30 ??)
 - **What:** Last commit is `160d7d2` (2025-08-27). Four epics (Phase-1 content, roguelike
   meta-loop, both audit passes) exist only as unstaged edits. One `git checkout .` erases
@@ -46,14 +70,14 @@ uncommitted work.
 - **Test:** `git status --porcelain` is empty (minus intentionally excluded files);
   `git log --oneline -3` shows the three commits.
 
-### [ ] R0.2 — Push and verify Pages deploy
+### [x] R0.2 — Push and verify Pages deploy
 - **File:** remote `origin/main`
 - **What:** The public site is frozen at Aug 2025 and still serves the deleted debug pages.
 - **Fix:** `git push`, wait for GitHub Pages (~1–10 min).
 - **Test:** Live site loads and plays; `https://…/docs/index_old_backup.html` and
   `test-*.html` return 404.
 
-### [ ] R0.3 — Tag the snapshot
+### [x] R0.3 — Tag the snapshot
 - **File:** git tag
 - **What:** A recoverable marker for "state as reviewed, before remediation edits."
 - **Fix:** `git tag pre-remediation-2026-07 && git push --tags`
@@ -63,7 +87,7 @@ uncommitted work.
 
 ## Batch 1: High-Severity Defects (4 items)
 
-### [ ] R1.1 — Unify `currentWeapon` vs `currentWeaponIndex`
+### [x] R1.1 — Unify `currentWeapon` vs `currentWeaponIndex`
 - **File:** `docs/js/systems/ShopSystem.js:89-90, 259-260`; `docs/js/core/StateManager.js:57, 267`; `docs/js/main_eventbus_pure.js:164, 438-440, 1127`
 - **What:** Live code (main, weapon switching, saves) uses `ship.currentWeapon`;
   StateManager defaults and ShopSystem's post-purchase clamp use `currentWeaponIndex`.
@@ -77,7 +101,7 @@ uncommitted work.
 - **Test:** Buy a ship with fewer weapon slots than currently selected index; switch
   weapons (Q); fire. No `undefined` weapon, HUD shows correct type after purchase.
 
-### [ ] R1.2 — Deep-clone `DEFAULT_META_STATE`
+### [x] R1.2 — Deep-clone `DEFAULT_META_STATE`
 - **File:** `docs/js/core/MetaStateManager.js:76, 90, 101-102, 104, 293`
 - **What:** `{ ...DEFAULT_META_STATE }` shallow-copies; nested `unlocks.ships[]`,
   `unlocks.upgrades[]`, `stats{}` remain shared references to the module constant.
@@ -89,7 +113,7 @@ uncommitted work.
 - **Test:** In console: reset meta, unlock a ship, `resetMeta()` again — default meta must
   not contain the unlocked ship. Two fresh runs in one session don't share unlock state.
 
-### [ ] R1.3 — Remove dead boss-unlock block from orchestrator
+### [x] R1.3 — Remove dead boss-unlock block from orchestrator
 - **File:** `docs/js/main_eventbus_pure.js:564-575`; owner: `docs/js/systems/RunSystem.js:290-311, 368`
 - **What:** Two NPC_DEATH paths handle boss unlocks. Main's block reads
   `data.npc.unlocks.ship` — wrong shape (boss data is `{type, id}`), so it never fires;
@@ -101,7 +125,7 @@ uncommitted work.
 - **Test:** Defeat Captain Blackstar; "Unlocked" toast appears once; unlock persists in
   `localStorage.galaxyTraderMeta` after reload.
 
-### [ ] R1.4 — Give the `void` boss weapon real behavior
+### [x] R1.4 — Give the `void` boss weapon real behavior
 - **File:** `docs/js/data/zones.js:182`; `docs/js/utils/Constants.js:96-146`; `docs/js/systems/WeaponSystem.js` (type branches ~:140, :185-198, :212, :227, :490, :558)
 - **What:** The Devourer fires weapon `type: 'void'`; WeaponSystem has no branch for it,
   so the final boss silently attacks with default-laser stats/visuals.
@@ -116,7 +140,7 @@ uncommitted work.
 
 ## Batch 2: Content Correctness (3 items)
 
-### [ ] R2.1 — Define `void_hunter` and give it spawn weight
+### [x] R2.1 — Define `void_hunter` and give it spawn weight
 - **File:** `docs/js/data/zones.js:99`; `docs/js/systems/SpawnSystem.js:22-84 (stat table), 704-720 (weight chain)`
 - **What:** Zone 4 lists `enemyTypes: ['elite_pirate', 'void_hunter']` but `void_hunter`
   has no stat entry and the weight if-chain covers only pirate/elite_pirate/trader/
@@ -128,7 +152,7 @@ uncommitted work.
 - **Test:** Advance to zone 4; confirm `void_hunter` NPCs spawn (check
   `state.npcShips.map(n => n.type)` in console) and fight noticeably harder than pirates.
 
-### [ ] R2.2 — Single source of truth for NPC stats
+### [x] R2.2 — Single source of truth for NPC stats
 - **File:** `docs/js/data/gameData.js:5-58` vs `docs/js/systems/SpawnSystem.js:22-84`
 - **What:** NPC types are defined twice with divergent health/speed/credit values;
   spawning reads the SpawnSystem copy, so `gameData.npcTypes` is a decoy that invites
@@ -140,7 +164,7 @@ uncommitted work.
 - **Test:** Spawned pirate/trader HP and behavior unchanged from pre-fix baseline
   (compare a few `npc.health`/`maxSpeed` values before/after).
 
-### [ ] R2.3 — Align boss upgrade-unlock ids with shop inventory
+### [x] R2.3 — Align boss upgrade-unlock ids with shop inventory
 - **File:** `docs/js/data/zones.js:157`; `docs/js/core/MetaStateManager.js:33-42`; `docs/js/data/gameData.js:69-147`
 - **What:** Boss rewards record upgrade ids (`shield_advanced`) that don't exist in
   `shopInventory` (`shield1`, `shield2`, …); `ALL_UPGRADES` uses a third namespace. The
@@ -156,7 +180,7 @@ uncommitted work.
 
 ## Batch 3: Dead Code & Hygiene (6 items)
 
-### [ ] R3.1 — Remove orphaned `touchControls.js` and its dangling call
+### [x] R3.1 — Remove orphaned `touchControls.js` and its dangling call
 - **File:** `docs/js/systems/touchControls.js` (372 lines); `docs/js/systems/RenderSystem.js:1096-1097`
 - **What:** Never imported; constructor signature references the removed pre-EventBus
   `game` object; RenderSystem calls `window.touchControls.render()` but nothing ever sets
@@ -166,14 +190,14 @@ uncommitted work.
   implementation if ever wanted.
 - **Test:** `node --check` on RenderSystem; desktop play unaffected.
 
-### [ ] R3.2 — Remove orphaned `RenderLint.js`
+### [x] R3.2 — Remove orphaned `RenderLint.js`
 - **File:** `docs/js/systems/RenderLint.js` (22 lines)
 - **What:** Exports `check2DContext`; imported by no one (RenderSystem uses its own inline
   `debugRenderLint()`).
 - **Fix:** Delete the file.
 - **Test:** Grep for `RenderLint` returns only the inline method in RenderSystem.
 
-### [ ] R3.3 — Remove dead respawn path
+### [x] R3.3 — Remove dead respawn path
 - **File:** `docs/js/main_eventbus_pure.js:595-648` (`respawnPlayer`); `docs/js/systems/UISystem.js:163` (SHIP_RESPAWN listener)
 - **What:** Permadeath is the design (R respawn disabled at :447); `respawnPlayer()` is
   never called and is the only `SHIP_RESPAWN` emitter, so the UISystem listener is dead.
@@ -181,13 +205,13 @@ uncommitted work.
   corresponding `off()` in `destroy()` if present).
 - **Test:** Die in-game; death screen flow works; no console errors.
 
-### [ ] R3.4 — Untrack `server.pid`
+### [x] R3.4 — Untrack `server.pid`
 - **File:** repo root `server.pid` (tracked), `.gitignore`
 - **What:** A local dev-server pid file is tracked (pre-dates the ignore rule).
 - **Fix:** `git rm --cached server.pid`; ensure `.gitignore` covers `server.pid`.
 - **Test:** `git status` clean after a local server restart.
 
-### [ ] R3.5 — Purge stray files from the published folder
+### [x] R3.5 — Purge stray files from the published folder
 - **File:** `docs/assets/misc/` (4 dev screenshots); `docs/SESSION_37_SAVE_LOAD_FIX.md/` (empty dir)
 - **What:** GitHub Pages serves everything under `docs/`; dev screenshots and an empty
   `.md`-named directory are publicly reachable cruft.
@@ -195,7 +219,7 @@ uncommitted work.
   `docs/RENDERING_NOTES.md` content into `INTERNAL_DEV_DOCS/` — decide, don't drift.)
 - **Test:** `ls docs/assets/misc` fails; live URLs 404 after deploy.
 
-### [ ] R3.6 — Fix StateManager's dead/misleading default ship
+### [x] R3.6 — Fix StateManager's dead/misleading default ship
 - **File:** `docs/js/core/StateManager.js:44-63, 254-273`; `docs/js/main_eventbus_pure.js:138-172`
 - **What:** StateManager's constructor default ship (`credits: 1000`,
   `currentWeaponIndex`, …) is overwritten wholesale by `initShip()` (`credits: 250`) at
