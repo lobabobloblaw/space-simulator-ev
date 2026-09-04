@@ -5,7 +5,8 @@
 
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 
-// In-memory error log for debugging (circular buffer)
+// In-memory error log (circular buffer). Write-only from code: inspect it from a
+// debugger when reconstructing a session's failures.
 const ERROR_LOG_MAX = 50;
 const errorLog = [];
 
@@ -42,21 +43,6 @@ export function logError(context, error, notify = false) {
     if (notify) {
         notifyUser(`Error in ${context}: ${errorMessage}`, 'error');
     }
-}
-
-/**
- * Get recent errors for debugging
- * @returns {Array} Recent error log entries
- */
-export function getRecentErrors() {
-    return [...errorLog];
-}
-
-/**
- * Clear the error log
- */
-export function clearErrorLog() {
-    errorLog.length = 0;
 }
 
 /**
@@ -136,58 +122,6 @@ function createFallbackNotification(message, type) {
 }
 
 /**
- * Wrap an async function with error handling
- * @param {Function} fn - Async function to wrap
- * @param {string} context - Context name for error logging
- * @param {boolean} notify - Whether to notify user on error
- * @returns {Function} Wrapped function that catches and logs errors
- */
-export function wrapAsync(fn, context, notify = false) {
-    return async function(...args) {
-        try {
-            return await fn.apply(this, args);
-        } catch (error) {
-            logError(context, error, notify);
-            return undefined;
-        }
-    };
-}
-
-/**
- * Wrap a sync function with error handling
- * @param {Function} fn - Function to wrap
- * @param {string} context - Context name for error logging
- * @param {*} fallback - Value to return on error
- * @returns {Function} Wrapped function that catches and logs errors
- */
-export function wrapSync(fn, context, fallback = undefined) {
-    return function(...args) {
-        try {
-            return fn.apply(this, args);
-        } catch (error) {
-            logError(context, error, false);
-            return fallback;
-        }
-    };
-}
-
-/**
- * Safe JSON parse with error logging
- * @param {string} jsonString - JSON string to parse
- * @param {string} context - Context for error logging
- * @param {*} fallback - Value to return on parse error
- * @returns {*} Parsed object or fallback value
- */
-export function safeJsonParse(jsonString, context, fallback = null) {
-    try {
-        return JSON.parse(jsonString);
-    } catch (error) {
-        logError(context, `JSON parse failed: ${error.message}`, false);
-        return fallback;
-    }
-}
-
-/**
  * Check if localStorage is available (handles private browsing)
  * @returns {{available: boolean, reason: string|null}}
  */
@@ -211,10 +145,5 @@ export function checkLocalStorage() {
 export default {
     logError,
     notifyUser,
-    wrapAsync,
-    wrapSync,
-    safeJsonParse,
-    checkLocalStorage,
-    getRecentErrors,
-    clearErrorLog
+    checkLocalStorage
 };

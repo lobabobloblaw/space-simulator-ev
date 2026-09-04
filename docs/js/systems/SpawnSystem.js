@@ -4,6 +4,7 @@ import { GameConstants } from '../utils/Constants.js';
 import ShipCatalog from './ShipCatalog.js';
 import { getRunSystem, RunEvents } from './RunSystem.js';
 import { npcTypes } from '../data/gameData.js';
+import { typeToSpriteId, bossIdToSpriteId } from './SpriteMappings.js';
 
 /**
  * SpawnSystem - Handles spawning of NPCs, asteroids, and pickups
@@ -55,6 +56,7 @@ export class SpawnSystem {
         this.handleShipTakeoff = this.handleShipTakeoff.bind(this);
         this.handleShipLanded = this.handleShipLanded.bind(this);
         this.handleBossPhase = this.handleBossPhase.bind(this);
+        this.handleBossDefeat = this.handleBossDefeat.bind(this);
         this._spawnCooldown = { until: 0 };
         this._recentTypeCooldown = {}; // { [type]: untilTs }
         this._typeCooldownMs = (GameConstants?.SPAWN?.TYPE_COOLDOWN_MS ?? 6000);   // suppress same-type spawns briefly after a death
@@ -107,6 +109,8 @@ export class SpawnSystem {
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleShipLanded);
         // Boss phase escalation spawns reinforcements
         this.eventBus.on(RunEvents.ZONE_BOSS_PHASE, this.handleBossPhase);
+        // ...and the survivors warp out with their paymaster
+        this.eventBus.on(RunEvents.ZONE_BOSS_DEFEAT, this.handleBossDefeat);
         // Small debris on projectile hits
         this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, (data) => {
             try { this.handleProjectileHitDebris(data); } catch(_) {}
@@ -690,6 +694,9 @@ export class SpawnSystem {
                     adj.freighter = (1 - pirateWeight) * 0.3;
                 } else if (enemyType === 'patrol') {
                     adj.patrol = (1 - pirateWeight) * 0.3;
+                } else if (enemyType === 'scavenger') {
+                    // Salvagers are background colour, not a threat — keep it thin
+                    adj.scavenger = (1 - pirateWeight) * 0.12;
                 }
             }
         } else {
@@ -892,7 +899,11 @@ export class SpawnSystem {
             angle: (() => { const a = Math.atan2(initialVy || 0.0001, initialVx || 0.0001); return Number.isFinite(a) ? a : 0; })(),
             type: type,
             ...template,
-            targetPlanet: (type === 'trader' || type === 'freighter') ? 
+            // Faction drives the palette and decals in FactionVisuals (P7).
+            // It comes from the npcTypes template; the fallback keeps any
+            // future template without one rendering as a neutral civilian.
+            faction: template.faction || 'civilian',
+            targetPlanet: (type === 'trader' || type === 'freighter') ?
                 state.planets[Math.floor(Math.random() * state.planets.length)] : null,
             weaponCooldown: 0,
             lifetime: 0,
@@ -979,6 +990,10 @@ export class SpawnSystem {
             title: bossData.title,
             size: bossData.size || 28,
             color: '#ff0000',
+            faction: bossData.faction || 'pirate',
+            // Distinct silhouette per boss; RenderSystem honours npc.spriteId
+            // ahead of typeToSpriteId[npc.type] (placeholder art, see P3)
+            spriteId: bossIdToSpriteId[bossData.id] || typeToSpriteId.boss,
             maxSpeed: bossData.maxSpeed || 0.6,
             thrust: bossData.thrust || 0.004,
             turnSpeed: bossData.turnSpeed || 0.012,
@@ -988,6 +1003,8 @@ export class SpawnSystem {
             behavior: 'boss',
             weapon: scaledWeapon,
             phases: bossData.phases || [],
+            // Telegraphed special attack, driven by NPCSystem.updateBossSignature
+            signature: bossData.signature || null,
             spawnMessage: bossData.spawnMessage,
             phase2Message: bossData.phase2Message,
             phase3Message: bossData.phase3Message,
@@ -1041,6 +1058,28 @@ export class SpawnSystem {
     }
 
     /**
+     * Boss defeated — its summoned escorts warp out rather than mobbing a
+     * player who has already won the fight. Only entities tagged `isBossAdd`
+     * are cleared; anything the zone spawned normally stays.
+     * @returns {number} How many were withdrawn
+     */
+    handleBossDefeat() {
+        const state = this.stateManager.state;
+        if (!state?.npcShips?.length) return 0;
+
+        let removed = 0;
+        for (let i = state.npcShips.length - 1; i >= 0; i--) {
+            const npc = state.npcShips[i];
+            if (!npc.isBossAdd) continue;
+            this._pushWarpEffect(npc.x, npc.y, 'depart', state);
+            state.npcShips.splice(i, 1);
+            removed++;
+        }
+        if (removed) console.log(`[SpawnSystem] Boss adds withdrawn: ${removed}`);
+        return removed;
+    }
+
+    /**
      * Spawn `count` escorts of `type` around a boss
      * @returns {number} How many were actually spawned
      */
@@ -1089,6 +1128,7 @@ export class SpawnSystem {
                 angle,
                 type,
                 ...template,
+                faction: template.faction || 'pirate',
                 targetPlanet: null,
                 weaponCooldown: 0,
                 lifetime: 0,
@@ -1372,6 +1412,7 @@ export class SpawnSystem {
         this.eventBus.off(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
         this.eventBus.off(GameEvents.SHIP_LANDED, this.handleShipLanded);
         this.eventBus.off(RunEvents.ZONE_BOSS_PHASE, this.handleBossPhase);
+        this.eventBus.off(RunEvents.ZONE_BOSS_DEFEAT, this.handleBossDefeat);
 
         console.log('[SpawnSystem] Destroyed');
     }

@@ -10,6 +10,41 @@ import { MathUtils } from '../utils/MathUtils.js';
 import { SpatialHash } from '../utils/SpatialHash.js';
 import { RunEvents } from './RunSystem.js';
 
+/**
+ * Behaviours that read as "pirate" to everything else in the world: patrols hunt
+ * them, traders flee them, taunts come from them. Hostiles stopped sharing a
+ * single `behavior` string when the differentiated AI landed (W3.2), so every
+ * such test goes through this set. Bosses are deliberately excluded — patrols
+ * never engaged one and a boss fight stays a duel.
+ */
+const PIRATE_BEHAVIORS = new Set(['aggressive', 'elite', 'ambusher']);
+
+/** Elite duellist tuning — stand-off, three-shot bursts, reload while backing off. */
+const ELITE = Object.freeze({
+    ENGAGE_RANGE: 900,      // beyond this it wanders
+    HOLD_MIN: 250,          // closer than this and it backs away
+    HOLD_MAX: 350,          // further than this and it closes
+    FIRE_RANGE: 420,
+    FIRE_ARC: Math.PI / 6,
+    BURST_SHOTS: 3,
+    BURST_GAP: 6,           // frames between shots inside a burst
+    RELOAD_FRAMES: 90       // frames of retreat/strafe between bursts
+});
+
+/** Ambusher tuning — drift dark, telegraph, charge, break off, repeat. */
+const AMBUSHER = Object.freeze({
+    TRIGGER_RANGE: 420,     // player this close wakes it up
+    TELL_FRAMES: 40,        // shimmer/"…" telegraph before the charge
+    CHARGE_THRUST: 1.8,
+    CHARGE_TIMEOUT: 240,    // frames before an unsuccessful charge is abandoned
+    FIRE_RANGE: 200,
+    FIRE_ARC: Math.PI / 4,
+    BREAKOFF_RANGE: 90,     // passed the target — peel off
+    DISENGAGE_RANGE: 600,   // re-arm the ambush once this far out
+    DISENGAGE_THRUST: 1.2,
+    DISENGAGE_TIMEOUT: 300  // never chase the horizon forever
+});
+
 export default class NPCSystem {
     constructor() {
         this.eventBus = getEventBus();
@@ -60,7 +95,9 @@ export default class NPCSystem {
             } catch(_) {}
         });
 
-        // Scavenger spawn disabled to reduce confusion. (Previously listened to NPC_DESTROYED.)
+        // Scavengers are back (W3.2), but they spawn through the normal
+        // SpawnSystem weights for Core/Frontier rather than off NPC_DESTROYED —
+        // a salvager materialising on every kill was the confusing part.
 
         console.log('[NPCSystem] Initialized with sophisticated AI');
     }
@@ -152,7 +189,7 @@ export default class NPCSystem {
             }
         }
 
-        if (npc.behavior === 'aggressive' && rep.pirate <= -5) {
+        if (PIRATE_BEHAVIORS.has(npc.behavior) && rep.pirate <= -5) {
             if (!npc.lastTaunt || now - npc.lastTaunt > (GameConstants?.NPC?.TAUNT_COOLDOWN_MS ?? 8000)) {
                 const lines = [
                     'You think the patrols can save you?',
@@ -302,6 +339,8 @@ export default class NPCSystem {
     handleNPCDeath(npc, ship, state) {
         // Credits, kills, and reputation are handled centrally in main_eventbus_pure NPC_DEATH handler
         // Keep visuals/loot here only.
+
+
         // Create explosion effect. These used to go to EXPLOSION_CREATED, which
         // has no listener, so NPC deaths rendered nothing (P8). This is now the
         // only death-explosion emitter — main's NPC_DEATH handler no longer
@@ -380,6 +419,10 @@ export default class NPCSystem {
         switch (npc.behavior) {
             case "aggressive":
                 return this.makePirateDecision(npc, state, decision);
+            case "elite":
+                return this.makeEliteDecision(npc, state, decision);
+            case "ambusher":
+                return this.makeAmbusherDecision(npc, state, decision);
             case "lawful":
                 return this.makePatrolDecision(npc, state, playerHostility, decision);
             case "passive":
@@ -538,6 +581,184 @@ export default class NPCSystem {
     }
     
     /**
+     * Stable strafe direction that flips every `periodMs` — shared by the
+     * behaviours that need lateral drift without allocating anything.
+     */
+    _strafeSign(npc, periodMs = 1200) {
+        if (!npc.strafeDir || !npc.strafeTimer || this._frameTime - npc.strafeTimer > periodMs) {
+            npc.strafeDir = Math.random() < 0.5 ? -1 : 1;
+            npc.strafeTimer = this._frameTime;
+        }
+        return npc.strafeDir;
+    }
+
+    /**
+     * Elite AI - a stand-off duellist. Holds ELITE.HOLD_MIN..HOLD_MAX, fires
+     * three-shot bursts, then backs out of the band while it reloads.
+     * Burst bookkeeping lives on `npc.burst` (one object per NPC, never per frame).
+     */
+    makeEliteDecision(npc, state, decision) {
+        const ship = state.ship;
+        const burst = npc.burst || (npc.burst = { shots: 0, gap: 0, reload: 0 });
+        if (burst.gap > 0) burst.gap--;
+        if (burst.reload > 0) burst.reload--;
+
+        // Target the player first, then any merchant in reach (elites are pirates)
+        let target = null;
+        let dist = ELITE.ENGAGE_RANGE;
+        if (ship && !ship.isDestroyed) {
+            const d = Math.hypot(ship.x - npc.x, ship.y - npc.y);
+            if (d < dist) { target = ship; dist = d; }
+        }
+        for (const other of state.npcShips) {
+            if (other.behavior !== 'passive') continue;
+            const d = Math.hypot(other.x - npc.x, other.y - npc.y);
+            if (d < dist) { target = other; dist = d; }
+        }
+
+        if (!target) {
+            npc.state = 'wandering';
+            if (!npc.wanderAngle || Math.random() < 0.01) npc.wanderAngle = Math.random() * Math.PI * 2;
+            decision.desiredAngle = npc.wanderAngle;
+            if (Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle)) < Math.PI / 4) {
+                decision.shouldThrust = true;
+                decision.thrustPower = 0.6;
+            }
+            return decision;
+        }
+
+        const awayAngle = Math.atan2(npc.y - target.y, npc.x - target.x);
+
+        // Reloading: peel out of the band, strafing, and hold fire
+        if (burst.reload > 0) {
+            npc.state = 'reloading';
+            decision.desiredAngle = awayAngle + this._strafeSign(npc) * 0.35;
+            if (dist < ELITE.HOLD_MAX) {
+                decision.shouldThrust = true;
+                decision.thrustPower = 0.9;
+            }
+            return decision;
+        }
+
+        npc.state = 'engaging';
+
+        const aim = this.calculateSafeIntercept(target, npc.x, npc.y, dist, npc.maxSpeed, 50, 0.7);
+        const toTarget = Math.atan2(aim.y - npc.y, aim.x - npc.x);
+
+        if (dist < ELITE.HOLD_MIN) {
+            // Too close — reverse out of knife range
+            decision.desiredAngle = awayAngle;
+            decision.shouldThrust = true;
+            decision.thrustPower = 0.8;
+        } else if (dist > ELITE.HOLD_MAX) {
+            // Too far — close the gap
+            decision.desiredAngle = toTarget;
+            if (Math.abs(this.normalizeAngle(toTarget - npc.angle)) < Math.PI / 3) {
+                decision.shouldThrust = true;
+            }
+        } else {
+            // In the band — drift laterally so it is not a stationary target
+            decision.desiredAngle = toTarget + this._strafeSign(npc) * 0.22;
+            decision.shouldBrake = true;
+        }
+
+        // Fire: three shots BURST_GAP frames apart, then a long reload
+        const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
+        if (burst.gap === 0 && npc.weaponCooldown <= 0 &&
+            dist < ELITE.FIRE_RANGE && angleDiff < ELITE.FIRE_ARC) {
+            decision.shouldFire = true;
+            decision.fireTarget = target;
+            burst.shots++;
+            burst.gap = ELITE.BURST_GAP;
+            if (burst.shots >= ELITE.BURST_SHOTS) {
+                burst.shots = 0;
+                burst.reload = ELITE.RELOAD_FRAMES;
+            }
+        }
+
+        return decision;
+    }
+
+    /**
+     * Ambusher AI - drifts unpowered until the player strays inside
+     * AMBUSHER.TRIGGER_RANGE, telegraphs for TELL_FRAMES, then charges under
+     * heavy thrust, breaks off, and re-arms at DISENGAGE_RANGE.
+     * State machine on `npc.state`: lurking -> tell -> charging -> disengaging.
+     */
+    makeAmbusherDecision(npc, state, decision) {
+        const ship = state.ship;
+        if (!ship || ship.isDestroyed) {
+            npc.state = 'lurking';
+            npc.tell = 0;
+            return decision;
+        }
+
+        const dx = ship.x - npc.x;
+        const dy = ship.y - npc.y;
+        const dist = Math.hypot(dx, dy);
+        const toPlayer = Math.atan2(dy, dx);
+
+        if (npc.state !== 'tell' && npc.state !== 'charging' && npc.state !== 'disengaging') {
+            npc.state = 'lurking';
+        }
+
+        if (npc.state === 'tell') {
+            // Shimmer tell: lined up, still dark, about to commit
+            npc.tell = Math.max(0, (npc.tell || 0) - 1);
+            decision.desiredAngle = toPlayer;
+            if (npc.tell === 0) {
+                npc.state = 'charging';
+                npc.chargeTimer = AMBUSHER.CHARGE_TIMEOUT;
+            }
+            return decision;
+        }
+
+        if (npc.state === 'charging') {
+            npc.chargeTimer = Math.max(0, (npc.chargeTimer || 0) - 1);
+            const aim = this.calculateSafeIntercept(ship, npc.x, npc.y, dist, npc.maxSpeed, 50, 1.0);
+            decision.desiredAngle = Math.atan2(aim.y - npc.y, aim.x - npc.x);
+            const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
+            if (angleDiff < Math.PI / 2) {
+                decision.shouldThrust = true;
+                decision.thrustPower = AMBUSHER.CHARGE_THRUST;
+            }
+            if (dist < AMBUSHER.FIRE_RANGE && angleDiff < AMBUSHER.FIRE_ARC && npc.weaponCooldown <= 0) {
+                decision.shouldFire = true;
+                decision.fireTarget = ship;
+            }
+            if (dist < AMBUSHER.BREAKOFF_RANGE || npc.chargeTimer === 0) {
+                npc.state = 'disengaging';
+                npc.disengageTimer = AMBUSHER.DISENGAGE_TIMEOUT;
+            }
+            return decision;
+        }
+
+        if (npc.state === 'disengaging') {
+            npc.disengageTimer = Math.max(0, (npc.disengageTimer || 0) - 1);
+            decision.desiredAngle = toPlayer + Math.PI;
+            if (Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle)) < Math.PI / 2) {
+                decision.shouldThrust = true;
+                decision.thrustPower = AMBUSHER.DISENGAGE_THRUST;
+            }
+            if (dist >= AMBUSHER.DISENGAGE_RANGE || npc.disengageTimer === 0) {
+                npc.state = 'lurking';
+            }
+            return decision;
+        }
+
+        // Lurking: engines cold, nose tracking the prey
+        decision.desiredAngle = toPlayer;
+        decision.shouldThrust = false;
+        if (dist < AMBUSHER.TRIGGER_RANGE) {
+            npc.state = 'tell';
+            npc.tell = AMBUSHER.TELL_FRAMES;
+            npc.message = '…';
+            npc.messageTime = this._frameTime;
+        }
+        return decision;
+    }
+
+    /**
      * Patrol AI - hunt pirates, respond to hostile players
      */
     makePatrolDecision(npc, state, playerHostility, decision) {
@@ -562,7 +783,7 @@ export default class NPCSystem {
         const searchRadius = playerIsFriendly ? 1500 : 1200;
         const nearbyPirates = this._npcHash.queryNearFiltered(
             npc.x, npc.y, searchRadius,
-            other => other.behavior === 'aggressive'
+            other => PIRATE_BEHAVIORS.has(other.behavior)
         );
 
         let targetPirate = null;
@@ -814,7 +1035,7 @@ export default class NPCSystem {
         const fleeDist = GameConstants?.NPC?.TRADER_FLEE_HOSTILE_DISTANCE ?? 200;
         const nearbyHostiles = this._npcHash.queryNearFiltered(
             npc.x, npc.y, fleeDist,
-            other => other.behavior === 'aggressive'
+            other => PIRATE_BEHAVIORS.has(other.behavior)
         );
 
         if (nearbyHostiles.length > 0) {
@@ -902,6 +1123,22 @@ export default class NPCSystem {
         if ((npc.inventory || 0) >= 4 || npc.lifetime > 2000) {
             npc.readyToDock = true; return decision;
         }
+
+        // Unarmed salvager: anything hostile nearby and it runs
+        const fleeDist = GameConstants?.NPC?.TRADER_FLEE_HOSTILE_DISTANCE ?? 200;
+        const threat = this._npcHash.findNearest(npc.x, npc.y, fleeDist * 1.5,
+            other => PIRATE_BEHAVIORS.has(other.behavior));
+        if (threat) {
+            npc.state = 'fleeing';
+            npc.isFleeing = true;
+            decision.desiredAngle = Math.atan2(npc.y - threat.entity.y, npc.x - threat.entity.x);
+            if (Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle)) < Math.PI / 3) {
+                decision.shouldThrust = true;
+            }
+            return decision;
+        }
+        npc.isFleeing = false;
+
         // Find nearest pickup
         let best = null; let bestDist = (GameConstants?.NPC?.SCAVENGER_SCAN_DISTANCE ?? 900);
         for (const p of pickups) {
@@ -1037,7 +1274,72 @@ export default class NPCSystem {
         npc.state = 'pursuing';
         npc.pursuing = true;
 
+        // Signature attack (zones.js `signature`) can override the above
+        this.updateBossSignature(npc, state, decision, currentPhase, distToPlayer);
+
         return decision;
+    }
+
+    /**
+     * Drive a boss's telegraphed signature attack.
+     *
+     * Data lives on the boss entry in zones.js and is copied onto the NPC at
+     * spawn: `{ type: 'mines', count, everyMs, fromPhase }` or
+     * `{ type: 'lance', everyMs, fromPhase, windupFrames }`. Timing is wall
+     * clock (`npc._sigNext`), matching the rest of the NPC message cadences.
+     */
+    updateBossSignature(npc, state, decision, currentPhase, distToPlayer) {
+        const sig = npc.signature;
+        const ws = this.weaponSystem;
+        if (!sig || !ws) return;
+        if (npc.deathSeq || npc.health <= 0) return;
+
+        const now = this._frameTime;
+        const everyMs = Number(sig.everyMs) > 0 ? Number(sig.everyMs) : 8000;
+
+        // A lance in the tube outranks everything: the boss stops dead and
+        // telegraphs for the whole wind-up, then fires.
+        if (npc.lanceWindup > 0) {
+            npc.lanceWindup--;
+            decision.shouldThrust = false;
+            decision.shouldBrake = true;
+            decision.shouldFire = false;
+            if (state.ship) {
+                decision.desiredAngle = Math.atan2(state.ship.y - npc.y, state.ship.x - npc.x);
+            }
+            if (npc.lanceWindup === 0 && typeof ws.fireLance === 'function') {
+                ws.fireLance(npc, state.ship);
+                npc._sigNext = now + everyMs;
+            }
+            return;
+        }
+
+        if (currentPhase < (Number(sig.fromPhase) || 0)) return;
+
+        // First window opens one interval after the phase is entered
+        if (!Number.isFinite(npc._sigNext)) { npc._sigNext = now + everyMs; return; }
+        if (now < npc._sigNext) return;
+
+        if (sig.type === 'mines') {
+            if (distToPlayer > 900) return;   // don't seed empty space
+            if (typeof ws.fireMines !== 'function') return;
+            ws.fireMines(npc, sig.count || 5);
+            npc._sigNext = now + everyMs;
+        } else if (sig.type === 'lance') {
+            if (distToPlayer > 800) return;
+            npc.lanceWindup = Math.max(1, Math.floor(Number(sig.windupFrames) || 45));
+            npc.message = 'CHARGING';
+            npc.messageTime = now;
+            // One warning per charge (throttled in case everyMs is ever tightened)
+            if (!npc._lanceWarnAt || now - npc._lanceWarnAt > 6000) {
+                npc._lanceWarnAt = now;
+                this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                    message: `${npc.name || 'The boss'} is charging a lance — break line!`,
+                    type: 'warning',
+                    duration: 2500
+                });
+            }
+        }
     }
 
     /**
@@ -1211,9 +1513,21 @@ export default class NPCSystem {
     }
 
     /**
-     * Normalize angle to -PI to PI range with NaN/Infinity validation
+     * Normalize angle to -PI..PI with NaN/Infinity validation.
+     *
+     * `MathUtils.normalizeAngleSafe` uses `((a + PI) % 2PI) - PI`, and JS `%`
+     * keeps the sign of the dividend: any input below -PI comes back unchanged
+     * (normalizeAngleSafe(-2PI) === -2PI). Every AI turn decision here is
+     * `desiredAngle - npc.angle`, which lands in (-2PI, 2PI), so roughly a
+     * quarter of all engagements got an un-normalized diff: the NPC turned the
+     * long way round and, because |diff| stayed above the thrust gate, coasted
+     * the whole way there. The extra wrap below is the fix; the same defect
+     * still lives in MathUtils for other callers.
      */
     normalizeAngle(angle) {
-        return MathUtils.normalizeAngleSafe(angle);
+        const a = MathUtils.normalizeAngleSafe(angle);
+        if (a >= -Math.PI && a <= Math.PI) return a;
+        const wrapped = ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+        return Number.isFinite(wrapped) ? wrapped : 0;
     }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "Galaxy Trader",
+  "short_name": "Galaxy Trader",
+  "description": "A browser space trading roguelike. Four zones, three bosses, permadeath — unlocks are forever.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    { "src": "./favicon-16.png", "sizes": "16x16", "type": "image/png" },
+    { "src": "./favicon.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "./favicon-64.png", "sizes": "64x64", "type": "image/png" },
+    { "src": "./assets/logo.png", "sizes": "256x256", "type": "image/png", "purpose": "any" }
+  ]
+}

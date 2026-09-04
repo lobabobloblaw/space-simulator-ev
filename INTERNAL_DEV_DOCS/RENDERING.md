@@ -54,6 +54,55 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 - Rebuilds are strictly event/threshold‑driven: on target change, `|Δangle| ≥ ~0.12rad`, or `≥ ~90ms` elapsed since last build. Warm‑up guard still suppresses atlas/baseline until it expires.
 - PNG paths bake the +90° inner rotation into the buffer; atlas/baseline use only the outer rotation.
 
+## Starfield (tiles)
+
+- Each layer (`far`, `mid`, `near`) is a small pre-rendered offscreen tile, blitted
+  across the viewport **in screen space** at a modulo offset. ~33 `drawImage` calls a
+  frame, replacing ~9,600 per-star `fillRect` calls, and the field is genuinely
+  infinite (the old wrap band was anchored at the world origin, so the near layers
+  thinned out past ~2,100 units — roadmap P5).
+- Parallax comes from `GameConstants.WORLD.STAR_PARALLAX` and is read as *the fraction
+  of camera motion the layer travels*: far 0.05 barely drifts, near 0.4 moves fastest
+  but still slower than the world. (The old world-space code subtracted the parallax
+  term, which made the layers travel at `1 + f` — faster than the planets behind them.)
+- Layer tile sizes are deliberately different (640 / 512 / 448) so the three periodic
+  grids never line up into a visible lattice.
+- Blit offsets are floored to whole pixels: a fractional blit of a nearest-neighbour
+  tile shimmers.
+- Twinkle: the `mid` layer has three baked variants; each tile picks one from
+  `state.effects.starPhase` (advanced by `VisualEffectsSystem`) plus a per-tile offset,
+  so neighbouring tiles are never in step.
+- Cache: `_starTiles`, keyed on quality + zone id + `starDensity` + star-array lengths.
+  `_syncZoneTheme()` drops it on a zone change alongside the nebula and clear gradient.
+- Star counts per tile are derived from the live `state.stars` arrays, so colour, size
+  and brightness distribution stay exactly as authored; only the layout is re-tiled.
+- Camera shake is applied to the tile offsets, so the backdrop shakes with the world.
+
+## Screen-space overlay pass
+
+- Per-NPC decorations (target bracket, AI state icon, chatter bubble, health bar) are
+  drawn by `RenderSystem.renderNPCOverlays()` in **one** `withScreen` pass that runs
+  *after* the whole world pass. They used to be drawn inside `renderNPCs`, i.e. before
+  projectiles, explosions and warp FX painted over them (roadmap P10).
+- Shake and screen space: `withWorld` translates by `screenCenter - camera + shake`,
+  while screen-space overlays compute `p - camera + screenCenter`. `RenderSystem` keeps
+  a second camera object, `_hudCamera = camera - shake`, and hands *that* to
+  `HUDRenderer` and to `ExplosionRenderer`'s flipbook pass — so overlays land on exactly
+  the same pixels as the shaken world instead of detaching during a shake.
+
+## Who owns time-varying visual state
+
+`RenderSystem` reads; it does not write simulation state (roadmap P11). Screen-shake
+decay, damage-flash decay, asteroid spin and `shapePoints`, pickup sparkle seeds,
+explosion spark angles and the star twinkle clock all advance in
+`systems/VisualEffectsSystem.js`, on the 60 Hz fixed tick. Consequences worth knowing:
+
+- These no longer run at display rate (they used to run twice as fast on a 120 Hz panel).
+- They freeze while the game is paused, because the update loop skips paused frames.
+- Asteroid `shapePoints` are seeded by every producer (world init, SpawnSystem
+  fragments, save restore); the effects tick only backfills. `renderAsteroids` skips an
+  asteroid with no silhouette rather than inventing one.
+
 ## Effects
 
 - ExplosionRenderer: Uses flipbook if available, otherwise synthesized puffs.
@@ -89,7 +138,7 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 ## Quality & Boot Ramp (Session 59/62)
 
 - Auto quality: Enabled by default (unless `window.RENDER_AUTO_QUALITY === false`). Degrades quickly on repeated over‑budget frames (streak of 4; a >26ms frame counts double). Recovery needs 45 frames under 17ms and tolerates up to 2 slower frames inside that window (each costs 10 frames of progress; a third resets it).
-- Stars: On `medium` and `high`, far/mid/near now render every frame for consistent brightness; blur remains enabled only on `high`. On `low`, far layer only (no blur). Star stride and alpha additionally scale with the zone theme's `starDensity`.
+- Stars: see **Starfield (tiles)** below. Quality still controls density (`low` thins each layer) and glow (`high` only); the zone theme's `starDensity` still scales count and alpha.
 - Nebula: one 512×512 offscreen tile built per zone theme from `theme.nebulaColor` and blitted with a 5% parallax offset; drawn on `medium` and `high` (skipped on `low`). The cached clear‑gradient's bottom stop carries the same zone tint; both caches are dropped on zone change.
 - Boot ramp: For ~3s after boot (`window.BOOT_QUALITY_MS`, default 3000):
   - Force `quality='medium'`.
@@ -114,11 +163,10 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 - Render Lint toggles live under `state.debug.*` (where present). Keep OFF in production.
  - Quick reference: see `INTERNAL_DEV_DOCS/QUICK_TOGGLES.md` for a consolidated list of QA/debug toggles.
 
-### Renderer Selection (Spike Only)
+### Renderer Selection
 
-- Default renderer: Canvas2D `RenderSystem`.
-- Optional WebGL spike (OFF by default): enable via `?webgl=1` in the URL, or `localStorage.setItem('RENDER_WEBGL','1')` before load. Disable via removing the query and `localStorage.removeItem('RENDER_WEBGL')`.
-- Scope: current WebGL spike draws simple GPU primitives for player/NPC/projectiles; HUD/TargetCam/minimap remain on existing paths.
+- Canvas2D `RenderSystem` is the only renderer. The WebGL spike and its `?webgl=1` /
+  `RENDER_WEBGL` flags were removed in Phase 1; see `TICKET_WEBGL_SPIKE.md` for why.
 
 ### Optional Guards (QA only)
 

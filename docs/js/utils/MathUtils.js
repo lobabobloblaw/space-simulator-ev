@@ -374,7 +374,10 @@ export class MathUtils {
      */
     static normalizeAngleSafe(angle) {
         if (!isFinite(angle) || isNaN(angle)) return 0;
-        const normalized = ((angle + Math.PI) % (Math.PI * 2)) - Math.PI;
+        // JS % keeps the dividend's sign, so add a full turn before the second
+        // modulo or inputs below -PI (e.g. desired - current) never wrap.
+        const twoPi = Math.PI * 2;
+        const normalized = ((((angle + Math.PI) % twoPi) + twoPi) % twoPi) - Math.PI;
         return isFinite(normalized) ? normalized : 0;
     }
 

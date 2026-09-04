@@ -10,7 +10,18 @@ export const typeToSpriteId = {
   freighter: 'ships/freighter_1',
   interceptor: 'ships/interceptor_0',
   shuttle: 'ships/shuttle_0',
-  scavenger: 'ships/trader_0'
+  scavenger: 'ships/trader_0',
+  boss: 'ships/pirate_0'
+};
+
+// Boss id -> sprite id. Bosses carry `npc.spriteId` (set in SpawnSystem.spawnBoss)
+// so each one reads as a different silhouette; RenderSystem honours `npc.spriteId`
+// ahead of `typeToSpriteId[npc.type]`. Placeholders drawn from the existing ship
+// art until dedicated boss art lands (roadmap 3.2 item 3 / P3).
+export const bossIdToSpriteId = {
+  warlord_krix: 'ships/patrol_0',
+  pirate_lord: 'ships/pirate_0',
+  void_king: 'ships/freighter_0'
 };
 
 // Alias mapping for placeholder/atlas coverage before dedicated art
@@ -23,7 +34,8 @@ export const aliasSpriteForType = {
   freighter: 'ships/trader_0',
   trader: 'ships/trader_0',
   shuttle: 'ships/trader_0',
-  scavenger: 'ships/trader_0'
+  scavenger: 'ships/trader_0',
+  boss: 'ships/raider_0'
 };
 
 // Base rotation offset for sprites (align art that faces up to nose-right)

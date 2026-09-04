@@ -12,9 +12,6 @@ export class PhysicsSystem {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
 
-        // Physics constants
-        this.SPACE_FRICTION = 1.0;  // No friction in space!
-        this.BRAKE_FRICTION = 0.95;
         const worldHalf = Math.floor(((GameConstants?.WORLD?.ASTEROID_WORLD_SIZE ?? 4000) / 2));
         this.WORLD_BOUNDS = { min: -worldHalf, max: worldHalf };
 
@@ -185,8 +182,6 @@ export class PhysicsSystem {
         }
         
         // No friction in space! Ship maintains velocity (Newton's first law)
-        // ship.vx *= this.SPACE_FRICTION;  // Commented out - no friction
-        // ship.vy *= this.SPACE_FRICTION;  // Commented out - no friction
         
         // Apply velocity limits with validation
         const maxSpeed = ship.maxSpeed || 0.45;
@@ -248,8 +243,6 @@ export class PhysicsSystem {
             // We'll just apply physics constraints here
             
             // No friction in space for NPCs either!
-            // npc.vx *= this.SPACE_FRICTION;  // Removed - no friction
-            // npc.vy *= this.SPACE_FRICTION;  // Removed - no friction
             
             // Apply velocity limits with validation
             const cappedVelocity = MathUtils.capVelocity(npc.vx, npc.vy, npc.maxSpeed);
@@ -257,34 +250,6 @@ export class PhysicsSystem {
             npc.vy = cappedVelocity.vy;
             
             // Position is updated in the old system for now
-        }
-    }
-    
-    /**
-     * Update projectile physics
-     */
-    updateProjectilePhysics(state, deltaTime) {
-        // Access projectiles from state
-        const projectiles = state.projectiles;
-        if (!projectiles) return;
-        
-        for (let i = projectiles.length - 1; i >= 0; i--) {
-            const proj = projectiles[i];
-            
-            // Simple linear motion (no gravity in space)
-            proj.x += proj.vx;
-            proj.y += proj.vy;
-            
-            // Update lifetime
-            proj.lifetime++;
-            
-            // Remove old projectiles
-            if (proj.lifetime > 60) {
-                projectiles.splice(i, 1);
-                
-                // Emit projectile expired event
-                this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_EXPIRED, { projectile: proj });
-            }
         }
     }
     
@@ -468,32 +433,6 @@ export class PhysicsSystem {
     }
     
     /**
-     * Check collision between a point and a circle
-     */
-    checkPointCircleCollision(point, circle) {
-        const r = circle.size || circle.radius || 10;
-        const r2 = r * r;
-        const d2 = MathUtils.distanceSquared(point.x, point.y, circle.x, circle.y);
-        return d2 < r2;
-    }
-    
-    /**
-     * Apply impulse to an entity
-     */
-    applyImpulse(entity, forceX, forceY) {
-        if (!entity) return;
-        
-        entity.vx = (entity.vx || 0) + forceX;
-        entity.vy = (entity.vy || 0) + forceY;
-        
-        // Emit impulse event
-        this.eventBus.emit(GameEvents.PHYSICS_IMPULSE_APPLIED, {
-            entity,
-            force: { x: forceX, y: forceY }
-        });
-    }
-    
-    /**
      * Calculate distance between two entities
      */
     getDistance(entity1, entity2) {
@@ -507,16 +446,6 @@ export class PhysicsSystem {
         const dx = entity2.x - entity1.x;
         const dy = entity2.y - entity1.y;
         return Math.atan2(dy, dx);
-    }
-    
-    /**
-     * Predict future position of an entity
-     */
-    predictPosition(entity, time) {
-        return {
-            x: entity.x + (entity.vx || 0) * time,
-            y: entity.y + (entity.vy || 0) * time
-        };
     }
     
     /**

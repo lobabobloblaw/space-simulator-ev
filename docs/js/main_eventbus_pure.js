@@ -6,6 +6,7 @@
 import { getEventBus, GameEvents } from './core/EventBus.js';
 import { getStateManager } from './core/StateManager.js';
 import { GameLoop } from './core/GameLoop.js';
+import { buildSystemRegistry } from './core/SystemRegistry.js';
 
 // Roguelike systems
 import { getMetaStateManager } from './core/MetaStateManager.js';
@@ -19,8 +20,8 @@ import { validateSaveData } from './utils/SaveUtils.js';
 // Import systems
 import InputSystem from './systems/InputSystem.js';
 import PhysicsSystem from './systems/PhysicsSystem.js';
+import VisualEffectsSystem from './systems/VisualEffectsSystem.js';
 import RenderSystem from './systems/RenderSystem.js';
-import WebGLRenderSystem from './systems/WebGLRenderSystem.js';
 import AudioSystem from './systems/AudioSystem.js';
 import UISystem from './systems/UISystem.js';
 import WeaponSystem from './systems/WeaponSystem.js';
@@ -33,6 +34,7 @@ import NPCSystem from './systems/NPCSystem.js';  // Full NPC AI with personaliti
 import DebugSystem from './systems/DebugSystem.js';
 import TargetingSystem from './systems/TargetingSystem.js';
 import AssetSystem from './systems/AssetSystem.js';
+import GameFeelSystem from './systems/GameFeelSystem.js';
 import { GameConstants } from './utils/Constants.js';
 
 // We'll import game data dynamically in the initialization function
@@ -87,8 +89,13 @@ try {
 const eventBus = getEventBus();
 const stateManager = getStateManager();
 
-// Systems container
+// Systems container. Construction order here is irrelevant: the update order is
+// declared in core/SystemRegistry.js (SYSTEM_ORDER) and resolved into
+// `systemRegistry` at the end of initializeSystems().
 const systems = {};
+
+/** @type {Array<{key: string, instance: any, update: boolean, render: boolean}>} */
+let systemRegistry = [];
 
 // ---- initializeGameState() helper splits (no behavior changes) ----
 async function loadGameData() {
@@ -566,14 +573,15 @@ function setupEventHandlers() {
         const state = stateManager.state;
         
         if (data.npc && data.npc.killedBy === 'player') {
-            // Hostiles (pirates and bosses) pay their full declared bounty
-            const fullBounty = data.npc.behavior === 'aggressive' || data.npc.behavior === 'boss';
-            const bounty = fullBounty ?
-                data.npc.credits : Math.floor(data.npc.credits * 0.5);
+            // Hostiles (every pirate variant and bosses) pay their full declared bounty
+            const HOSTILE = new Set(['aggressive', 'elite', 'ambusher', 'boss']);
+            const isHostile = HOSTILE.has(data.npc.behavior);
+            const declared = Number(data.npc.credits) || 0;
+            const bounty = isHostile ? declared : Math.floor(declared * 0.5);
             state.ship.credits += bounty + 25;
             state.ship.kills++;
             
-            if (data.npc.behavior === 'aggressive') {
+            if (isHostile && data.npc.behavior !== 'boss') {
                 state.ship.pirateKills = (state.ship.pirateKills || 0) + 1;
                 // Reputation: defeating pirates increases patrol standing
                 state.reputation = state.reputation || { trader: 0, patrol: 0, pirate: 0 };
@@ -651,17 +659,20 @@ async function initializeSystems() {
     } catch (e) {
         console.error('❌ PhysicsSystem failed:', e);
     }
-    
+
+    try {
+        systems.vfx = new VisualEffectsSystem();
+        systems.vfx.init();
+        console.log('✅ VisualEffectsSystem initialized');
+    } catch (e) {
+        console.error('❌ VisualEffectsSystem failed:', e);
+    }
+
     try {
         const canvas = document.getElementById('gameCanvas');
-        const useWebGL = (typeof window !== 'undefined') && (
-            !!window.RENDER_WEBGL ||
-            /(?:^|[?&])webgl=1(?:&|$)/.test(window.location.search || '') ||
-            (typeof localStorage !== 'undefined' && localStorage.getItem('RENDER_WEBGL') === '1')
-        );
-        systems.render = useWebGL ? new WebGLRenderSystem(canvas) : new RenderSystem(canvas);
+        systems.render = new RenderSystem(canvas);
         await systems.render.init();
-        console.log(useWebGL ? '✅ WebGLRenderSystem initialized' : '✅ RenderSystem initialized');
+        console.log('✅ RenderSystem initialized');
     } catch (e) {
         console.error('❌ RenderSystem failed:', e);
     }
@@ -757,6 +768,14 @@ async function initializeSystems() {
     }
     
     try {
+        systems.gamefeel = new GameFeelSystem();
+        systems.gamefeel.init();
+        console.log('✅ GameFeelSystem initialized');
+    } catch (e) {
+        console.error('❌ GameFeelSystem failed:', e);
+    }
+
+    try {
         systems.debug = new DebugSystem();
         await systems.debug.init();
         console.log('✅ DebugSystem initialized');
@@ -775,6 +794,26 @@ async function initializeSystems() {
     // Mission objects that came back from a save lost their isComplete()
     // closures to JSON; reattach them from the static definitions (E13).
     try { systems.mission?.rehydrate(stateManager.state.ship); } catch(e) { console.warn('[EventBus] Mission rehydrate failed:', e); }
+
+    // Resolve the declared update order (S4). To add a system, add one line to
+    // SYSTEM_ORDER in core/SystemRegistry.js — not here.
+    try {
+        systemRegistry = buildSystemRegistry(systems);
+    } catch (e) {
+        // The registry is the only thing driving update and render; never let a
+        // failure here leave a black, frozen screen.
+        console.error('❌ SystemRegistry failed; falling back to construction order:', e);
+        systemRegistry = Object.entries(systems)
+            .filter(([, sys]) => sys)
+            .map(([key, sys]) => ({
+                key,
+                instance: sys,
+                update: typeof sys.update === 'function',
+                render: key === 'render' && typeof sys.render === 'function'
+            }));
+    }
+    try { window.systemRegistry = systemRegistry; } catch(_) {}
+    console.log('[EventBus] Update order:', systemRegistry.filter(e => e.update).map(e => e.key).join(' → '));
 
     return systems;
 }
@@ -892,11 +931,12 @@ async function initGame() {
 
                 const now0 = performance.now ? performance.now() : Date.now();
                 let totalMs = 0; const breakdown = {}; let worstK = null, worstV = -1;
-                for (const [key, system] of Object.entries(systems)) {
-                    if (!system || typeof system.update !== 'function') continue;
+                for (const entry of systemRegistry) {
+                    if (!entry.update) continue;
+                    const key = entry.key;
                     mark('u:' + key);
                     const t0 = shouldProfile ? (performance.now ? performance.now() : Date.now()) : 0;
-                    system.update(state, deltaTime);
+                    entry.instance.update(state, deltaTime);
                     mark('u:' + key + ':done');
                     if (shouldProfile) {
                         const dt = (performance.now ? performance.now() : Date.now()) - t0;
@@ -1009,9 +1049,11 @@ async function initGame() {
             }
         },
         onRender: (interpolation, deltaTime) => {
-            if (systems.render && systems.render.render) {
+            // Render entries run at display rate, outside the fixed-step sequence.
+            for (const entry of systemRegistry) {
+                if (!entry.render) continue;
                 mark('r:start');
-                systems.render.render(stateManager.state, deltaTime);
+                entry.instance.render(stateManager.state, deltaTime);
                 mark('r:end');
             }
         },
@@ -1149,6 +1191,8 @@ async function initGame() {
         runSystem.startNewRun(id);
         mainMenuUI.hide();
         stateManager.state.paused = false;
+        // Pair the ship save with the new run id right away (silent, prompt save)
+        eventBus.emit(GameEvents.GAME_SAVE, { reason: 'run-start' });
     };
 
     mainMenuUI.onContinueRun = () => {
@@ -1174,6 +1218,7 @@ async function initGame() {
         initShipForRun(id);
         runSystem.startNewRun(id);
         stateManager.state.paused = false;
+        eventBus.emit(GameEvents.GAME_SAVE, { reason: 'run-start' });
     };
 
     deathScreenUI.onMainMenu = () => {

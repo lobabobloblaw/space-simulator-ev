@@ -4,6 +4,33 @@ import { GameConstants } from '../utils/Constants.js';
 import { MathUtils } from '../utils/MathUtils.js';
 
 /**
+ * Boss signature ordnance (W3.3).
+ *
+ * Both kinds are hostile-only: they are skipped by the NPC and asteroid
+ * collision passes, so a boss can seed the arena without gutting its own adds
+ * or the rock field. Frozen module constant — no per-frame allocation.
+ */
+export const SIGNATURE_ORDNANCE = Object.freeze({
+    mine: Object.freeze({
+        speed: 0.15,            // drifts, does not fly
+        lifetimeFrames: 360,    // 6 s at 60 Hz, then it cooks off
+        armDistance: 60,        // player inside this radius detonates it
+        blastRadius: 90,        // area damage radius on detonation
+        damage: 25,
+        // A fan is laid on an arc behind the boss. The arc is deliberately wide
+        // and stood off from the hull so neighbours sit ~50-90 units apart:
+        // clipping one mine costs 25, not the whole fan at once.
+        fanSpreadRad: 2.2,
+        layRadiusPad: 60
+    }),
+    lance: Object.freeze({
+        speed: 6,
+        lifetimeFrames: 72,     // 1.2 s at 60 Hz
+        damage: 45
+    })
+});
+
+/**
  * WeaponSystem - Handles all weapon mechanics (firing, projectiles, damage)
  * Manages projectile creation, collision detection, and weapon switching
  */
@@ -11,23 +38,14 @@ export class WeaponSystem {
     constructor() {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
-        
+
         // System state
         this.projectiles = [];
-        this.weaponTypes = {
-            laser: { type: "laser", damage: 10, cooldown: 15, speed: 2 },
-            rapid: { type: "rapid", damage: 5, cooldown: 5, speed: 3 },
-            plasma: { type: "plasma", damage: 20, cooldown: 30, speed: 1.5 },
-            mining: { type: "mining", damage: 3, cooldown: 10, speed: 2 },
-            void: { type: "void", damage: 18, cooldown: 22, speed: 2.2 }
-        };
-        
+
         // Bind event handlers
-        this.handleWeaponFire = this.handleWeaponFire.bind(this);
         this.handleWeaponSwitch = this.handleWeaponSwitch.bind(this);
-        this.handleProjectileUpdate = this.handleProjectileUpdate.bind(this);
         this.handleEntityDestroyed = this.handleEntityDestroyed.bind(this);
-        
+
         console.log('[WeaponSystem] Created');
     }
     
@@ -50,38 +68,15 @@ export class WeaponSystem {
     subscribeToEvents() {
         // Input events - WeaponSystem directly handles weapon input through update()
         // No need to subscribe to INPUT_FIRE as we handle it in update()
-        
+
         // Weapon events
-        this.eventBus.on(GameEvents.WEAPON_FIRE, this.handleWeaponFire);
         this.eventBus.on(GameEvents.INPUT_SWITCH_WEAPON, this.handleWeaponSwitch);
-        
+
         // Combat events
         this.eventBus.on(GameEvents.PHYSICS_COLLISION, this.handleCollision.bind(this));
         this.eventBus.on(GameEvents.NPC_DESTROYED, this.handleEntityDestroyed);
     }
-    
-    /**
-     * Handle weapon fire event
-     */
-    handleWeaponFire(data) {
-        if (!data || !data.shooter) return;
-        
-        const weapon = data.weapon || this.weaponTypes.laser;
-        this.fireProjectile(
-            data.shooter,
-            data.angle,
-            data.isPlayer || false,
-            weapon
-        );
-        
-        // Emit sound event
-        this.eventBus.emit(GameEvents.WEAPON_FIRED, {
-            weapon: weapon,
-            shooter: data.shooter,
-            isPlayer: data.isPlayer
-        });
-    }
-    
+
     /**
      * Handle weapon switch event
      */
@@ -97,14 +92,6 @@ export class WeaponSystem {
             
             try { if (typeof window !== 'undefined' && window.DEBUG_WEAPONS) console.log('[WeaponSystem] Switched to weapon:', ship.weapons[ship.currentWeapon].type); } catch(_) {}
         }
-    }
-    
-    /**
-     * Handle projectile update event
-     */
-    handleProjectileUpdate(data) {
-        // This would be called from the game loop to update projectile positions
-        // For now, the update logic is in the update() method
     }
     
     /**
@@ -253,20 +240,37 @@ export class WeaponSystem {
             proj.y += proj.vy;
             proj.lifetime++;
             
-            // Remove expired projectiles (per-type lifetime, extended for longer travel)
+            // Remove expired projectiles (per-type lifetime, extended for longer travel).
+            // Signature ordnance carries its own `maxLifetime` and wins.
             const lifetimes = (GameConstants?.WEAPONS?.PROJECTILE_LIFETIME_FRAMES) || {};
-            let maxLifetime = lifetimes[proj.type] ?? (GameConstants?.WEAPONS?.PROJECTILE_LIFETIME ?? 100);
+            let maxLifetime = Number.isFinite(proj.maxLifetime)
+                ? proj.maxLifetime
+                : (lifetimes[proj.type] ?? (GameConstants?.WEAPONS?.PROJECTILE_LIFETIME ?? 100));
             // Apply optional debug multiplier
             const mult = (state && state.debug && typeof state.debug.projLifetimeMult === 'number')
                 ? state.debug.projLifetimeMult : 1;
             maxLifetime = Math.floor(maxLifetime * mult);
             // 'laser' uses default
             if (proj.lifetime > maxLifetime) {
+                // A mine that runs out of clock cooks off where it sits
+                if (proj.type === 'mine') this.detonateMine(proj, ship, explosions, audioSystem);
                 this.projectiles.splice(i, 1);
                 this.eventBus.emit(GameEvents.PHYSICS_PROJECTILE_EXPIRED, { projectile: proj });
                 continue;
             }
-            
+
+            // Mines never collide — they arm on player proximity, then detonate
+            if (proj.type === 'mine') {
+                if (ship && !ship.isDestroyed) {
+                    const arm = SIGNATURE_ORDNANCE.mine.armDistance;
+                    if (MathUtils.distanceSquared(proj.x, proj.y, ship.x, ship.y) < arm * arm) {
+                        this.detonateMine(proj, ship, explosions, audioSystem);
+                        this.projectiles.splice(i, 1);
+                    }
+                }
+                continue;
+            }
+
             // Check collision with player ship
             if (!proj.isPlayer && ship && !ship.isDestroyed) {
                 const r2 = (ship.size || 0) * (ship.size || 0);
@@ -276,13 +280,20 @@ export class WeaponSystem {
                     continue;
                 }
             }
-            
+
+            // Signature ordnance is player-only: it passes through NPCs and rocks
+            if (proj.type === 'lance') continue;
+
             // Check collision with NPCs
             if (npcShips) {
                 for (let npc of npcShips) {
                     if (proj.shooter === npc) continue;
-                    // Skip faction allies for NPC projectiles (M3: prevent friendly fire)
-                    if (!proj.isPlayer && proj.shooter && proj.shooter.behavior === npc.behavior) continue;
+                    // Skip faction allies for NPC projectiles (M3: prevent friendly fire).
+                    // Faction is the authority now that hostiles no longer share one
+                    // `behavior` string (pirate / elite / ambusher / boss are all
+                    // faction 'pirate'); behavior is the fallback for seeded NPCs.
+                    if (!proj.isPlayer && proj.shooter &&
+                        (proj.shooter.faction || proj.shooter.behavior) === (npc.faction || npc.behavior)) continue;
                     const r2 = (npc.size || 0) * (npc.size || 0);
                     if (MathUtils.distanceSquared(proj.x, proj.y, npc.x, npc.y) < r2) {
                         this.handleProjectileHitNPC(proj, npc, explosions);
@@ -291,7 +302,7 @@ export class WeaponSystem {
                     }
                 }
             }
-            
+
             // Check collision with asteroids
             if (asteroids) {
                 for (let asteroid of asteroids) {
@@ -595,35 +606,110 @@ export class WeaponSystem {
         });
     }
     
+    // ==================== BOSS SIGNATURE ORDNANCE ====================
+
     /**
-     * Get weapon by type
+     * Lay a fan of proximity mines behind `npc` (boss signature `type: 'mines'`).
+     * Mines are hostile-only: they never touch NPCs or asteroids.
+     * @returns {number} how many were laid
      */
-    getWeaponType(type) {
-        return this.weaponTypes[type] || this.weaponTypes.laser;
-    }
-    
-    /**
-     * Add new weapon type
-     */
-    addWeaponType(type, config) {
-        this.weaponTypes[type] = config;
-    }
-    
-    /**
-     * Get all projectiles
-     */
-    getProjectiles() {
-        return this.projectiles;
-    }
-    
-    /**
-     * Clear all projectiles
-     */
-    clearProjectiles() {
-        this.projectiles = [];
+    fireMines(npc, count = 5) {
+        if (!npc || !Number.isFinite(npc.x) || !Number.isFinite(npc.y)) return 0;
+        const n = Math.max(1, Math.floor(count));
+        const CFG = SIGNATURE_ORDNANCE.mine;
+
+        // Fan points away from the boss's nose, so mines are left in its wake
+        const centre = (npc.angle || 0) + Math.PI;
+        const step = n > 1 ? CFG.fanSpreadRad / (n - 1) : 0;
+        const start = centre - CFG.fanSpreadRad / 2;
+
+        const layRadius = (npc.size || 20) + CFG.layRadiusPad;
+        for (let i = 0; i < n; i++) {
+            const a = start + step * i;
+            this.projectiles.push({
+                x: npc.x + Math.cos(a) * layRadius,
+                y: npc.y + Math.sin(a) * layRadius,
+                vx: Math.cos(a) * CFG.speed,
+                vy: Math.sin(a) * CFG.speed,
+                isPlayer: false,
+                shooter: npc,
+                lifetime: 0,
+                maxLifetime: CFG.lifetimeFrames,
+                damage: CFG.damage,
+                type: 'mine',
+                trailLen: 0,
+                trailWidth: 0
+            });
+        }
         this.syncState();
+
+        this.eventBus.emit(GameEvents.WEAPON_FIRED, {
+            weapon: { type: 'mine', damage: CFG.damage },
+            shooter: npc,
+            isPlayer: false
+        });
+        return n;
     }
-    
+
+    /**
+     * Fire a charged void lance at `target` (boss signature `type: 'lance'`).
+     * The wind-up/telegraph is owned by NPCSystem.makeBossDecision; by the time
+     * this runs the shot is committed.
+     * @returns {boolean} whether the lance left the tube
+     */
+    fireLance(npc, target) {
+        if (!npc || !Number.isFinite(npc.x) || !Number.isFinite(npc.y)) return false;
+        const CFG = SIGNATURE_ORDNANCE.lance;
+
+        // Aimed, not sprayed — this is the payoff for the 45-frame tell
+        let angle = npc.angle || 0;
+        if (target && Number.isFinite(target.x) && Number.isFinite(target.y)) {
+            const a = Math.atan2(target.y - npc.y, target.x - npc.x);
+            if (Number.isFinite(a)) angle = a;
+        }
+
+        this.projectiles.push({
+            x: npc.x + Math.cos(angle) * ((npc.size || 20) + 8),
+            y: npc.y + Math.sin(angle) * ((npc.size || 20) + 8),
+            vx: Math.cos(angle) * CFG.speed,
+            vy: Math.sin(angle) * CFG.speed,
+            isPlayer: false,
+            shooter: npc,
+            lifetime: 0,
+            maxLifetime: CFG.lifetimeFrames,
+            damage: CFG.damage,
+            type: 'lance',
+            trailLen: 14,
+            trailWidth: 5
+        });
+        this.syncState();
+
+        this.eventBus.emit(GameEvents.WEAPON_FIRED, {
+            weapon: { type: 'lance', damage: CFG.damage },
+            shooter: npc,
+            isPlayer: false
+        });
+        return true;
+    }
+
+    /**
+     * Detonate a mine: a medium blast plus area damage to the player only.
+     * Caller removes the projectile.
+     */
+    detonateMine(proj, ship, explosions, audioSystem) {
+        const CFG = SIGNATURE_ORDNANCE.mine;
+        this.eventBus.emit(GameEvents.EXPLOSION, { x: proj.x, y: proj.y, size: 'medium' });
+
+        if (!ship || ship.isDestroyed) return;
+        const r = CFG.blastRadius;
+        if (MathUtils.distanceSquared(proj.x, proj.y, ship.x, ship.y) > r * r) return;
+
+        // Reuse the normal hit path so shields, god mode, sparks and the
+        // SHIP_DAMAGE event all behave exactly as they do for a bolt.
+        proj.damage = CFG.damage;
+        this.handleProjectileHitShip(proj, ship, explosions, audioSystem);
+    }
+
     /**
      * Update weapon system (called each frame)
      */
@@ -676,7 +762,6 @@ export class WeaponSystem {
         this.projectiles = [];
         
         // Unsubscribe from events
-        this.eventBus.off(GameEvents.WEAPON_FIRE, this.handleWeaponFire);
         this.eventBus.off(GameEvents.INPUT_SWITCH_WEAPON, this.handleWeaponSwitch);
         this.eventBus.off(GameEvents.PHYSICS_COLLISION, this.handleCollision);
         this.eventBus.off(GameEvents.NPC_DESTROYED, this.handleEntityDestroyed);

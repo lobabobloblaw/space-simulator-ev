@@ -6,8 +6,23 @@
     <title>Galaxy Trader - Space Trading & Combat</title>
     <!-- CSP: 'wasm-unsafe-eval' covers the WASM/Emscripten audio modules; connect-src restricted to known APIs -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://lexica.art https://image.pollinations.ai; object-src 'none'; base-uri 'self';">
+    <meta name="description" content="Galaxy Trader — a browser space trading roguelike: fly, fight, trade and push through four zones to kill The Void King.">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
+    <!-- PWA (U7) -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <meta name="theme-color" content="#0a0a0a">
+    <link rel="apple-touch-icon" href="./favicon-64.png">
+    <!-- Social share card (U7) -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Galaxy Trader">
+    <meta property="og:description" content="A browser space trading roguelike. Four zones, three bosses, permadeath — unlocks are forever.">
+    <meta property="og:image" content="./assets/share.png">
+    <meta property="og:url" content="https://lobabobloblaw.github.io/space-simulator-ev/">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Galaxy Trader">
+    <meta name="twitter:description" content="A browser space trading roguelike. Four zones, three bosses, permadeath — unlocks are forever.">
+    <meta name="twitter:image" content="./assets/share.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Orbitron:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
@@ -24,7 +39,19 @@
         <span id="gameVersion" class="version"></span>
     </div>
     <div id="gameAnnouncements" aria-live="assertive" aria-atomic="true" class="sr-only" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;"> </div>
-    
+
+    <!-- Zone / boss telegraph banner (distinct from toasts) -->
+    <div id="zoneBanner" aria-hidden="true">
+        <div id="zoneBannerTitle"></div>
+        <div id="zoneBannerSub"></div>
+    </div>
+
+    <!-- Flight-time contract tracker (hidden until a contract is active) -->
+    <div id="contractTracker" aria-label="Active contracts" role="region">
+        <div id="contractTrackerTitle">CONTRACTS</div>
+        <div id="contractTrackerList"></div>
+    </div>
+
     <!-- 90s Space Sim HUD -->
     <div id="gameHUD">
         <div class="tech-line"></div>
@@ -127,7 +154,7 @@
             <h1 class="menu-title">GALAXY TRADER</h1>
             <div class="menu-subtitle">A Space Trading Roguelike</div>
 
-            <div id="shipCarousel" class="ship-carousel">
+            <div id="shipCarousel" class="ship-carousel" role="radiogroup" aria-label="Select starting ship">
                 <!-- Ships populated by MainMenuUI.js -->
             </div>
 

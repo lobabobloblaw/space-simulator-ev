@@ -166,9 +166,9 @@ check('reload: no console errors', consoleErrors.length === errsBeforeReload, co
 
 // ============================================================================
 // Scenario 2: run-to-victory — boots fresh, plays a full roguelike run start
-// to finish (Core -> Frontier -> Outer Rim -> The Void), killing NPCs and both
-// zone bosses with real projectiles (never calling spawnZoneBoss() directly,
-// so the boss-trigger regression stays covered), reaches the victory screen,
+// to finish (Core -> Frontier -> Outer Rim -> The Void), killing NPCs and all
+// three zone bosses with real projectiles (never calling spawnZoneBoss()
+// directly, so the boss-trigger regression stays covered), reaches the victory screen,
 // unlocks the battlecruiser, starts a run with it, then dies and retries.
 // ============================================================================
 
@@ -228,7 +228,7 @@ async function fireUntil(page, predicateFn, maxMs = 5000) {
 
 // Kill `count` real NPCs one at a time via spawnAhead/killTaggedNPC, sweeping
 // dead leftovers between kills. Used for the natural (kills-based) boss
-// trigger in Outer Rim and The Void — spawnZoneBoss() is never called.
+// trigger in Frontier, Outer Rim and The Void — spawnZoneBoss() is never called.
 async function killNRealNPCs(page, count, health = 6) {
   for (let i = 0; i < count; i++) {
     const sp = await spawnAhead(page, { health });
@@ -286,19 +286,74 @@ check('victory-run: first real kill registers and pays bounty',
   !sp1.error && kill1Ok && !kill1Res.error && kill1Res.kills === 1 && kill1Res.statKills === 1 && kill1Res.credits > startCredits,
   JSON.stringify({ sp1, kill1Ok, kill1Res, startCredits }));
 
-// --- 4. Advance Core -> Frontier -> Outer Rim ---
+// --- 4. Advance Core -> Frontier (Core keeps its kill/credit gate) ---
 await page.evaluate(() => { window.__rs._runStats.kills = 5; window.stateManager.state.ship.credits = 1200; });
 await page.keyboard.press('z');
 await page.waitForFunction(() => window.__rs.getCurrentZone().name === 'Frontier Space', null, { timeout: 3000 }).catch(() => {});
-await page.evaluate(() => { window.__rs._runStats.kills = 15; window.stateManager.state.ship.credits = 6000; });
+const frontierRes = await page.evaluate(() => {
+  try {
+    return { zoneName: window.__rs.getCurrentZone().name, bossTriggerKills: window.__rs.getRunStats().bossTriggerKills };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: advanced Core -> Frontier',
+  !frontierRes.error && frontierRes.zoneName === 'Frontier Space' && frontierRes.bossTriggerKills === 3,
+  JSON.stringify(frontierRes));
+
+// --- 4b. Frontier is a boss gate now: 3 real kills summon Warlord Krix ---
+await page.evaluate(() => {
+  const s = window.stateManager.state;
+  s.npcShips = [];
+  s.ship.vx = 0; s.ship.vy = 0;
+  s.ship.health = s.ship.maxHealth;
+});
+const trigK = await killNRealNPCs(page, 3, 6);
+let krixAppeared = false;
+if (trigK.ok) {
+  try {
+    await page.waitForFunction(() => window.stateManager.state.npcShips.some((n) => n.type === 'boss'), null, { timeout: 3000, polling: 100 });
+    krixAppeared = true;
+  } catch { krixAppeared = false; }
+}
+await page.evaluate(() => {
+  const s = window.stateManager.state;
+  const b = s.npcShips.find((n) => n.type === 'boss');
+  if (b) {
+    b.x = s.ship.x + Math.cos(s.ship.angle) * 120;
+    b.y = s.ship.y + Math.sin(s.ship.angle) * 120;
+    b.vx = 0; b.vy = 0; b.maxSpeed = 0; b.thrust = 0;
+    b.health = 9;
+    s.ship.vx = 0; s.ship.vy = 0;
+  }
+});
+const krixDead = await fireUntil(page, () => window.__rs._runStats.bossesDefeated.includes('warlord_krix'), 5000);
+await page.waitForTimeout(300);
+const krixRes = await page.evaluate(() => {
+  try {
+    let meta = null;
+    try { meta = JSON.parse(localStorage.getItem('galaxyTraderMeta') || 'null'); } catch {}
+    return { unlockShips: meta?.unlocks?.ships || [], canAdvance: window.__rs.canAdvance() };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: Warlord Krix defeated, corvette unlocked, zone advance available',
+  trigK.ok && krixAppeared && krixDead && !krixRes.error &&
+  krixRes.unlockShips.includes('corvette') && krixRes.canAdvance === true,
+  JSON.stringify({ trigK, krixAppeared, krixDead, krixRes }));
+
+// --- 4c. Advance Frontier -> Outer Rim ---
 await page.keyboard.press('z');
 await page.waitForFunction(() => window.__rs.getCurrentZone().name === 'Outer Rim', null, { timeout: 3000 }).catch(() => {});
+await page.evaluate(() => {
+  const s = window.stateManager.state;
+  s.npcShips = [];
+  s.ship.vx = 0; s.ship.vy = 0;
+  s.ship.health = s.ship.maxHealth;
+});
 const zoneRes = await page.evaluate(() => {
   try {
     return { zoneName: window.__rs.getCurrentZone().name, bossTriggerKills: window.__rs.getRunStats().bossTriggerKills };
   } catch (e) { return { error: String((e && e.message) || e) }; }
 });
-check('victory-run: advanced Core -> Frontier -> Outer Rim',
+check('victory-run: advanced Frontier -> Outer Rim',
   !zoneRes.error && zoneRes.zoneName === 'Outer Rim' && zoneRes.bossTriggerKills === 3,
   JSON.stringify(zoneRes));
 
@@ -406,7 +461,7 @@ check('victory-run: Void King defeated -> victory screen, unlocks, meta stats',
   victoryRes.unlocksText.length > 0 &&
   victoryRes.paused === true &&
   victoryRes.totalWins === 1 &&
-  typeof victoryRes.bossesDefeated === 'number' && victoryRes.bossesDefeated === 2 &&
+  typeof victoryRes.bossesDefeated === 'number' && victoryRes.bossesDefeated === 3 &&
   victoryRes.unlockShips.includes('battlecruiser'),
   JSON.stringify({ trig2, bossAppeared2, voidKingDead, victoryRes }));
 

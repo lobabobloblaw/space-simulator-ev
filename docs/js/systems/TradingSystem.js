@@ -316,10 +316,6 @@ export default class TradingSystem {
             }
         }
     }
-
-    update(state, deltaTime) {
-        // Nothing to update each frame for trading
-    }
 }
 
 // No globals

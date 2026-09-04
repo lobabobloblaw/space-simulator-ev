@@ -2,15 +2,19 @@
  * MetaStateManager - Manages permanent progression across runs
  * Handles ship unlocks, upgrade pool unlocks, and persistent statistics
  *
- * Stored separately from run state in localStorage key: 'galaxyTraderMeta'
+ * Persisted through core/Persistence.js under the 'meta' key
+ * ('galaxyTraderMeta', schema 2). This module never touches localStorage
+ * directly: reads are migrated by Persistence, writes surface quota failures.
  */
 
-const META_STORAGE_KEY = 'galaxyTraderMeta';
-const META_VERSION = '1.0';
+import * as Persistence from './Persistence.js';
+import { bosses } from '../data/zones.js';
+
+// Shared with the meta 1→2 migration in Persistence
+const coerceBossCount = Persistence.coerceBossCount;
 
 // Default meta state for new players
 const DEFAULT_META_STATE = {
-    version: META_VERSION,
     unlocks: {
         ships: ['shuttle'],           // Starting ships available
         upgrades: ['weapon1']         // shopInventory keys (weapon1 = Mining Laser)
@@ -38,6 +42,18 @@ const makeDefaultMeta = () => (typeof structuredClone === 'function'
 // All possible ship unlocks (for reference)
 export const ALL_SHIPS = ['shuttle', 'interceptor', 'corvette', 'freighter', 'gunship', 'battlecruiser'];
 
+// How each locked ship is earned, for the main-menu carousel. Boss-granted
+// ships are resolved from zones.js first (see getUnlockCondition); this table
+// covers the ships no boss grants, and is the fallback if the data goes away.
+const SHIP_UNLOCK_CONDITIONS = {
+    shuttle: 'Available from the start',
+    interceptor: 'Win a run',
+    corvette: 'Defeat Warlord Krix',
+    battlecruiser: 'Defeat The Void King',
+    freighter: 'Coming in a later build',
+    gunship: 'Coming in a later build'
+};
+
 // All possible upgrade unlocks — ids are shopInventory keys (gameData.js)
 export const ALL_UPGRADES = [
     'weapon1', 'weapon2', 'weapon3',
@@ -50,7 +66,6 @@ export const ALL_UPGRADES = [
 class MetaStateManager {
     constructor() {
         this._meta = null;
-        this._listeners = new Map();
     }
 
     /**
@@ -74,22 +89,13 @@ class MetaStateManager {
     }
 
     /**
-     * Load meta state from localStorage
+     * Load meta state through Persistence (schema detection + migrations live
+     * there; an unreadable or refused blob falls back to defaults).
      */
     _loadFromStorage() {
         try {
-            const stored = localStorage.getItem(META_STORAGE_KEY);
-            if (!stored) return makeDefaultMeta();
-
-            const parsed = JSON.parse(stored);
-
-            // Version migration if needed
-            if (parsed.version !== META_VERSION) {
-                console.log('[MetaStateManager] Migrating from version', parsed.version);
-                return this._migrate(parsed);
-            }
-
-            // Merge with defaults to ensure all fields exist
+            const parsed = Persistence.read('meta');
+            if (!parsed) return makeDefaultMeta();
             return this._mergeWithDefaults(parsed);
         } catch (e) {
             console.warn('[MetaStateManager] Failed to load, using defaults:', e);
@@ -102,7 +108,6 @@ class MetaStateManager {
      */
     _mergeWithDefaults(loaded) {
         const merged = {
-            version: META_VERSION,
             unlocks: {
                 ships: [...(loaded.unlocks?.ships || DEFAULT_META_STATE.unlocks.ships)],
                 upgrades: [...(loaded.unlocks?.upgrades || DEFAULT_META_STATE.unlocks.upgrades)]
@@ -115,48 +120,25 @@ class MetaStateManager {
             achievements: loaded.achievements || []
         };
 
-        // Migration: bossesDefeated used to be concatenated with the run's
-        // boss-id array, producing strings like "0pirate_lord,void_king"
-        merged.stats.bossesDefeated = this._coerceBossCount(merged.stats.bossesDefeated);
+        // Belt and braces: the meta 1→2 migration already coerces this, but a
+        // blob written by a build in between could still carry the string form.
+        merged.stats.bossesDefeated = coerceBossCount(merged.stats.bossesDefeated);
 
         return merged;
     }
 
     /**
-     * Coerce a possibly-corrupt bossesDefeated stat back to a count
-     */
-    _coerceBossCount(value) {
-        if (typeof value === 'number' && Number.isFinite(value)) return value;
-        if (Array.isArray(value)) return value.length;
-        if (typeof value === 'string') {
-            // "0pirate_lord,void_king" → 2 ids appended to a leading 0
-            const ids = value.replace(/^\d+/, '').split(',').filter(Boolean);
-            const leading = parseInt(value, 10);
-            return (Number.isFinite(leading) ? leading : 0) + ids.length;
-        }
-        return 0;
-    }
-
-    /**
-     * Migrate old meta state versions
-     */
-    _migrate(old) {
-        // Future migrations go here
-        return this._mergeWithDefaults(old);
-    }
-
-    /**
-     * Save current meta state to localStorage
+     * Save current meta state (schema stamp + quota reporting via Persistence)
+     * @returns {boolean} True when the write landed
      */
     save() {
-        try {
-            localStorage.setItem(META_STORAGE_KEY, JSON.stringify(this._meta));
-            console.log('[MetaStateManager] Saved');
-            return true;
-        } catch (e) {
-            console.error('[MetaStateManager] Save failed:', e);
+        const ok = Persistence.write('meta', this._meta);
+        if (!ok) {
+            console.error('[MetaStateManager] Save failed:', Persistence.lastWriteError());
             return false;
         }
+        console.log('[MetaStateManager] Saved');
+        return true;
     }
 
     // ==================== UNLOCK METHODS ====================
@@ -183,7 +165,6 @@ class MetaStateManager {
         if (this._meta.unlocks.ships.includes(shipId)) return false;
         this._meta.unlocks.ships.push(shipId);
         this.save();
-        this._emit('ship_unlock', { shipId });
         console.log('[MetaStateManager] Ship unlocked:', shipId);
         return true;
     }
@@ -196,7 +177,6 @@ class MetaStateManager {
         if (this._meta.unlocks.upgrades.includes(upgradeId)) return false;
         this._meta.unlocks.upgrades.push(upgradeId);
         this.save();
-        this._emit('upgrade_unlock', { upgradeId });
         console.log('[MetaStateManager] Upgrade unlocked:', upgradeId);
         return true;
     }
@@ -216,6 +196,31 @@ class MetaStateManager {
     }
 
     /**
+     * Short "how do I get this?" line for a locked ship, for the menu.
+     * Boss-granted ships are derived from the zone data so the string tracks
+     * whatever boss actually carries the unlock; the rest fall back to the
+     * SHIP_UNLOCK_CONDITIONS table above.
+     * @param {string} shipId
+     * @returns {string} One short line (never empty)
+     */
+    getUnlockCondition(shipId) {
+        if (this.isShipUnlocked(shipId)) return 'Unlocked';
+
+        // Derived: a boss whose `unlocks` grants this ship
+        try {
+            for (const boss of Object.values(bosses || {})) {
+                if (boss?.unlocks?.type === 'ship' && boss.unlocks.id === shipId) {
+                    return `Defeat ${boss.name || boss.id}`;
+                }
+            }
+        } catch (e) {
+            console.warn('[MetaStateManager] Unlock condition lookup failed:', e);
+        }
+
+        return SHIP_UNLOCK_CONDITIONS[shipId] || 'Coming in a later build';
+    }
+
+    /**
      * Check if an achievement is completed
      */
     hasAchievement(achievementId) {
@@ -230,7 +235,6 @@ class MetaStateManager {
         if (this._meta.achievements.includes(achievementId)) return false;
         this._meta.achievements.push(achievementId);
         this.save();
-        this._emit('achievement_complete', { achievementId });
         console.log('[MetaStateManager] Achievement completed:', achievementId);
         return true;
     }
@@ -267,7 +271,7 @@ class MetaStateManager {
         const bossCount = Array.isArray(runStats.bossesDefeated)
             ? runStats.bossesDefeated.length
             : (Number(runStats.bossesDefeated) || 0);
-        this._meta.stats.bossesDefeated = this._coerceBossCount(this._meta.stats.bossesDefeated) + bossCount;
+        this._meta.stats.bossesDefeated = coerceBossCount(this._meta.stats.bossesDefeated) + bossCount;
 
         // Track zones reached
         if (runStats.zoneReached) {
@@ -286,38 +290,6 @@ class MetaStateManager {
         return { ...this._meta.stats };
     }
 
-    // ==================== EVENT SYSTEM ====================
-
-    /**
-     * Subscribe to meta events
-     */
-    on(event, callback) {
-        if (!this._listeners.has(event)) {
-            this._listeners.set(event, []);
-        }
-        this._listeners.get(event).push(callback);
-    }
-
-    /**
-     * Unsubscribe from meta events
-     */
-    off(event, callback) {
-        if (!this._listeners.has(event)) return;
-        const list = this._listeners.get(event);
-        const idx = list.indexOf(callback);
-        if (idx !== -1) list.splice(idx, 1);
-    }
-
-    /**
-     * Emit a meta event
-     */
-    _emit(event, data) {
-        if (!this._listeners.has(event)) return;
-        for (const cb of this._listeners.get(event)) {
-            try { cb(data); } catch (e) { console.error('[MetaStateManager] Event handler error:', e); }
-        }
-    }
-
     // ==================== DEBUG / RESET ====================
 
     /**
@@ -327,16 +299,6 @@ class MetaStateManager {
         this._meta = makeDefaultMeta();
         this.save();
         console.log('[MetaStateManager] Reset to defaults');
-    }
-
-    /**
-     * Unlock everything (for testing)
-     */
-    unlockAll() {
-        this._meta.unlocks.ships = [...ALL_SHIPS];
-        this._meta.unlocks.upgrades = [...ALL_UPGRADES];
-        this.save();
-        console.log('[MetaStateManager] All unlocks granted');
     }
 }
 

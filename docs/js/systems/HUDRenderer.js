@@ -48,6 +48,62 @@ export default class HUDRenderer {
     } catch (e) { logError('HUD.drawBuildTag', e); }
   }
 
+  /**
+   * World→screen for HUD overlays. Matches every other HUD draw: the
+   * RenderSystem camera plus screen centre, no shake (P10 tracks that).
+   */
+  _toScreen(x, y) {
+    return {
+      sx: x - this.camera.x + this.screenCenter.x,
+      sy: y - this.camera.y + this.screenCenter.y
+    };
+  }
+
+  /**
+   * Floating damage numbers (W2.2). Entries are produced by GameFeelSystem in
+   * `state.fx.damageNumbers` as {x, y, amount, t, life, crit, isPlayer}; `t` is
+   * a performance.now() stamp. Small (11 px), monospace (tabular by face),
+   * outlined so they stay legible over sprites and explosions.
+   */
+  drawDamageNumbers(state) {
+    try {
+      const list = state?.fx?.damageNumbers;
+      if (!Array.isArray(list) || list.length === 0) return;
+      const ctx = this.ctx;
+      const dpr = (ctx?.canvas?.__dpr) || 1;
+      const vw = (ctx?.canvas?.width || 0) / dpr;
+      const vh = (ctx?.canvas?.height || 0) / dpr;
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+      withScreen(ctx, () => {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+        for (let i = 0; i < list.length; i++) {
+          const n = list[i];
+          if (!n) continue;
+          const life = n.life || 700;
+          const age = now - n.t;
+          if (age < 0 || age >= life) continue;
+          const p = age / life;                       // 0..1
+          const rise = 22 * (1 - Math.pow(1 - p, 2)); // ease-out upward drift
+          const { sx, sy } = this._toScreen(n.x, n.y - rise);
+          if (sx < -40 || sy < -40 || sx > vw + 40 || sy > vh + 40) continue;
+          ctx.globalAlpha = p < 0.6 ? 1 : Math.max(0, 1 - (p - 0.6) / 0.4);
+          ctx.font = `${n.crit ? 'bold ' : ''}11px "JetBrains Mono", VT323, monospace`;
+          ctx.fillStyle = n.isPlayer ? '#ff4455' : (n.crit ? '#ffdd55' : '#ffffff');
+          const text = String(n.amount);
+          ctx.strokeText(text, sx, sy);
+          ctx.fillText(text, sx, sy);
+        }
+        ctx.restore();
+      });
+    } catch (e) { logError('HUD.drawDamageNumbers', e); }
+  }
+
   drawPlayerHealth(state) {
     try {
       const ship = state.ship;

@@ -11,11 +11,18 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { getMetaStateManager } from '../core/MetaStateManager.js';
+import * as Persistence from '../core/Persistence.js';
 import { getZone, getBoss, canAdvanceZone, zones } from '../data/zones.js';
 import { shipClasses, shopInventory } from '../data/gameData.js';
 
-// Run-specific storage key (ephemeral, deleted on run end)
-const RUN_STORAGE_KEY = 'galaxyTraderRun';
+// Schema of the ephemeral run blob ('galaxyTraderRun'). Owned by
+// core/Persistence.js, which also holds the migration chain; mirrored here so
+// the version this system writes is visible at the top of the file.
+export const RUN_SCHEMA_VERSION = Persistence.SCHEMA.run; // 1
+
+// Run saves are throttled: at most one write per window, with a trailing write.
+// Zone changes, boss spawn/defeat, run end and page-hide flush immediately.
+const RUN_SAVE_DEBOUNCE_MS = 1000;
 
 // New events for run lifecycle
 export const RunEvents = {
@@ -49,6 +56,12 @@ class RunSystem {
         this._bossWarned = false;
         this._bossTimer = null;
 
+        // Debounced run-save state (S2)
+        this._runSaveTimer = null;
+        this._runSaveDirty = false;
+        this._lastRunWriteAt = 0;
+        this._unregisterFlush = null;
+
         // Bind handlers
         this._handleShipDeath = this._handleShipDeath.bind(this);
         this._handleNPCDeath = this._handleNPCDeath.bind(this);
@@ -68,6 +81,11 @@ class RunSystem {
             this._currentZoneId = savedRun.zoneId || 'core';
         }
 
+        // Flush any debounced run save before the page goes away
+        if (!this._unregisterFlush) {
+            this._unregisterFlush = Persistence.onFlush(() => this._flushRun());
+        }
+
         // Subscribe to game events
         this.eventBus.on(GameEvents.SHIP_DEATH, this._handleShipDeath);
         this.eventBus.on(GameEvents.NPC_DEATH, this._handleNPCDeath);
@@ -78,14 +96,13 @@ class RunSystem {
     }
 
     /**
-     * Check if there's a run in progress that can be resumed
+     * Check if there's a run in progress that can be resumed.
+     * A run whose `runId` does not match the main save's is not resumable
+     * (the ship in that save belongs to a different run) — _loadSavedRun()
+     * drops it, so the menu hides CONTINUE instead of resuming a mismatch.
      */
     hasSavedRun() {
-        try {
-            return localStorage.getItem(RUN_STORAGE_KEY) !== null;
-        } catch (e) {
-            return false;
-        }
+        return this._loadSavedRun() !== null;
     }
 
     /**
@@ -111,6 +128,9 @@ class RunSystem {
         this._runStartTime = Date.now();
         this._runStats = this._createEmptyStats();
         this._runStats.shipId = shipId;
+        // Identity shared with the main save, so a resumed run and the ship it
+        // resumes with can be proven to belong together (S1)
+        this._runStats.runId = this._newRunId();
         this._currentZoneId = 'core';
         this._bossSpawned = false;
         this._bossDefeated = false;
@@ -142,7 +162,9 @@ class RunSystem {
     resumeRun() {
         const savedRun = this._loadSavedRun();
         if (!savedRun) {
-            console.warn('[RunSystem] No saved run to resume');
+            // Either nothing saved, or the run did not belong to the main save
+            // (_loadSavedRun warns and clears in that case)
+            console.warn('[RunSystem] No resumable saved run');
             return null;
         }
 
@@ -274,8 +296,8 @@ class RunSystem {
         // Update run stats
         this._runStats.zonesVisited.push(nextZone.id);
 
-        // Save progress
-        this._saveRun();
+        // Save progress immediately — a zone change is worth losing nothing
+        this._flushRun();
 
         // Emit zone change
         this.eventBus.emit(RunEvents.ZONE_CHANGE, {
@@ -301,7 +323,7 @@ class RunSystem {
         if (!boss) return null;
 
         this._bossSpawned = true;
-        this._saveRun();
+        this._flushRun();
 
         this.eventBus.emit(RunEvents.ZONE_BOSS_SPAWN, {
             bossId: zone.bossId,
@@ -345,7 +367,7 @@ class RunSystem {
             });
         }
 
-        this._saveRun();
+        this._flushRun();
 
         this.eventBus.emit(RunEvents.ZONE_BOSS_DEFEAT, {
             bossId,
@@ -508,40 +530,105 @@ class RunSystem {
         this._saveRun();
     }
 
-    _saveRun() {
-        if (!this._runActive) return;
-
-        try {
-            const runData = {
-                startTime: this._runStartTime,
-                stats: this._runStats,
-                zoneId: this._currentZoneId,
-                bossSpawned: this._bossSpawned,
-                bossDefeated: this._bossDefeated,
-                zoneKills: this._zoneKills,
-                savedAt: Date.now()
-            };
-            localStorage.setItem(RUN_STORAGE_KEY, JSON.stringify(runData));
-        } catch (e) {
-            console.warn('[RunSystem] Failed to save run:', e);
-        }
+    /**
+     * Identity stamped on both the run blob and the main save (S1)
+     */
+    _newRunId() {
+        const rand = Math.random().toString(36).slice(2, 10);
+        return `r${Date.now().toString(36)}-${rand}`;
     }
 
+    /**
+     * Request a run save. Throttled to one write per RUN_SAVE_DEBOUNCE_MS with
+     * a trailing write, so a kill streak or a burst of credit changes cannot
+     * put a JSON.stringify + setItem on every frame (S2). Use _flushRun() for
+     * the moments worth writing at once.
+     */
+    _saveRun() {
+        if (!this._runActive) return;
+        this._runSaveDirty = true;
+        if (this._runSaveTimer) return; // trailing write already scheduled
+
+        const since = Date.now() - this._lastRunWriteAt;
+        const delay = Math.max(0, RUN_SAVE_DEBOUNCE_MS - since);
+        this._runSaveTimer = setTimeout(() => {
+            this._runSaveTimer = null;
+            if (this._runSaveDirty) this._writeRun();
+        }, delay);
+    }
+
+    /**
+     * Write the run blob now, cancelling any pending debounced write.
+     * Called on zone change, boss spawn/defeat, run end and page hide.
+     */
+    _flushRun() {
+        this._cancelPendingRunSave();
+        if (!this._runActive) return false;
+        return this._writeRun();
+    }
+
+    _cancelPendingRunSave() {
+        if (this._runSaveTimer) {
+            clearTimeout(this._runSaveTimer);
+            this._runSaveTimer = null;
+        }
+        this._runSaveDirty = false;
+    }
+
+    /**
+     * Unconditional write (schema stamp and quota reporting live in Persistence)
+     */
+    _writeRun() {
+        this._runSaveDirty = false;
+        this._lastRunWriteAt = Date.now();
+        const ok = Persistence.write('run', {
+            startTime: this._runStartTime,
+            stats: this._runStats,
+            zoneId: this._currentZoneId,
+            bossSpawned: this._bossSpawned,
+            bossDefeated: this._bossDefeated,
+            zoneKills: this._zoneKills
+        });
+        if (!ok) console.warn('[RunSystem] Run save did not land:', Persistence.lastWriteError());
+        return ok;
+    }
+
+    /**
+     * Read the saved run (Persistence migrates it to schema
+     * RUN_SCHEMA_VERSION) and verify it belongs to the ship in the main save.
+     * A mismatched pair is dropped: resuming it would hand the player another
+     * run's ship (S1). Runs saved before run ids existed are grandfathered.
+     * @returns {object|null}
+     */
     _loadSavedRun() {
-        try {
-            const saved = localStorage.getItem(RUN_STORAGE_KEY);
-            return saved ? JSON.parse(saved) : null;
-        } catch (e) {
+        const savedRun = Persistence.read('run');
+        if (!savedRun) return null;
+        if (savedRun.schema !== RUN_SCHEMA_VERSION) {
+            // Persistence migrates forward, so this only fires if the two
+            // versions drift apart in a future change
+            console.warn('[RunSystem] Unexpected run schema', savedRun.schema);
             return null;
         }
+
+        const runId = savedRun.stats?.runId;
+        if (runId && !this._runActive) {
+            const mainSave = Persistence.read('save');
+            const saveRunId = mainSave?.runId || null;
+            if (saveRunId !== runId) {
+                console.warn('[RunSystem] Saved run does not match the saved ship ' +
+                    `(run ${runId} vs save ${saveRunId || 'none'}) — discarding run`);
+                Persistence.clearRun();
+                return null;
+            }
+        }
+        return savedRun;
     }
 
     _clearSavedRun() {
-        try {
-            localStorage.removeItem(RUN_STORAGE_KEY);
-        } catch (e) {
-            console.warn('[RunSystem] Failed to clear run save:', e);
-        }
+        // Cancel first: a pending debounced write must not resurrect the key
+        this._cancelPendingRunSave();
+        this._lastRunWriteAt = 0;
+        Persistence.clearRun();
     }
 
     _getVictoryUnlocks() {
@@ -599,6 +686,8 @@ class RunSystem {
      */
     destroy() {
         this._clearBossTrigger();
+        this._cancelPendingRunSave();
+        if (this._unregisterFlush) { this._unregisterFlush(); this._unregisterFlush = null; }
         this.eventBus.off(GameEvents.SHIP_DEATH, this._handleShipDeath);
         this.eventBus.off(GameEvents.NPC_DEATH, this._handleNPCDeath);
         this.eventBus.off(GameEvents.CREDITS_CHANGE, this._handleCreditsChange);

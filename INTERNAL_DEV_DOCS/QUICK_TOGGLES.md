@@ -25,6 +25,12 @@ UI/Images
 - `window.UI_TOASTS = true|false` — force floating toasts on/off. Default: on for `warning`/`success`/`error`, off for `info` (console readout only)
 - `window.RADIO_STATIC = false` — disable faint static inside the radio dial
 
+Game feel (W2)
+- `window.HITSTOP_OFF = true` — suppress hit-stop time-scale requests (player hit, boss death, boss phase). `GameLoop.timeScale` stays 1
+- `window.DAMAGE_NUMBERS_OFF = true` — stop feeding `state.fx.damageNumbers` (nothing new is drawn; live entries expire in ≤700 ms)
+- Hit-stop can also be driven by hand: `eventBus.emit('game.timescale.set', { value: 0.15, ms: 200 })`; `eventBus.on('game.timescale', d => …)` reports every change, and `stateManager.state.fx.timeScale` mirrors it
+- OS reduced-motion is honoured automatically (`state.fx.reducedMotion`): hit-stop still fires, shake amplification does not
+
 Planets (QA)
 - Terra static sprite: `localStorage.setItem('gt.useTerraSprite','true')` (persist) or `?use_terra_sprite=1` (`?terra=1`)
 - Crimson static sprite: `localStorage.setItem('gt.useCrimsonSprite','true')` or `?use_crimson_sprite=1` (`?crimson=1`)
@@ -35,8 +41,7 @@ Planets (QA)
 - Sprite badge: `window.SHOW_PLANET_SPRITE_BADGE = true` — draws a tiny `SP` above sprite planets
 
 Renderer Spike (optional)
-- Enable WebGL spike: `?webgl=1` (URL) or `localStorage.setItem('RENDER_WEBGL','1')`
-- Disable: remove `?webgl=1` and `localStorage.removeItem('RENDER_WEBGL')`
+- WebGL spike: removed 2026-09 (see `TICKET_WEBGL_SPIKE.md`); Canvas2D is the only renderer.
 
 Reset All (examples)
 - `delete window.TC_SHOW_PATH; delete window.TC_DEBUG; delete window.RENDER_PROF_OVERLAY; delete window.RENDER_PROF_LOG; delete window.UPDATE_PROF_OVERLAY; delete window.UPDATE_PROF_LOG; delete window.TC_STATIC; delete window.RADIO_STATIC; delete window.MINIMAP_STATIC`

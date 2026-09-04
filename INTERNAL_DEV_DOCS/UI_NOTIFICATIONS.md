@@ -29,3 +29,58 @@ Notifications are surfaced via the `UI_MESSAGE` event and are rendered by `UISys
 ## Toggles (QA)
 
 - `window.UI_TOASTS = true|false` — force floating toasts on for every type, or off entirely. Default: severity‑based (see Behavior).
+
+---
+
+## Zone / boss banner (W2.4)
+
+A third feedback channel, above toasts and the console line: `#zoneBanner`
+(`index.html`), styled in `main.css`, driven by `UISystem`.
+
+- **What uses it**: `zone.change` → zone name + difficulty stars
+  (`FRONTIER SPACE` / `★★`); `zone.boss.spawn` → boss name + title
+  (`CAPTAIN BLACKSTAR` / `PIRATE LORD`, red `boss` variant). Death and victory
+  keep their full-screen overlays and do **not** use the banner.
+- **Behaviour**: one banner at a time, centred at 20% viewport height, 2.5 s,
+  never queued — a newer event replaces the current one (`UISystem.showBanner`).
+  It sits below the boss health bar (canvas, y≈20) and below toasts.
+- **API**: `uiSystem.showBanner(title, subtitle, ms, variant)` —
+  `variant: 'boss'` switches the palette to danger red.
+
+## ARIA announcements (U7)
+
+`UISystem.announce(text)` writes `#gameAnnouncements` (`aria-live="assertive"`).
+Written on zone change, boss spawn, run end, victory, and unlocks
+(`announceUnlocks`, from the `unlocks` array on `run.end` / `run.victory`).
+A trailing NBSP is toggled so an identical message still registers as a change.
+
+## Contract tracker (W2.5)
+
+`#contractTracker` (top-right, hidden when empty) lists `ship.missions.active`
+with one-line progress: `Bounty 2/3 pirates`, `Deliver 5 Food → Crimson Moon`,
+`Escort Freighter → Ice World`, `Trade 750/1000 credits`. Rebuilt on
+`MISSION_ACCEPT` / `MISSION_UPDATED` / `MISSION_COMPLETE` (forced) and on the
+throttled `UI_UPDATE` (≥500 ms apart, and only when the rendered text changed).
+It is deliberately clear of the zone panel (top-left) and the boss health bar
+(top-centre).
+
+## HUD value flashes (W2.3)
+
+`UISystem.updateHUD` diffs credits, cargo count and hull % against the last
+rendered numbers and adds `.value-up` (green) or `.value-down` (red) to the
+`.status-value` element for 350 ms. Flashes are debounced to one per element
+per 300 ms so the ~8 Hz `UI_UPDATE` cannot strobe a value that ticks every
+frame. Keyframes: `valueFlashUp` / `valueFlashDown` in `main.css`.
+
+## Damage numbers (W2.2)
+
+Not DOM: `HUDRenderer.drawDamageNumbers` draws `state.fx.damageNumbers`
+(filled by `GameFeelSystem`) in screen space — 11 px monospace, outlined,
+700 ms life with an upward drift, white for hits, yellow for crits/kills, red
+for damage to the player. Capped at 24 live entries.
+
+## Reduced motion
+
+`@media (prefers-reduced-motion: reduce)` in `main.css` disables the CRT/scan
+sweeps, pulses, the `shake` keyframes and the value-flash animations. Hit-stop
+and the damage-number fade stay: they carry information, not decoration.

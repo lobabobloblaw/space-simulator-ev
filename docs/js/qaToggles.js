@@ -18,15 +18,10 @@
       'TC_ANGLE_EPS','TC_MIN_MS','SPAWN_TYPE_COOLDOWN_MS','SPAWN_PIRATE_SUPPRESS_MS',
       'RENDER_OTHER_GUARD','RENDER_OTHER_GUARD_MS','RENDER_OTHER_GUARD_N'
     ].forEach(del);
-    try { if (g.localStorage) g.localStorage.removeItem('RENDER_WEBGL'); } catch(_) {}
     console.log('[QA] Reset complete (Canvas2D preferred; toggles cleared).');
   };
 
   // Ensure Canvas2D by removing WebGL preference
-  QA.canvas2d = function canvas2d() {
-    try { if (g.localStorage) g.localStorage.removeItem('RENDER_WEBGL'); } catch(_) {}
-    console.log('[QA] Canvas2D enforced (removed RENDER_WEBGL from localStorage).');
-  };
 
   // Enable render profiler overlay/log briefly
   QA.profile = function profile(seconds = 15) {
@@ -77,7 +72,6 @@
   QA.info = function info() {
     console.table({
       reset: 'Clear toggles + prefer Canvas2D',
-      canvas2d: 'Remove RENDER_WEBGL flag',
       profile: 'Enable overlay/log briefly (s)',
       otherGuard: 'Enable guard (ms, n, s)',
       tcInspect: 'Enable TC_DEBUG/TC_SHOW_PATH (s)',

@@ -29,6 +29,7 @@ export const npcTypes = {
         maxHealth: 80,
         credits: 100,
         behavior: "passive",
+        faction: "trader",
         weapon: { type: "laser", damage: 5, cooldown: 30 }
     },
     trader: {
@@ -41,6 +42,7 @@ export const npcTypes = {
         maxHealth: 60,
         credits: 75,
         behavior: "passive",
+        faction: "trader",
         weapon: null
     },
     patrol: {
@@ -53,6 +55,7 @@ export const npcTypes = {
         maxHealth: 100,
         credits: 50,
         behavior: "lawful",
+        faction: "patrol",
         weapon: { type: "rapid", damage: 7, cooldown: 8 }
     },
     pirate: {
@@ -65,6 +68,7 @@ export const npcTypes = {
         maxHealth: 70,
         credits: 150,
         behavior: "aggressive",
+        faction: "pirate",
         weapon: { type: "plasma", damage: 15, cooldown: 25 }
     },
     elite_pirate: {
@@ -76,8 +80,14 @@ export const npcTypes = {
         health: 120,
         maxHealth: 120,
         credits: 300,
-        behavior: "aggressive",
-        weapon: { type: "plasma", damage: 20, cooldown: 20 },
+        // Stand-off duellist: holds 250-350 and fires three-shot bursts, so the
+        // weapon cadence is the *intra-burst* cadence (6 frames). NPCSystem's
+        // 'elite' case adds the 90-frame reload between bursts. 3x18 over a
+        // ~108-frame cycle is ~30 dps on target — a full burst hurts, but the
+        // reload is a real window to close or break line.
+        behavior: "elite",
+        faction: "pirate",
+        weapon: { type: "plasma", damage: 18, cooldown: 6 },
         isElite: true
     },
     void_hunter: {
@@ -89,9 +99,26 @@ export const npcTypes = {
         health: 150,
         maxHealth: 150,
         credits: 400,
-        behavior: "aggressive",
+        // Ambusher: drifts unpowered until the player is close, telegraphs, then
+        // charges. See NPCSystem.makeAmbusherDecision.
+        behavior: "ambusher",
+        faction: "pirate",
         weapon: { type: "void", damage: 12, cooldown: 24 },
         isElite: true
+    },
+    scavenger: {
+        size: 11,
+        color: "#c9a227",
+        maxSpeed: 0.4,
+        thrust: 0.004,
+        turnSpeed: 0.014,
+        health: 45,
+        maxHealth: 45,
+        credits: 60,
+        // Salvager: collects pickups left by fights and runs from anything armed.
+        behavior: "scavenger",
+        faction: "miner",
+        weapon: null
     }
 };
 

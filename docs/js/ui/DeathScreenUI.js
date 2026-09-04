@@ -71,6 +71,18 @@ class DeathScreenUI {
         this._renderOutcome();
         this._renderUnlocks();
         this.overlay.classList.add('visible');
+
+        // Move focus to the primary action so the overlay is operable by
+        // keyboard and screen readers land inside it (U6).
+        try {
+            requestAnimationFrame(() => {
+                if (this.isVisible() && this.retryBtn) {
+                    try { this.retryBtn.focus(); } catch (_) { /* focus is best-effort */ }
+                }
+            });
+        } catch (_) {
+            try { this.retryBtn?.focus(); } catch (_) { /* focus is best-effort */ }
+        }
     }
 
     /**

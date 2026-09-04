@@ -5,15 +5,16 @@
 
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
+import * as Persistence from '../core/Persistence.js';
+import { getRunSystem } from './RunSystem.js';
 import { logError, checkLocalStorage, notifyUser } from '../utils/ErrorUtils.js';
-import { validateSaveData } from '../utils/SaveUtils.js';
 
 export class SaveSystemAdapterFixed {
     constructor() {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
-        this.SAVE_KEY = 'galaxyTraderSave';
-        this.LOAD_PENDING_KEY = 'galaxyTraderLoadPending';
+        // Storage keys live in core/Persistence.js ('save' / 'loadPending');
+        // this adapter never touches localStorage directly.
         this.SAVE_MAX_NPCS = 28; // tighter cap to reduce JSON size and stall risk
         this._saveScheduled = false;
         this._savePending = false;
@@ -73,14 +74,6 @@ export class SaveSystemAdapterFixed {
     }
 
     /**
-     * Validate save data structure after JSON.parse.
-     * Delegates to shared SaveUtils validator.
-     */
-    _validateSaveData(data) {
-        return validateSaveData(data);
-    }
-
-    /**
      * Initialize the adapter
      */
     init() {
@@ -102,9 +95,9 @@ export class SaveSystemAdapterFixed {
         }
 
         // Check if we need to apply a pending load (only if storage available)
-        if (this._storageAvailable && localStorage.getItem(this.LOAD_PENDING_KEY) === 'true') {
+        if (this._storageAvailable && Persistence.readRaw('loadPending') === 'true') {
             console.log('[SaveSystemAdapterFixed] Applying pending load...');
-            localStorage.removeItem(this.LOAD_PENDING_KEY);
+            Persistence.remove('loadPending');
             
             // Apply the saved state immediately
             setTimeout(() => {
@@ -226,57 +219,47 @@ export class SaveSystemAdapterFixed {
                 const light = (!data || data.reason === 'auto');
                 const reason = (data && data.reason) || 'manual';
 
-                // Progressive save strategy to handle QuotaExceededError
+                // Progressive save strategy to handle QuotaExceededError.
+                // Persistence writes are `quiet`: this adapter reports save
+                // outcomes itself, so the shared one-per-session quota toast
+                // must not fire for an attempt we are about to retry smaller.
                 let saveSuccess = false;
                 let payload = null;
                 let saveMode = light ? 'light' : 'full';
+                const writeFailure = () => Persistence.lastWriteError() || new Error('Save write failed');
 
                 // Strategy 1: Try requested mode (full or light)
-                try {
-                    payload = this._buildSaveData(light);
-                    const json = JSON.stringify(payload);
-                    localStorage.setItem(this.SAVE_KEY, json);
-                    saveSuccess = true;
-                    this._trackSaveSize(json);
-                } catch (e) {
-                    if (e.name === 'QuotaExceededError' && !light) {
-                        console.warn('[SaveSystemAdapterFixed] Quota exceeded, trying light mode...');
+                payload = this._buildSaveData(light);
+                saveSuccess = Persistence.write('save', payload, { quiet: true });
 
-                        // Strategy 2: Try light mode (no NPCs/asteroids/pickups)
-                        try {
-                            payload = this._buildSaveData(true);
-                            const json = JSON.stringify(payload);
-                            localStorage.setItem(this.SAVE_KEY, json);
-                            saveSuccess = true;
-                            saveMode = 'light';
-                            this._trackSaveSize(json);
-                        } catch (e2) {
-                            if (e2.name === 'QuotaExceededError') {
-                                console.warn('[SaveSystemAdapterFixed] Quota still exceeded, trying critical-only mode...');
+                if (!saveSuccess) {
+                    const e = writeFailure();
+                    if (!Persistence.isQuotaError(e) || light) throw e; // not quota, or already minimal
+                    console.warn('[SaveSystemAdapterFixed] Quota exceeded, trying light mode...');
 
-                                // Strategy 3: Critical only (ship + reputation)
-                                try {
-                                    payload = this._buildCriticalSaveData();
-                                    const json = JSON.stringify(payload);
-                                    localStorage.setItem(this.SAVE_KEY, json);
-                                    saveSuccess = true;
-                                    saveMode = 'critical';
-                                    this._trackSaveSize(json);
-                                } catch (e3) {
-                                    throw e3; // Give up, throw to outer catch
-                                }
-                            } else {
-                                throw e2;
-                            }
-                        }
+                    // Strategy 2: Try light mode (no NPCs/asteroids/pickups)
+                    payload = this._buildSaveData(true);
+                    saveSuccess = Persistence.write('save', payload, { quiet: true });
+
+                    if (saveSuccess) {
+                        saveMode = 'light';
                     } else {
-                        throw e; // Not quota error or already light, rethrow
+                        const e2 = writeFailure();
+                        if (!Persistence.isQuotaError(e2)) throw e2;
+                        console.warn('[SaveSystemAdapterFixed] Quota still exceeded, trying critical-only mode...');
+
+                        // Strategy 3: Critical only (ship + reputation)
+                        payload = this._buildCriticalSaveData();
+                        saveSuccess = Persistence.write('save', payload, { quiet: true });
+                        if (!saveSuccess) throw writeFailure(); // Give up, throw to outer catch
+                        saveMode = 'critical';
                     }
                 }
+                this._trackSaveSize(Persistence.lastWriteBytes());
 
                 if (saveSuccess && payload) {
                     // Show appropriate message based on save mode
-                    if (reason !== 'auto') {
+                    if (reason !== 'auto' && reason !== 'run-start') {
                         if (saveMode === 'critical') {
                             this.showMessage('SAVE LIMITED (STORAGE FULL)', 'warning');
                         } else if (saveMode === 'light' && !light) {
@@ -330,11 +313,11 @@ export class SaveSystemAdapterFixed {
 
     /**
      * Track save size for debugging/monitoring
+     * @param {number} bytes Size of the blob Persistence just wrote
      */
-    _trackSaveSize(json) {
+    _trackSaveSize(bytes) {
         try {
-            const bytes = (typeof TextEncoder !== 'undefined') ?
-                new TextEncoder().encode(json).length : (json.length * 2);
+            if (!Number.isFinite(bytes) || bytes <= 0) return;
             const kb = Number((bytes / 1024).toFixed(1));
 
             // Write to state.diagnostics (preferred)
@@ -353,6 +336,19 @@ export class SaveSystemAdapterFixed {
     }
 
     /**
+     * Id of the run this ship belongs to, so a resumed run can prove the two
+     * blobs were written by the same run (S1). Null outside a run.
+     */
+    _currentRunId() {
+        try {
+            return getRunSystem().getRunStats().runId || null;
+        } catch (e) {
+            console.warn('[SaveSystemAdapterFixed] Could not read run id:', e);
+            return null;
+        }
+    }
+
+    /**
      * Build critical-only save data (minimal size for quota issues)
      */
     _buildCriticalSaveData() {
@@ -360,6 +356,7 @@ export class SaveSystemAdapterFixed {
         return {
             version: '6.0-critical',
             timestamp: Date.now(),
+            runId: this._currentRunId(),
             ship: {
                 x: state.ship.x,
                 y: state.ship.y,
@@ -447,9 +444,10 @@ export class SaveSystemAdapterFixed {
         this._saveVersion++;
 
         return {
-            version: '6.1', // Bumped for snapshot-based saves
+            version: '6.1', // Legacy stamp; core/Persistence.js adds `schema`
             saveVersion: this._saveVersion,
             timestamp: Date.now(),
+            runId: this._currentRunId(),
             ship: shipSnapshot,
             reputation: repSnapshot,
             mission: missionSnapshot,
@@ -475,14 +473,13 @@ export class SaveSystemAdapterFixed {
     handleLoad() {
         console.log('[SaveSystemAdapterFixed] LOAD triggered - using nuclear reload');
         
-        const saveData = localStorage.getItem(this.SAVE_KEY);
-        if (!saveData) {
+        if (!Persistence.has('save')) {
             this.showMessage('NO SAVE FOUND', 'error');
             return false;
         }
         
         // Set flag to apply load after reload
-        localStorage.setItem(this.LOAD_PENDING_KEY, 'true');
+        Persistence.writeRaw('loadPending', 'true');
         
         // Show message
         this.showMessage('LOADING...', 'info');
@@ -502,17 +499,15 @@ export class SaveSystemAdapterFixed {
         console.log('[SaveSystemAdapterFixed] Applying loaded state after reload');
         
         try {
-            const saveData = localStorage.getItem(this.SAVE_KEY);
-            if (!saveData) {
-                console.log('[SaveSystemAdapterFixed] No save data found');
-                return false;
-            }
-            
-            const data = JSON.parse(saveData);
-
-            // Validate save data structure
-            if (!this._validateSaveData(data)) {
-                console.error('[SaveSystemAdapterFixed] Save data validation failed, aborting load');
+            // Persistence migrates the blob forward and runs the shared
+            // validateSaveData() shape checks; null means absent or unusable.
+            const data = Persistence.read('save');
+            if (!data) {
+                if (Persistence.has('save')) {
+                    console.warn('[SaveSystemAdapterFixed] Save data unusable, aborting load');
+                } else {
+                    console.log('[SaveSystemAdapterFixed] No save data found');
+                }
                 return false;
             }
 
@@ -541,8 +536,6 @@ export class SaveSystemAdapterFixed {
                 if (data.npcs && data.npcs.length > 0) {
                     const restoredNpcs = [];
                     data.npcs.forEach(npcData => {
-                        // Drop legacy/optional 'scavenger' NPCs (feature removed)
-                        if (npcData && npcData.type === 'scavenger') return;
                         const npc = {
                             ...npcData,
                             color: npcData.type === 'pirate' ? '#ff4444' :
@@ -620,12 +613,7 @@ export class SaveSystemAdapterFixed {
      */
     hasSave() {
         if (!this._storageAvailable) return false;
-        try {
-            return localStorage.getItem(this.SAVE_KEY) !== null;
-        } catch (e) {
-            logError('SaveSystem.hasSave', e);
-            return false;
-        }
+        return Persistence.has('save');
     }
     
     /**
@@ -741,8 +729,9 @@ export class SaveSystemAdapterFixed {
             // leaves 'galaxyTraderMeta' untouched — that's permanent cross-run
             // progression (unlocks/stats), not part of "clear save".
             try {
-                const clearedKeys = [this.SAVE_KEY, this.LOAD_PENDING_KEY, 'galaxyTraderRun'];
-                clearedKeys.forEach(k => localStorage.removeItem(k));
+                // keepMeta: permanent progression (unlocks/stats) is not part of
+                // "clear save" — clearAll() drops save + loadPending + run only.
+                const clearedKeys = Persistence.clearAll({ keepMeta: true });
                 console.log('[SaveSystemAdapterFixed] Cleared keys:', clearedKeys.join(', '));
                 this.clearConfirmPending = false;
                 this.showMessage('SAVE CLEARED - RESTARTING', 'success');

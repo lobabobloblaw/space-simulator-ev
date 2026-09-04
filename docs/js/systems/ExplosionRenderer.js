@@ -126,23 +126,16 @@ export class ExplosionRenderer {
       }
 
       // Sparks (world space) — treat as debris chunks. Keep per-explosion angles stable.
-      if (progress < 0.55 && showParticles) {
-        const sc = sparkCountFor(quality, isTiny);
-        // Lazily initialize stable spark angles + radial multipliers per explosion
-        if (!exp.__sparks || exp.__sparks.length !== sc) {
-          const arr = new Array(sc);
-          for (let i = 0; i < sc; i++) {
-            arr[i] = {
-              a: Math.random() * Math.PI * 2,        // angle
-              m: 0.9 + Math.random() * 0.8           // radial multiplier
-            };
-          }
-          exp.__sparks = arr;
-        }
+      // Angles and radial multipliers are seeded once by VisualEffectsSystem
+      // (P11 — the renderer no longer writes to the simulation). It seeds the
+      // largest count any quality asks for; take a prefix of that.
+      const seeded = exp.__sparks;
+      if (progress < 0.55 && showParticles && seeded && seeded.length) {
+        const sc = Math.min(sparkCountFor(quality, isTiny), seeded.length);
         // Slightly warmer debris color improves visibility against rings
         ctx.fillStyle = `rgba(255, 200, 80, ${Math.max(0, 1 - progress * 2)})`;
         for (let i = 0; i < sc; i++) {
-          const s = exp.__sparks[i];
+          const s = seeded[i];
           const dist = radius * 1.6 * progress * s.m;
           const sx = exp.x + Math.cos(s.a) * dist;
           const sy = exp.y + Math.sin(s.a) * dist;

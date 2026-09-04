@@ -300,10 +300,6 @@ export default class ShopSystem {
         this.eventBus.emit(GameEvents.UI_UPDATE, { ship: ship });
         this.eventBus.emit(GameEvents.SHIP_UPGRADE, { ship: ship });
     }
-
-    update(state, deltaTime) {
-        // No per-frame updates needed for shop
-    }
 }
 
 // No globals

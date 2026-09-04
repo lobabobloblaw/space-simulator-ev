@@ -1,7 +1,16 @@
 /**
  * SaveUtils - Shared save data validation
  * Single source of truth for validating save data structures.
+ *
+ * Two generations of stamp are accepted:
+ *  - `schema: 7` (integer) — written by core/Persistence.js, authoritative.
+ *  - `version: '6.x'` (string) — pre-schema saves, still readable.
+ * Persistence migrates 6.x → 7 on read; this validator stays tolerant of both
+ * because main_eventbus_pure.js and StateManager read saves directly.
  */
+
+/** Current integer schema of the main save blob (mirrors Persistence.SCHEMA.save) */
+export const SAVE_SCHEMA = 7;
 
 /**
  * Validate parsed save data has expected structure.
@@ -21,11 +30,15 @@ export function validateSaveData(data) {
         return false;
     }
 
-    // Version gate: reject saves missing a version, or from an incompatible
-    // save format (anything not on the current '6.x' schema). Treated as
-    // invalid rather than thrown so callers fall back to fresh defaults.
-    if (typeof data.version !== 'string' || !data.version.startsWith('6')) {
-        console.warn('[SaveUtils] Invalid save data: missing or unsupported version', data.version);
+    // Version gate: reject saves with no recognisable stamp, or from an
+    // incompatible format. Accepted: the current integer `schema`, or the
+    // legacy '6.x' `version` string that Persistence migrates forward.
+    // Treated as invalid rather than thrown so callers fall back to defaults.
+    const schemaOk = Number.isInteger(data.schema) && data.schema === SAVE_SCHEMA;
+    const legacyOk = typeof data.version === 'string' && data.version.startsWith('6');
+    if (!schemaOk && !legacyOk) {
+        console.warn('[SaveUtils] Invalid save data: missing or unsupported version',
+            data.schema ?? data.version);
         return false;
     }
 

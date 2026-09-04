@@ -14,7 +14,7 @@ export const zones = [
         difficultyMultiplier: 1.0,
 
         // Enemy configuration
-        enemyTypes: ['trader', 'freighter', 'pirate', 'patrol'],
+        enemyTypes: ['trader', 'freighter', 'pirate', 'patrol', 'scavenger'],
         pirateSpawnWeight: 0.3,    // 30% of spawns are pirates
         eliteChance: 0,            // No elites in starting zone
 
@@ -45,17 +45,20 @@ export const zones = [
         difficultyMultiplier: 1.5,
 
         // elite_pirate must be listed here or eliteChance never fires (E16)
-        enemyTypes: ['trader', 'pirate', 'elite_pirate', 'patrol'],
+        enemyTypes: ['trader', 'pirate', 'elite_pirate', 'patrol', 'scavenger'],
         pirateSpawnWeight: 0.5,
         eliteChance: 0.1,
 
         planets: ['Crimson Moon'],
 
-        bossId: null,
+        // Every zone exit past Core is a fight: Krix holds the Frontier lanes
+        bossId: 'warlord_krix',
+
+        // When the zone boss appears: after N kills in-zone, or after maxDelayMs
+        bossTrigger: { kills: 3, maxDelayMs: 90000 },
 
         advanceRequirements: {
-            kills: 15,
-            credits: 5000
+            bossDefeated: 'warlord_krix'
         },
 
         theme: {
@@ -125,8 +128,56 @@ export const zones = [
 
 /**
  * Boss definitions
+ *
+ * `signature` is the boss's telegraphed special attack, driven by
+ * NPCSystem.makeBossDecision and built by WeaponSystem:
+ *   { type: 'mines', count, everyMs, fromPhase }
+ *   { type: 'lance', everyMs, fromPhase, windupFrames }
+ * `fromPhase` is the first phase index (0-based) that may use it.
  */
 export const bosses = {
+    warlord_krix: {
+        id: 'warlord_krix',
+        name: 'Warlord Krix',
+        title: 'Frontier Warlord',
+        type: 'boss',
+
+        health: 300,
+        maxHealth: 300,
+        size: 24,
+        maxSpeed: 0.55,
+        thrust: 0.0045,
+        turnSpeed: 0.014,
+
+        weapon: {
+            type: 'rapid',
+            damage: 8,
+            cooldown: 10,
+            projectileSpeed: 3
+        },
+
+        phases: [
+            { healthThreshold: 1.0, behavior: 'tactical', addSpawnCount: 0 },
+            { healthThreshold: 0.5, behavior: 'aggressive', addSpawnCount: 2 }
+        ],
+
+        // Krix seeds the lane with mines from the opening bell
+        signature: { type: 'mines', count: 3, everyMs: 7000, fromPhase: 0 },
+
+        drops: {
+            credits: 1200
+        },
+
+        unlocks: {
+            type: 'ship',
+            id: 'corvette'
+        },
+
+        spawnMessage: 'The frontier answers to me. Not to you.',
+        phase2Message: 'Krix does not yield! Take them apart!',
+        deathMessage: 'The frontier... eats us all...'
+    },
+
     pirate_lord: {
         id: 'pirate_lord',
         name: 'Captain Blackstar',
@@ -154,6 +205,9 @@ export const bosses = {
             { healthThreshold: 1.0, behavior: 'aggressive', addSpawnCount: 0 },
             { healthThreshold: 0.5, behavior: 'berserk', addSpawnCount: 2 }
         ],
+
+        // Below half health Blackstar starts fanning proximity mines behind him
+        signature: { type: 'mines', count: 5, everyMs: 6000, fromPhase: 1 },
 
         // Rewards
         drops: {
@@ -198,6 +252,9 @@ export const bosses = {
             { healthThreshold: 0.3, behavior: 'desperate', addSpawnCount: 5 }
         ],
 
+        // From phase 2 the King stops dead, charges, and fires a void lance
+        signature: { type: 'lance', everyMs: 8000, fromPhase: 1, windupFrames: 45 },
+
         drops: {
             credits: 5000
         },
@@ -222,15 +279,6 @@ export const bosses = {
  */
 export function getZone(zoneId) {
     return zones.find(z => z.id === zoneId) || zones[0];
-}
-
-/**
- * Helper: Get next zone after current
- */
-export function getNextZone(currentZoneId) {
-    const idx = zones.findIndex(z => z.id === currentZoneId);
-    if (idx === -1 || idx >= zones.length - 1) return null;
-    return zones[idx + 1];
 }
 
 /**
@@ -269,4 +317,4 @@ export function canAdvanceZone(currentZoneId, playerStats) {
     return true;
 }
 
-export default { zones, bosses, getZone, getNextZone, getBoss, canAdvanceZone };
+export default { zones, bosses, getZone, getBoss, canAdvanceZone };

@@ -1,6 +1,7 @@
 import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
+import { RunEvents } from './RunSystem.js';
 
 /**
  * UISystem - Handles all UI elements (HUD, panels, overlays, notifications)
@@ -37,7 +38,12 @@ export class UISystem {
         this.handleShipDestroyed = this.handleShipDestroyed.bind(this);
         this._handleThrustChanged = (e) => { try { this._thrustActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} };
         this._handleBrakeChanged = (e) => { try { this._brakeActive = !!(e && e.active); this._updateFuelAlert(); } catch(_) {} };
-        
+        this.handleZoneChange = this.handleZoneChange.bind(this);
+        this.handleBossSpawn = this.handleBossSpawn.bind(this);
+        this.handleRunEnd = this.handleRunEnd.bind(this);
+        this.handleRunVictory = this.handleRunVictory.bind(this);
+        this.handleMissionsChanged = this.handleMissionsChanged.bind(this);
+
         console.log('[UISystem] Created');
 
         // Image provider preference for planet landscapes.
@@ -78,6 +84,17 @@ export class UISystem {
 
         // Cached DOM references for frequently-updated HUD elements (populated in init)
         this._domCache = {};
+
+        // W2.3 — HUD value flashes. `last` holds the previously rendered number
+        // per element, `at` the last flash time (debounce against the 8 Hz
+        // UI_UPDATE), `timers` the class-removal timeouts.
+        this._valueFlash = { last: {}, at: {}, timers: {} };
+
+        // W2.4 — centred zone/boss banner (distinct from the toast queue)
+        this._bannerTimer = null;
+
+        // W2.5 — flight-time contract tracker (throttled DOM rebuild)
+        this._tracker = { lastTs: 0, minInterval: 500, signature: null };
     }
     
     /**
@@ -95,6 +112,14 @@ export class UISystem {
         for (const id of hudIds) {
             this._domCache[id] = document.getElementById(id);
         }
+
+        // Banner, contract tracker and the ARIA live region (U7)
+        this._bannerEl = document.getElementById('zoneBanner');
+        this._bannerTitleEl = document.getElementById('zoneBannerTitle');
+        this._bannerSubEl = document.getElementById('zoneBannerSub');
+        this._trackerEl = document.getElementById('contractTracker');
+        this._trackerListEl = document.getElementById('contractTrackerList');
+        this._announceEl = document.getElementById('gameAnnouncements');
 
         // Subscribe to UI events
         this.subscribeToEvents();
@@ -165,6 +190,17 @@ export class UISystem {
         
         // Tutorial
         this.eventBus.on(GameEvents.TUTORIAL_UPDATE, this.handleTutorialUpdate);
+
+        // Run/zone banner + ARIA announcements (W2.4, U7)
+        this.eventBus.on(RunEvents.ZONE_CHANGE, this.handleZoneChange);
+        this.eventBus.on(RunEvents.ZONE_BOSS_SPAWN, this.handleBossSpawn);
+        this.eventBus.on(RunEvents.RUN_END, this.handleRunEnd);
+        this.eventBus.on(RunEvents.RUN_VICTORY, this.handleRunVictory);
+
+        // Contract tracker (W2.5)
+        this.eventBus.on(GameEvents.MISSION_ACCEPT, this.handleMissionsChanged);
+        this.eventBus.on(GameEvents.MISSION_UPDATED, this.handleMissionsChanged);
+        this.eventBus.on(GameEvents.MISSION_COMPLETE, this.handleMissionsChanged);
 
         // No UI image toggles; provider behavior managed via debug toggles
     }
@@ -247,6 +283,223 @@ export class UISystem {
             this.tutorialStage = data.stage;
             this.updateTutorialHint(data.ship);
         }
+    }
+
+    // ==================== BANNER / ANNOUNCEMENTS (W2.4, U7) ====================
+
+    /**
+     * Zone entry: big centred banner plus a screen-reader announcement.
+     */
+    handleZoneChange(data) {
+        try {
+            const zone = data?.zone;
+            if (!zone) return;
+            const stars = '★'.repeat(Math.max(0, Number(zone.difficulty) || 0));
+            const name = String(zone.name || '').toUpperCase();
+            this.showBanner(name, stars, 2500);
+            this.announce(`Entering ${zone.name}${stars ? `, difficulty ${zone.difficulty}` : ''}`);
+        } catch (_) { /* banner is cosmetic */ }
+    }
+
+    /**
+     * Boss telegraph: name + title, held slightly longer than a zone banner.
+     */
+    handleBossSpawn(data) {
+        try {
+            const boss = data?.boss;
+            if (!boss) return;
+            const name = String(boss.name || 'BOSS').toUpperCase();
+            const title = String(boss.title || '').toUpperCase();
+            this.showBanner(name, title, 2500, 'boss');
+            this.announce(`Warning: ${boss.name}${boss.title ? `, ${boss.title}` : ''} has arrived`);
+        } catch (_) { /* banner is cosmetic */ }
+    }
+
+    handleRunEnd(data) {
+        this.announce('Ship destroyed. Run over.');
+        this.announceUnlocks(data?.unlocks);
+    }
+
+    handleRunVictory(data) {
+        this.announce('Victory. The Void King is dead.');
+        this.announceUnlocks(data?.unlocks);
+    }
+
+    announceUnlocks(unlocks) {
+        try {
+            if (!Array.isArray(unlocks) || unlocks.length === 0) return;
+            const names = unlocks.map(u => u?.name || u?.id).filter(Boolean);
+            if (names.length) this.announce(`New unlocks: ${names.join(', ')}`);
+        } catch (_) { /* announcement is optional */ }
+    }
+
+    /**
+     * Write the ARIA live region (`#gameAnnouncements`). A trailing NBSP is
+     * toggled so an identical message still counts as a change for AT.
+     */
+    announce(text) {
+        try {
+            const el = this._announceEl || document.getElementById('gameAnnouncements');
+            if (!el) return;
+            const t = String(text || '').trim();
+            if (!t) return;
+            el.textContent = (el.textContent || '').endsWith(' ') ? t : `${t} `;
+        } catch (_) { /* announcement is optional */ }
+    }
+
+    /**
+     * Show the centred banner. Distinct from toasts: one at a time, replaced by
+     * the next event rather than queued.
+     * @param {string} title - Large line
+     * @param {string} [subtitle] - Small line under it
+     * @param {number} [ms] - Visible duration
+     * @param {string} [variant] - '' | 'boss'
+     */
+    showBanner(title, subtitle = '', ms = 2500, variant = '') {
+        const el = this._bannerEl || document.getElementById('zoneBanner');
+        if (!el) return;
+        const titleEl = this._bannerTitleEl || document.getElementById('zoneBannerTitle');
+        const subEl = this._bannerSubEl || document.getElementById('zoneBannerSub');
+        if (titleEl) titleEl.textContent = String(title || '');
+        if (subEl) subEl.textContent = String(subtitle || '');
+        el.classList.toggle('boss', variant === 'boss');
+        // Restart the entry animation if a banner is already up
+        el.classList.remove('visible');
+        void el.offsetWidth;
+        el.classList.add('visible');
+        if (this._bannerTimer) clearTimeout(this._bannerTimer);
+        this._bannerTimer = setTimeout(() => {
+            this._bannerTimer = null;
+            try { el.classList.remove('visible'); } catch (_) {}
+        }, Math.max(600, Number(ms) || 2500));
+    }
+
+    // ==================== CONTRACT TRACKER (W2.5) ====================
+
+    handleMissionsChanged() {
+        // Forced: MISSION_ACCEPT reaches this system before MissionSystem has
+        // mutated the list, so the throttle must not swallow the follow-up.
+        this.updateContractTracker(true);
+    }
+
+    /**
+     * Compact list of active contracts with one-line progress. Hidden when the
+     * player has none. Rebuilds only when the rendered text actually changes.
+     * @param {boolean} [force] - Bypass the throttle
+     */
+    updateContractTracker(force = false) {
+        try {
+            const el = this._trackerEl || document.getElementById('contractTracker');
+            const list = this._trackerListEl || document.getElementById('contractTrackerList');
+            if (!el || !list) return;
+
+            const now = performance.now ? performance.now() : Date.now();
+            if (!force && now - (this._tracker.lastTs || 0) < this._tracker.minInterval) return;
+            this._tracker.lastTs = now;
+
+            const ship = this.stateManager.state?.ship;
+            const active = (ship && ship.missions && Array.isArray(ship.missions.active))
+                ? ship.missions.active
+                : [];
+
+            const lines = active.map(m => this._contractLine(m, ship)).filter(Boolean);
+            const signature = lines.join('\n');
+            if (signature === this._tracker.signature) return;
+            this._tracker.signature = signature;
+
+            if (lines.length === 0) {
+                el.classList.remove('visible');
+                list.textContent = '';
+                return;
+            }
+
+            list.textContent = '';
+            for (const line of lines) {
+                const row = document.createElement('div');
+                row.className = 'contract-row';
+                row.textContent = line;
+                list.appendChild(row);
+            }
+            el.classList.add('visible');
+        } catch (_) { /* tracker is cosmetic */ }
+    }
+
+    /**
+     * One-line progress for a mission, e.g. "Bounty 2/3 pirates" or
+     * "Deliver 5 Food → Crimson Moon".
+     */
+    _contractLine(mission, ship) {
+        if (!mission) return '';
+        const st = (ship && ship.missionStates && ship.missionStates[mission.id]) || {};
+        const label = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+        switch (mission.type) {
+            case 'bounty': {
+                const need = Number(mission.count) || 1;
+                const anyKill = mission.target === 'any' || !mission.target;
+                const have = anyKill
+                    ? (ship?.kills || 0) - (st.killsAtAccept || 0)
+                    : (ship?.pirateKills || 0) - (st.pirateKillsAtAccept || 0);
+                const done = Math.max(0, Math.min(need, have));
+                const what = anyKill ? 'hostiles' : `${mission.target}s`;
+                return `Bounty ${done}/${need} ${what}`;
+            }
+            case 'delivery': {
+                if (st.delivered) return `Deliver ${label(mission.cargo)} — ready to claim`;
+                return `Deliver ${mission.amount || 1} ${label(mission.cargo)} → ${mission.deliveryPlanet || '?'}`;
+            }
+            case 'escort': {
+                if (st.escortArrived) return `Escort ${label(mission.escortType)} — ready to claim`;
+                return `Escort ${label(mission.escortType)} → ${mission.endPlanet || '?'}`;
+            }
+            case 'trade': {
+                const target = Number(mission.targetCredits) || 0;
+                return target
+                    ? `Trade ${Math.min(ship?.credits || 0, target)}/${target} credits`
+                    : (mission.title || 'Trade contract');
+            }
+            default:
+                return mission.title || 'Contract';
+        }
+    }
+
+    // ==================== HUD VALUE FLASHES (W2.3) ====================
+
+    /**
+     * Flash a HUD value element green (up) or red (down). Debounced so the
+     * 8 Hz UI_UPDATE cannot strobe a value that changes every tick.
+     * @param {string} id - Cached HUD element id
+     * @param {number} dir - >0 up, <0 down
+     */
+    _flashValue(id, dir) {
+        try {
+            const el = this._domCache[id];
+            if (!el) return;
+            const now = performance.now ? performance.now() : Date.now();
+            if (now - (this._valueFlash.at[id] || 0) < 300) return;
+            this._valueFlash.at[id] = now;
+
+            const cls = dir > 0 ? 'value-up' : 'value-down';
+            el.classList.remove('value-up', 'value-down');
+            void el.offsetWidth; // restart the CSS animation
+            el.classList.add(cls);
+
+            if (this._valueFlash.timers[id]) clearTimeout(this._valueFlash.timers[id]);
+            this._valueFlash.timers[id] = setTimeout(() => {
+                this._valueFlash.timers[id] = null;
+                try { el.classList.remove('value-up', 'value-down'); } catch (_) {}
+            }, 350);
+        } catch (_) { /* flash is cosmetic */ }
+    }
+
+    /**
+     * Diff a numeric HUD value against the last rendered one and flash on change.
+     */
+    _trackValue(id, value) {
+        const prev = this._valueFlash.last[id];
+        this._valueFlash.last[id] = value;
+        if (prev === undefined || prev === value || !Number.isFinite(value)) return;
+        this._flashValue(id, value > prev ? 1 : -1);
     }
 
     // Removed UI-driven image source/enhance handlers per requirements
@@ -429,7 +682,9 @@ export class UISystem {
         };
 
         // Health/Shield/Fuel: rounded values minimize updates
-        updateElement('health', Math.max(0, Math.round(ship.health)) + '%');
+        const hullPct = Math.max(0, Math.round(ship.health));
+        this._trackValue('health', hullPct);
+        updateElement('health', hullPct + '%');
         updateElement('shield', ship.shield > 0 ? Math.round(ship.shield) : 'EQUIP');
         updateElement('fuel', Math.round(ship.fuel) + '%');
         // Update fuel alert based on latest values
@@ -453,14 +708,19 @@ export class UISystem {
             ? ship.cargo.reduce((sum, item) => sum + (item?.quantity ?? 1), 0)
             : 0;
         const cargoStr = cargoUsed + '/' + (ship.cargoCapacity || 10);
+        this._trackValue('cargo', cargoUsed);
         if (this._hudCache.values.cargo !== cargoStr) { this._hudCache.values.cargo = cargoStr; updateElement('cargo', cargoStr); }
         const locStr = ship.isLanded && ship.landedPlanet ? ship.landedPlanet.name : 'SPACE';
         if (this._hudCache.values.location !== locStr) { this._hudCache.values.location = locStr; updateElement('location', locStr); }
         const credStr = String(ship.credits || 0);
+        this._trackValue('credits', Number(ship.credits) || 0);
         if (this._hudCache.values.credits !== credStr) { this._hudCache.values.credits = credStr; updateElement('credits', credStr); }
         updateElement('weapon', ship.weapons && ship.weapons.length > 0 ?
             ship.weapons[ship.currentWeapon].type.toUpperCase() : 'EQUIP');
         // Kills and target readouts removed from HUD by design
+
+        // Contract tracker rides the same throttled update (W2.5)
+        this.updateContractTracker();
     }
 
     _updateFuelAlert() {
@@ -2011,6 +2271,23 @@ export class UISystem {
         this.eventBus.off(GameEvents.AUDIO_STATE_CHANGED, this.handleAudioStateChanged);
         this.eventBus.off(GameEvents.AUDIO_MUSIC_STATE, this.handleMusicState);
         this.eventBus.off(GameEvents.SHIP_DEATH, this.handleShipDestroyed);
+        this.eventBus.off(RunEvents.ZONE_CHANGE, this.handleZoneChange);
+        this.eventBus.off(RunEvents.ZONE_BOSS_SPAWN, this.handleBossSpawn);
+        this.eventBus.off(RunEvents.RUN_END, this.handleRunEnd);
+        this.eventBus.off(RunEvents.RUN_VICTORY, this.handleRunVictory);
+        this.eventBus.off(GameEvents.MISSION_ACCEPT, this.handleMissionsChanged);
+        this.eventBus.off(GameEvents.MISSION_UPDATED, this.handleMissionsChanged);
+        this.eventBus.off(GameEvents.MISSION_COMPLETE, this.handleMissionsChanged);
+
+        // Banner + value-flash timers
+        if (this._bannerTimer) {
+            clearTimeout(this._bannerTimer);
+            this._bannerTimer = null;
+        }
+        for (const key of Object.keys(this._valueFlash.timers)) {
+            if (this._valueFlash.timers[key]) clearTimeout(this._valueFlash.timers[key]);
+            this._valueFlash.timers[key] = null;
+        }
 
         // Clear all timers to prevent memory leaks
         if (this._radioStaticTimer) {

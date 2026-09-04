@@ -142,6 +142,16 @@ export class InputSystem {
         };
         window.addEventListener('blur', this._handleBlur);
         window.addEventListener('focus', this._handleFocus);
+
+        // Page Visibility (U7): a backgrounded tab pauses exactly like a blur
+        // and reuses the same ownership flag, so a menu/death-screen pause is
+        // never stolen and never double-resumed.
+        this._handleVisibilityChange = () => {
+            if (typeof document === 'undefined') return;
+            if (document.hidden) this._handleBlur();
+            else this._handleFocus();
+        };
+        document.addEventListener('visibilitychange', this._handleVisibilityChange);
     }
     
     /**
@@ -552,6 +562,7 @@ export class InputSystem {
         window.removeEventListener('keydown', this._handleSpaceBarScroll);
         if (this._handleBlur) window.removeEventListener('blur', this._handleBlur);
         if (this._handleFocus) window.removeEventListener('focus', this._handleFocus);
+        if (this._handleVisibilityChange) document.removeEventListener('visibilitychange', this._handleVisibilityChange);
 
         const canvas = document.getElementById('gameCanvas');
         if (canvas) {

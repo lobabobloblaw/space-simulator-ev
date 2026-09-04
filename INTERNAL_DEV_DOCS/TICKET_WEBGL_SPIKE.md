@@ -1,51 +1,41 @@
-# Ticket — WebGL Spike (Flagged, OFF by default)
+# Ticket — WebGL Spike — NOT PURSUED (closed 2026-09-03)
 
-## Summary
-Explore a low‑risk WebGL renderer path behind a feature flag to assess performance headroom and parity with current Canvas2D rendering. No change to defaults; Canvas2D remains the shipping path.
+**Status: closed, will not be implemented. Code removed.**
 
-## Context
-- Current renderer: Canvas2D with strict hygiene, deterministic TargetCam, and profiling hooks.
-- Goal: Determine feasibility and benefit of WebGL batching for sprites/effects while preserving EventBus + StateManager and existing asset ownership (AssetSystem).
+`docs/js/systems/WebGLRenderSystem.js` and its `?webgl=1` / `window.RENDER_WEBGL` /
+`localStorage['RENDER_WEBGL']` wiring in `docs/js/main_eventbus_pure.js` were deleted in
+Phase 1 (roadmap 3.4 item 10). Canvas2D is the only renderer.
 
-## Scope (Phase 1 — Proof of Life)
-- Add `WebGLRenderSystem` (new module) that mirrors `RenderSystem` responsibilities for:
-  - Player ship, NPCs, projectiles (sprite paths only)
-  - Camera transforms (world vs screen containers)
-- HUD/UI remain DOM/Canvas2D.
-- Planets/stars/nebula/warp FX remain Canvas2D for this phase.
-- AssetSystem: add a non-breaking helper `getTexture(id)` or `getGLTexture(id)` wrapper (optional; keep internal, do not expose toggles by default).
+## Why it was dropped
 
-## Non‑Goals (Phase 1)
-- No shader post‑FX, no overhaul of planets/nebula.
-- No removal of Canvas2D; it remains the default fallback.
-- No default toggles enabled, no build system changes.
+1. **The frame was never batch-bound.** Profiling put the cost in a handful of Canvas2D hot
+   spots, not in draw-call submission: ~9,600 per-star `fillRect` calls per frame (of which
+   ~115 were on screen — the wrap band was broken, see roadmap P5), per-frame radial-gradient
+   allocation for pickups, explosions and nebula, and full-viewport gradient fills. All of
+   those are fixable *in Canvas2D* — the star layers are now pre-rendered tiles (~30 blits),
+   and the gradients are cached. A GL port would have carried the same waste to a new API.
 
-## Toggle
-- `window.RENDER_WEBGL = true` (OFF by default). When true, instantiate `WebGLRenderSystem` instead of `RenderSystem` in the entry point.
+2. **Entity counts are two orders of magnitude below the batching threshold.** A busy frame is
+   ~40 NPCs, <100 projectiles, a few dozen FX. Sprite batching starts to pay somewhere in the
+   thousands. There is no scene here that a 2D context cannot draw in budget.
 
-## Success Criteria
-- With `RENDER_WEBGL = true`:
-  - Player/NPC/projectile sprites render with correct orientation, depth order, and camera tracking.
-  - Frame times comparable or better than Canvas2D on a mid‑tier device; no new spikes in `targetcam`/`other` buckets.
-  - No functional regressions in input, physics, UI, or save/load.
-- With flag OFF: identical behavior/perf to current master.
+3. **Cost was structural, not incremental.** Parity would have meant a second implementation of
+   the sprite-orientation chain, TargetCam source resolution, quality policy, HiDPI handling and
+   every screen-space overlay — i.e. a permanent second renderer to keep in sync, for a
+   workload that does not need one.
 
-## Acceptance Checks
-- Run main (`/docs/`) for 2–5 minutes; sample `[RenderProfileStr]` with both Canvas2D and WebGL flag.
-- Cycle targets; verify TargetCam behavior unchanged (TargetCam remains Canvas2D in Phase 1).
-- Destroy ships; ensure FX and gameplay responsiveness unaffected.
+4. **The post-processing argument does not require it.** Bloom-lite, vignette and chromatic
+   flash can be done with a small offscreen Canvas2D pass; if a real shader stage is ever
+   wanted, it should be a compositing step over the 2D canvas, not a rewrite of scene drawing.
 
-## Risks & Mitigations
-- Texture upload stalls → preload textures early; keep Canvas2D fallback.
-- Blend/tint parity differences → restrict Phase 1 to simple sprite draw + alpha blend; defer complex FX.
-- Device compatibility variance → gate via flag; do not enable by default.
+## If this is ever reopened
 
-## Rollback
-- Remove the flag usage or keep code path dormant; no changes to default path.
+Reopen only on evidence, not on principle: a profile that shows draw-call submission (not
+gradient/allocation/GC) dominating a frame at a scene density we actually ship. The right move
+then is a GL *compositor* for a Canvas2D-rendered scene texture plus shader post-FX, not a
+second scene renderer.
 
-## Estimation
-- Phase 1: 1–2 days engineer time for a credible spike (no default behavior change).
+## Original ticket
 
-## Notes
-- Only pursue beyond Phase 1 if profiling shows render‑bound spikes or if we need higher scene density/post‑FX.
-
+Kept in git history: see the pre-2026-09 revision of this file and
+`docs/js/systems/WebGLRenderSystem.js` (deleted in the Phase 1 batch W1 commit).

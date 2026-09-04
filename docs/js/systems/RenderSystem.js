@@ -6,17 +6,45 @@ import PlanetSpriteRenderer from './PlanetSpriteRenderer.js';
 import ExplosionRenderer from './ExplosionRenderer.js';
 import ThrusterFXRenderer from './ThrusterFXRenderer.js';
 import HUDRenderer from './HUDRenderer.js';
-import { withWorld, withScreen, toWhiteMaskCanvas } from './RenderHelpers.js';
+import { withWorld, withScreen } from './RenderHelpers.js';
 import { MathUtils } from '../utils/MathUtils.js';
-import { resolveViewportSprite } from './SpriteResolver.js';
-import { getFrameCanvasFromState, getPlanetSpriteFromState } from './AssetSystem.js';
+import { getPlanetSpriteFromState } from './AssetSystem.js';
 import { isImageReady } from './AssetReadiness.js';
-import { typeToSpriteId, aliasSpriteForType, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES, spriteThrusterAnchors as THRUSTER_ANCHORS } from './SpriteMappings.js';
+import { typeToSpriteId, spriteRotationOffset, spriteOrientationOverrides as ORIENT_OVERRIDES, spriteThrusterAnchors as THRUSTER_ANCHORS } from './SpriteMappings.js';
 import ShipDesigns from './ShipDesigns.js';
 import TargetCamRenderer from './TargetCamRenderer.js';
 import FactionVisuals from './FactionVisuals.js';
 import { GameConstants } from '../utils/Constants.js';
 import { zones } from '../data/zones.js';
+
+// Behaviours that read as hostile on HUD outlines/minimap (pirate variants + bosses)
+const HOSTILE_BEHAVIORS = new Set(['aggressive', 'elite', 'ambusher', 'boss']);
+
+/**
+ * Projectile appearance by `proj.type`.
+ *
+ *   core     fill + glow colour of the head
+ *   trail    gradient end colour of the tail (defaults to `core`)
+ *   coreR    head radius in world units
+ *   seg      default tail length in velocity steps when the projectile has no
+ *            `trailLen`; `maxSeg` caps it, `heavySeg` caps it on low quality
+ *   glow     false to skip the shadow (cheap, and right for dull ordnance)
+ *
+ * Muzzle flash and impact-spark colours live in WeaponSystem.
+ */
+const PROJECTILE_STYLE_DEFAULT = { core: '#ffff00', coreR: 2, seg: 5, maxSeg: 12, heavySeg: 5 };
+const PROJECTILE_STYLE = {
+    laser:  { ...PROJECTILE_STYLE_DEFAULT },
+    rapid:  { ...PROJECTILE_STYLE_DEFAULT, core: '#ff8800' },
+    mining: { ...PROJECTILE_STYLE_DEFAULT, core: '#888888' },
+    plasma: { ...PROJECTILE_STYLE_DEFAULT, core: '#00ffff', coreR: 4 },
+    // Final boss weapon: violet core over a deeper violet trail
+    void:   { ...PROJECTILE_STYLE_DEFAULT, core: '#c26bff', trail: '#7a2cff', coreR: 5 },
+    // Deployed ordnance: a fat amber pip that smoulders instead of streaking
+    mine:   { ...PROJECTILE_STYLE_DEFAULT, core: '#ffb347', trail: 'rgba(255, 179, 71, 0.35)', coreR: 3, seg: 3, maxSeg: 4, heavySeg: 3, glow: false },
+    // Lance: a thin white-hot head dragging a long violet streak
+    lance:  { ...PROJECTILE_STYLE_DEFAULT, core: '#f0d9ff', trail: '#9b5cff', coreR: 3, seg: 14, maxSeg: 18, heavySeg: 9 }
+};
 
 /**
  * RenderSystem - Handles all visual rendering for the game
@@ -63,10 +91,6 @@ export class RenderSystem {
             phase: 0
         };
         this.staticNoise.ctx = this.staticNoise.canvas.getContext('2d');
-        // Target cam blip effect state
-        this.targetCamBlip = null;
-        // Target cam transition (adds a small visual gap & fade-in)
-        this.targetCamTransition = null; // { fromId, toId, start, duration, hold }
         
         // Initialize planet renderer based on constants/toggle
         try {
@@ -109,7 +133,11 @@ export class RenderSystem {
         // Extracted explosion renderer
         this.explosionRenderer = new ExplosionRenderer();
         this.thrusterFX = new ThrusterFXRenderer();
-        this.hud = new HUDRenderer(this.ctx, this.camera, this.screenCenter);
+        // Screen-space overlays read a camera shifted by the frame's shake offset so
+        // brackets and bars sit on the same pixels as the shaken world (P10).
+        this._shake = { x: 0, y: 0 };
+        this._hudCamera = { x: this.camera.x, y: this.camera.y };
+        this.hud = new HUDRenderer(this.ctx, this._hudCamera, this.screenCenter);
 
         // Optional per-planet sprite caches (QA-only swap paths)
         this._terraSprite = { ready: false, started: false, canvas: null, w: 0, h: 0, forRadius: 0 };
@@ -124,19 +152,8 @@ export class RenderSystem {
         this._terraAnim = { ready: false, started: false, frames: [], fps: 12, w: 0, h: 0, t0: 0 };
         this._crimsonAnim = { ready: false, started: false, frames: [], fps: 12, w: 0, h: 0, t0: 0 };
 
-        // Local minimal atlas for target-cam fallback silhouettes
-        this._viewportAtlas = null;
         // Track pending async planet generations to avoid repeat scheduling
         this._pendingPlanets = new Set();
-        // Preload target-cam sprite images (direct paths) to ensure availability
-        this._targetCamSprites = {};
-        try {
-            const ids = ['ships/pirate_0','ships/patrol_0','ships/patrol_1','ships/interceptor_0','ships/freighter_0','ships/freighter_1','ships/trader_0','ships/trader_1','ships/shuttle_0','ships/shuttle_1'];
-            ids.forEach(id => { this._targetCamSprites[id] = this._ensureDirectSpriteImage(id); });
-        } catch(_) {}
-
-        // Cached per-frame canvases extracted from placeholder atlas for target-cam use
-        this._tcFrameCache = {};
 
         // Optional: tiny guard to skip/stride soft UI (minimap/HUD) for 1–2 frames
         // when render profiler attributes a spike to 'other'. Disabled by default;
@@ -166,7 +183,8 @@ export class RenderSystem {
 
         // Background caches
         this._bgGrad = { canvas: null, h: 0 };
-        this._starTick = 0;
+        // Pre-rendered star tiles per layer (P5); rebuilt on quality/zone/density change
+        this._starTiles = null;
         this._starBootSkip = 0;
         try { const g = (typeof window !== 'undefined') ? window : globalThis; if (Number(g.STAR_BOOT_SKIP)) this._starBootSkip = Math.max(0, Number(g.STAR_BOOT_SKIP)|0); } catch(_) {}
 
@@ -227,60 +245,6 @@ export class RenderSystem {
         } finally { ctx.restore(); }
     }
 
-    // Draw src tinted to white (#e8f6ff). Prefers offscreen mask; falls back to in-place source-in.
-    _drawWhiteMasked(ctx, src, dw, dh, sx = null, sy = null, sw = null, sh = null) {
-        try {
-            const mask = toWhiteMaskCanvas(src, dw, dh, (sx??0), (sy??0), sw, sh);
-            ctx.drawImage(mask, -dw/2, -dh/2, dw, dh);
-            return true;
-        } catch (_) {
-            try {
-                ctx.save();
-                if (sw && sh && sx !== null && sy !== null) {
-                    ctx.drawImage(src, sx|0, sy|0, sw, sh, -dw/2, -dh/2, dw, dh);
-                } else {
-                    ctx.drawImage(src, -dw/2, -dh/2, dw, dh);
-                }
-                const prev = ctx.globalCompositeOperation;
-                ctx.globalCompositeOperation = 'source-in';
-                ctx.fillStyle = '#e8f6ff';
-                ctx.fillRect(-dw/2, -dh/2, dw, dh);
-                ctx.globalCompositeOperation = prev;
-                ctx.restore();
-                return true;
-            } catch (__) {
-                return false;
-            }
-        }
-    }
-
-  getViewportFallbackAtlas() {
-      if (this._viewportAtlas) return this._viewportAtlas;
-      const tw = 32, th = 32;
-      // Build per-frame canvases with transparent background
-      const raiderCanvas = document.createElement('canvas'); raiderCanvas.width = tw; raiderCanvas.height = th;
-      const rc = raiderCanvas.getContext('2d');
-      rc.save(); rc.translate(tw*0.5, th*0.5);
-      rc.fillStyle = '#e8f6ff';
-      rc.beginPath();
-      rc.moveTo(tw*0.36, 0);
-      rc.lineTo(-tw*0.28, -th*0.24);
-      rc.lineTo(-tw*0.20, 0);
-      rc.lineTo(-tw*0.28, th*0.24);
-      rc.closePath(); rc.fill(); rc.restore();
-
-      const traderCanvas = document.createElement('canvas'); traderCanvas.width = tw; traderCanvas.height = th;
-      const tc = traderCanvas.getContext('2d');
-      tc.save(); tc.translate(tw*0.5, th*0.5);
-      tc.fillStyle = '#e8f6ff';
-      tc.beginPath(); tc.ellipse(0,0, tw*0.38, th*0.22, 0, 0, Math.PI*2); tc.fill(); tc.restore();
-      const frames = {
-          'ships/raider_0': { img: raiderCanvas, w: tw, h: th },
-          'ships/trader_0': { img: traderCanvas, w: tw, h: th }
-      };
-      this._viewportAtlas = { frames };
-      return this._viewportAtlas;
-  }
     
     /**
      * Initialize the render system
@@ -323,7 +287,6 @@ export class RenderSystem {
                     this.planetRenderer.initializePlanets(state.planets);
                 } catch(_) {}
             }
-            try { this.buildTargetCamCache(); } catch(_) {}
         }, 100);
 
         // QA-only Terra/Crimson sprite prep (off-screen), guarded by persisted toggle
@@ -424,33 +387,6 @@ export class RenderSystem {
         try { this.targetCam.init(); } catch(_) {}
         
         console.log('[RenderSystem] Initialized');
-    }
-
-    buildTargetCamCache() {
-        try {
-            const state = this.stateManager?.state;
-            if (!state) return;
-            const wanted = [
-                'ships/pirate_0',
-                'ships/patrol_0',
-                'ships/interceptor_0',
-                'ships/freighter_0',
-                'ships/trader_0',
-                'ships/shuttle_0',
-                'ships/raider_0'
-            ];
-            const built = [];
-            for (const key of wanted) {
-                if (this._tcFrameCache[key]) continue;
-                const canvas = getFrameCanvasFromState(state, key);
-                if (!canvas) continue;
-                this._tcFrameCache[key] = canvas;
-                built.push(key);
-            }
-            if (built.length) {
-                console.log('[RenderSystem] TargetCam cache built for', built);
-            }
-        } catch(_) {}
     }
 
     /**
@@ -771,10 +707,6 @@ export class RenderSystem {
         this.eventBus.on(GameEvents.SHIELD_HIT, this.handleShieldHit);
 
         // TargetCam handles TARGET_SET/TARGET_CLEAR internally
-        // Build target-cam cache once assets are ready
-        this.eventBus.on('assets.ready', () => {
-            try { this.buildTargetCamCache(); } catch(_) {}
-        });
     }
 
     getOrLoadSprite(spriteId) {
@@ -799,21 +731,6 @@ export class RenderSystem {
             } catch(_) {}
             return null;
         } catch (_) { return null; }
-    }
-
-    _spriteUrlFor(spriteId) {
-        try { return new URL('../../assets/sprites/' + spriteId + '.png', import.meta.url).href; } catch(_) { return null; }
-    }
-    _ensureDirectSpriteImage(spriteId) {
-        try {
-            let img = this._targetCamSprites[spriteId];
-            if (img && (img.naturalWidth > 0 || !img.complete)) return img;
-            const url = this._spriteUrlFor(spriteId);
-            if (!url) return null;
-            img = new Image(); img.decoding = 'async'; img.crossOrigin = 'anonymous'; img.referrerPolicy = 'no-referrer'; img.src = url;
-            this._targetCamSprites[spriteId] = img;
-            return img;
-        } catch(_) { return null; }
     }
 
     _dbgLog(key, ...args) {
@@ -927,15 +844,21 @@ export class RenderSystem {
         // Clear canvas with gradient background
         this.clearCanvas();
         
-        // Save context state
-        // Apply world-space pass with camera and shake using helper
+        // Screen shake. The amplitude is decayed by VisualEffectsSystem on the fixed
+        // tick (P11); the renderer only samples it for this frame's offset.
         let shakeX = 0, shakeY = 0;
-        if (state.ship.screenShake && state.ship.screenShake > 0) {
+        if (state.ship.screenShake > 0) {
             shakeX = (Math.random() - 0.5) * state.ship.screenShake;
             shakeY = (Math.random() - 0.5) * state.ship.screenShake;
-            state.ship.screenShake *= state.ship.screenShakeDecay || (GameConstants?.PHYSICS?.SCREEN_SHAKE_DECAY ?? 0.8);
-            if (state.ship.screenShake < 0.5) state.ship.screenShake = 0;
         }
+        this._shake.x = shakeX;
+        this._shake.y = shakeY;
+        // One camera for every space (P10). withWorld translates by
+        // (screenCenter - camera + shake); screen-space overlays compute
+        // (p - camera + screenCenter), so shifting the camera they see by -shake
+        // puts them on exactly the same pixels as the shaken world.
+        this._hudCamera.x = this.camera.x - shakeX;
+        this._hudCamera.y = this.camera.y - shakeY;
 
         // Lightweight profiling (opt-in)
         const doProf = !!(typeof window !== 'undefined' && (window.RENDER_PROF_LOG || window.RENDER_PROF_OVERLAY)) || this._prof.armed > 0;
@@ -965,9 +888,15 @@ export class RenderSystem {
         const tf_world = doProf ? (pnow() - tf_world_start) : 0;
         // Debug: post-world pass lint
         this.debugRenderLint('post-world');
-        
-        // Draw damage flash overlay (screen space)
-        if (state.ship.damageFlash && state.ship.damageFlash > 0) {
+
+        // Per-NPC screen-space decorations (brackets, state icon, message, health).
+        // These used to be drawn from inside renderNPCs, i.e. before projectiles,
+        // explosions and warp FX painted over them (P10). One pass, after the world.
+        try { const tOv = doProf && pnow(); this.renderNPCOverlays(state); if (doProf) pmark('npcoverlay', pnow()-tOv); } catch(_) {}
+
+        // Draw damage flash overlay (screen space). Decay is owned by
+        // VisualEffectsSystem (P11) — read only here.
+        if (state.ship.damageFlash > 0) {
             withScreen(this.ctx, () => {
                 const mult = (GameConstants?.PHYSICS?.DAMAGE_FLASH_ALPHA_MULT ?? 0.3);
                 this.ctx.fillStyle = `rgba(255, 0, 0, ${state.ship.damageFlash * mult})`;
@@ -975,11 +904,8 @@ export class RenderSystem {
                 const dpr = this.canvas.__dpr || 1;
                 this.ctx.fillRect(0, 0, this.canvas.width / dpr, this.canvas.height / dpr);
             });
-            const decay = (GameConstants?.PHYSICS?.DAMAGE_FLASH_DECAY ?? 0.05);
-            state.ship.damageFlash -= decay;
-            if (state.ship.damageFlash < 0) state.ship.damageFlash = 0;
         }
-        
+
         // Render UI elements (not affected by camera)
         let t0;
         if (doProf) t0 = pnow();
@@ -1007,7 +933,8 @@ export class RenderSystem {
         // Screen-space HUD overlays
         try {
             if (!guardActive && !inBootRamp) {
-                this.hud.updateContext(this.ctx, this.camera, this.screenCenter);
+                this.hud.updateContext(this.ctx, this._hudCamera, this.screenCenter);
+                this.hud.drawDamageNumbers(state);
                 this.hud.drawPlayerHealth(state);
                 // Optional QA build tag (top-right); gated by window.HUD_SHOW_BUILD_TAG
                 this.hud.drawBuildTag();
@@ -1271,409 +1198,6 @@ export class RenderSystem {
     }
 
     /**
-     * Render target camera viewport showing silhouette of targeted ship
-     */
-    renderTargetCam(state) {
-        if (!this.targetCtx || !this.targetCanvas) return;
-        const w = this.targetCanvas.width || 100;
-        const h = this.targetCanvas.height || 100;
-        // Hard reset target-cam context to avoid lingering transforms/composites
-        try { this.targetCtx.setTransform(1, 0, 0, 1, 0, 0); } catch (_) {}
-        this.targetCtx.globalAlpha = 1;
-        this.targetCtx.globalCompositeOperation = 'source-over';
-        this.targetCtx.imageSmoothingEnabled = false;
-        this.targetCtx.clearRect(0, 0, w, h);
-
-        let targetId = (state.targeting && state.targeting.selectedId) || null;
-        const shipDead = !!(state.ship && state.ship.isDestroyed);
-        // Transition: enforce brief gap + fade-in for new selection
-        let silhouetteAlpha = 1.0;
-        let silhouetteScale = 1.0;
-        let drawSilhouette = true;
-        if (this.targetCamTransition) {
-            const now = performance.now();
-            const t = (now - this.targetCamTransition.start) / this.targetCamTransition.duration;
-            if (t >= 1) {
-                this._lastSilhouetteId = this.targetCamTransition.toId || targetId || null;
-                this.targetCamTransition = null;
-            } else {
-                // Always aim wedge at the incoming target during transition
-                targetId = this.targetCamTransition.toId || targetId;
-                if (t * this.targetCamTransition.duration < this.targetCamTransition.hold) {
-                    // Hold: keep ring/wedge but delay silhouette
-                    drawSilhouette = false;
-                } else {
-                    // Fade-in and slight overshoot scale for punch
-                    const fadeT = (now - (this.targetCamTransition.start + this.targetCamTransition.hold)) /
-                                  (this.targetCamTransition.duration - this.targetCamTransition.hold);
-                    silhouetteAlpha = Math.max(0, Math.min(1, fadeT));
-                    silhouetteScale = 1.05 - 0.05 * silhouetteAlpha; // 1.05 -> 1.00
-                }
-            }
-        }
-        // Fetch npc for wedge/silhouette if we have a target id
-        if (shipDead) targetId = null;
-        const npc = targetId ? (state.npcShips || []).find(n => n && n.id === targetId) : null;
-
-        // Static/scanline overlays are disabled by default (prod hygiene).
-        // Enable temporarily by setting window.TC_FX = true in console.
-        const now0 = performance.now ? performance.now() : Date.now();
-        const inTransition = !!this.targetCamTransition;
-        const inBlip = !!this.targetCamBlip && (now0 - this.targetCamBlip.start) <= (this.targetCamBlip.duration || 320);
-        const fxActive = inTransition || inBlip;
-        const fxEnabled = !!window.TC_FX;
-        if (fxEnabled && fxActive) {
-            this.drawStaticNoise(w, h, 0.08);
-            this.drawScanlines(w, h, 0.06);
-        }
-
-        // Center the drawing
-        const ctx = this.targetCtx;
-        ctx.save();
-        try {
-            const cx = w / 2, cy = h / 2;
-            ctx.translate(cx, cy);
-
-        // Direction indicator around perimeter
-        let ang = 0;
-        if (npc) {
-            const dx = npc.x - state.ship.x;
-            const dy = npc.y - state.ship.y;
-            ang = Math.atan2(dy, dx);
-        }
-        const radius = Math.min(w, h) * 0.5 - 4;
-
-        // Outer faint ring
-        ctx.save();
-        // Ring flash on transition start for extra punch
-        let ringAlpha = 0.25;
-        if (this.targetCamTransition) {
-            const now = performance.now();
-            const t = (now - this.targetCamTransition.start) / this.targetCamTransition.duration;
-            if (t < 0.25) ringAlpha = 0.6 - t * 1.2; // brief bright flash decaying
-        }
-        ctx.globalAlpha = Math.max(0.15, ringAlpha);
-        ctx.strokeStyle = '#aef';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-
-        // Marker wedge pointing to target direction (only if target exists)
-        if (npc) {
-            ctx.save();
-            ctx.rotate(ang);
-            ctx.fillStyle = '#cff';
-            const mr = radius;
-            ctx.beginPath();
-            ctx.moveTo(mr, 0);
-            ctx.lineTo(mr - 8, -4);
-            ctx.lineTo(mr - 8, 4);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-        }
-
-        // Blip: expanding ring from center on target change
-        if (this.targetCamBlip) {
-            const now = performance.now();
-            const t = (now - this.targetCamBlip.start) / this.targetCamBlip.duration;
-            if (t >= 1) {
-                this.targetCamBlip = null;
-            } else {
-                const r = (0.2 + 0.8 * t) * radius;
-                ctx.save();
-                ctx.globalAlpha = Math.max(0, 1 - t) * 0.6;
-                ctx.strokeStyle = '#cff';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(0, 0, r, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
-            }
-        }
-
-        // Draw live silhouette (prefer sprite shape) rotated with NPC angle
-        // Disabled: TargetCamRenderer now owns TargetCam viewport; avoid duplicate/legacy path
-        if (false && npc && drawSilhouette) {
-            ctx.save();
-            let base = Math.max(16, Math.min(28, (npc.size || 10) * 1.6));
-            base *= silhouetteScale;
-            let drewSprite = false;
-            let reason = 'init';
-            let lastErr = null;
-            // Track source dims for probe
-            let usedSw = 0, usedSh = 0, usedDw = 0, usedDh = 0;
-            // Compute sprite ids once for both try-block and fallback
-            const spriteId = npc.spriteId || typeToSpriteId[npc.type] || 'ships/pirate_0';
-            const aliasId = aliasSpriteForType[npc.type] || spriteId;
-            try {
-                const assets = this.stateManager.state.assets || {};
-                // Ensure atlas frame cache is ready (defensive)
-                if ((!this._tcFrameCache || Object.keys(this._tcFrameCache).length === 0) && assets.atlases && assets.atlases.placeholder) {
-                  try { this.buildTargetCamCache(); } catch(_) {}
-                }
-                const target = base * 2; // approximate to match prior vector size
-                // Step 1: standalone sprite (registry)
-                const sprite = assets.sprites && assets.sprites[spriteId];
-                if (!drewSprite && sprite && sprite.image && (sprite.image.naturalWidth > 0 && sprite.image.naturalHeight > 0)) {
-                  const sw = sprite.w || sprite.image.naturalWidth || sprite.image.width;
-                  const sh = sprite.h || sprite.image.naturalHeight || sprite.image.height;
-                  const scale = target / Math.max(sw, sh);
-                  const dw = sw * scale, dh = sh * scale;
-                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
-                  ctx.save();
-                  try {
-                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
-                    ctx.imageSmoothingEnabled = false;
-                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
-                    const ok = this._drawWhiteMasked(ctx, sprite.image, dw, dh);
-                    if (ok) { drewSprite = true; reason = 'standalone-drawn'; }
-                  } finally { ctx.restore(); }
-                }
-                // Step 2: preloaded direct image (ensure/populate)
-                if (!this._targetCamSprites[spriteId]) {
-                  const ensured = (typeof this._ensureDirectSpriteImage === 'function') ? this._ensureDirectSpriteImage(spriteId) : null;
-                  if (ensured) this._targetCamSprites[spriteId] = ensured;
-                }
-                const pre = this._targetCamSprites[spriteId];
-                if (!drewSprite && pre && pre.naturalWidth > 0 && pre.naturalHeight > 0) {
-                  const sw = pre.naturalWidth, sh = pre.naturalHeight;
-                  const scale = target / Math.max(sw, sh);
-                  const dw = sw * scale, dh = sh * scale;
-                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
-                  ctx.save();
-                  try {
-                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
-                    ctx.imageSmoothingEnabled = false;
-                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
-                    const ok = this._drawWhiteMasked(ctx, pre, dw, dh);
-                    if (ok) { drewSprite = true; reason = 'direct-preloaded'; }
-                  } finally { ctx.restore(); }
-                }
-                // Step 3: on-demand direct image
-                const direct = this.getOrLoadSprite(spriteId);
-                if (!drewSprite && direct && direct.naturalWidth > 0 && direct.naturalHeight > 0) {
-                  const sw = direct.naturalWidth || direct.width;
-                  const sh = direct.naturalHeight || direct.height;
-                  const scale = target / Math.max(sw, sh);
-                  const dw = sw * scale, dh = sh * scale;
-                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
-                  ctx.save();
-                  try {
-                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
-                    ctx.imageSmoothingEnabled = false;
-                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
-                    const ok = this._drawWhiteMasked(ctx, direct, dw, dh);
-                    if (ok) { drewSprite = true; reason = 'direct-drawn'; }
-                  } finally { ctx.restore(); }
-                }
-                // Step 4: cached per-frame atlas canvas (via AssetSystem helper)
-                const cf = getFrameCanvasFromState(this.stateManager.state, aliasId) || getFrameCanvasFromState(this.stateManager.state, spriteId);
-                if (!drewSprite && cf && cf.width > 0 && cf.height > 0) {
-                  const sw = cf.width, sh = cf.height;
-                  const scale = target / Math.max(sw, sh);
-                  const dw = sw * scale, dh = sh * scale;
-                  usedSw = sw; usedSh = sh; usedDw = dw; usedDh = dh;
-                  ctx.save();
-                  try {
-                    ctx.globalAlpha = Math.max(0.7, silhouetteAlpha);
-                    ctx.imageSmoothingEnabled = false;
-                    ctx.rotate((npc.angle || 0) + (this.spriteOrientationOverrides[spriteId] || 0) + this.spriteRotationOffset);
-                    const ok = this._drawWhiteMasked(ctx, cf, dw, dh);
-                    if (ok) { drewSprite = true; reason = 'atlas-drawn'; }
-                  } finally { ctx.restore(); }
-                }
-                // Step 4b: no longer needed; getFrameCanvasFromState covers atlas frames
-                // 5) No other sources succeeded; baseline/vec handled below with guard.
-            } catch(e) {
-                if (!drewSprite) { reason = 'error'; lastErr = e; }
-            }
-
-            // Minimal diagnostics: show compact info only when requested
-            if (window.DEBUG_SPRITES === 'errors' || window.DEBUG_SPRITES === 'verbose') {
-                const isErr = (reason === 'error');
-                if (isErr || window.DEBUG_SPRITES === 'verbose') {
-                    const payload = { type: npc.type, spriteId, reason, sw: usedSw|0, sh: usedSh|0, dw: usedDw|0, dh: usedDh|0 };
-                    if (isErr && lastErr && lastErr.message) payload.err = lastErr.message;
-                    (isErr ? console.warn : console.log)('[TargetCam]', payload);
-                }
-            }
-
-            // Final guard: if any valid source exists (standalone/preloaded/direct/atlas),
-            // skip baseline/vector. Prefer white mask from whichever is available.
-            let skipFallbacks = false;
-            try {
-                const assets = this.stateManager?.state?.assets || {};
-                const atlas = assets.atlases && assets.atlases.placeholder;
-                const atlasSrcReady = !!(atlas && ((atlas.canvas) || (atlas.image && atlas.image.naturalWidth > 0)));
-                const hasAtlasFrameReady = !!(atlasSrcReady && atlas.frames && (atlas.frames[aliasId] || atlas.frames[spriteId]));
-                const standaloneImg = assets.sprites && assets.sprites[spriteId] && assets.sprites[spriteId].image;
-                const hasStandaloneReady = !!(standaloneImg && (standaloneImg.naturalWidth > 0 && standaloneImg.naturalHeight > 0));
-                const pre = this._targetCamSprites && this._targetCamSprites[spriteId];
-                const hasPreloadedReady = !!(pre && pre.naturalWidth > 0 && pre.naturalHeight > 0);
-                const cf = this._tcFrameCache && (this._tcFrameCache[aliasId] || this._tcFrameCache[spriteId]);
-                const hasCachedFrameReady = !!(cf && cf.width > 0 && cf.height > 0);
-                // Check direct cache for readiness (without counting mere URL presence)
-                let hasDirectReady = false;
-                try {
-                    const direct = this.getOrLoadSprite(spriteId);
-                    hasDirectReady = !!(direct && direct.naturalWidth > 0 && direct.naturalHeight > 0);
-                } catch(_) {}
-                skipFallbacks = !!(hasAtlasFrameReady || hasStandaloneReady || hasPreloadedReady || hasCachedFrameReady || hasDirectReady);
-            } catch(_) { /* noop */ }
-
-            // Baseline: viewport-local transparent silhouette (outside try/catch)
-            // Always render baseline if nothing drew to avoid empty viewport.
-            if (!drewSprite) {
-                try {
-                    const vpa = this.getViewportFallbackAtlas();
-                    const vpf = vpa.frames[aliasId] || vpa.frames['ships/trader_0'];
-                    if (vpf && vpf.img) {
-                        const target = base * 2;
-                        const scale = target / Math.max(vpf.w, vpf.h);
-                        const dw = vpf.w * scale, dh = vpf.h * scale;
-                        ctx.save();
-                        ctx.globalAlpha = Math.max(0.9, silhouetteAlpha);
-                        ctx.imageSmoothingEnabled = false;
-                        ctx.rotate((npc.angle || 0) + this.spriteRotationOffset);
-                        usedSw = vpf.w; usedSh = vpf.h; usedDw = dw; usedDh = dh;
-                        ctx.drawImage(vpf.img, -dw/2, -dh/2, dw, dh);
-                        drewSprite = true;
-                        reason = 'vpa-drawn';
-                        ctx.restore();
-                    }
-                } catch(_) {}
-            }
-
-            // Diagnostics removed
-
-            if (!drewSprite) {
-                // Safe fallback: vector silhouette (prevents blank viewport)
-                const palette = { hullA: '#e8f6ff', hullB: '#e8f6ff', stroke: '#e8f6ff', cockpit: 'rgba(255,255,255,0.55)' };
-                try {
-                    const design = (npc.type === 'pirate') ? 'raider' :
-                                   (npc.type === 'patrol') ? 'wing' :
-                                   (npc.type === 'freighter') ? 'hauler' :
-                                   (npc.type === 'trader') ? 'oval' :
-                                   (npc.type === 'interceptor') ? 'dart' : 'delta';
-                    ctx.rotate(npc.angle || 0);
-                    ctx.globalAlpha = Math.max(0.4, silhouetteAlpha); // slight visibility even if fade=0
-                    ShipDesigns.draw(ctx, design, base, palette);
-                } catch (e) {
-                    ctx.fillStyle = '#e8f6ff';
-                    ctx.globalAlpha = Math.max(0.4, silhouetteAlpha);
-                    ctx.beginPath();
-                    ctx.moveTo(base, 0);
-                    ctx.lineTo(-base * 0.6, -base * 0.5);
-                    ctx.lineTo(-base * 0.6, base * 0.5);
-                    ctx.closePath();
-                    ctx.fill();
-                }
-                // probe removed
-            } else {
-                // probe removed
-            }
-            ctx.restore();
-        }
-
-        // If the player is destroyed, overlay an OFFLINE tag in the viewport
-        if (shipDead) {
-            ctx.save();
-            try {
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.globalAlpha = 0.65;
-                ctx.fillStyle = '#9cc';
-                ctx.font = '10px VT323, monospace';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('OFFLINE', w / 2, h / 2);
-            } finally { ctx.restore(); }
-        }
-
-        // Overlay FX only during transition/blip and only when explicitly enabled.
-        if (fxEnabled && fxActive) {
-            this.drawStaticNoise(w, h, 0.05, true);
-            this.drawRollingBand(w, h, 0.06);
-        }
-
-        // Diagnostics removed
-        } finally {
-            // Always restore to avoid context leakage on exceptions
-            ctx.restore();
-        }
-    }
-
-    /**
-     * Generate and draw subtle static noise
-     * intensity: 0..1, if overlay is true draw above content with lower alpha
-     */
-    drawStaticNoise(w, h, intensity = 0.1, overlay = false) {
-        const now = Date.now();
-        const sn = this.staticNoise;
-        if (now - sn.lastTime > 80) { // ~12.5 Hz update
-            const nctx = sn.ctx;
-            const img = nctx.createImageData(sn.canvas.width, sn.canvas.height);
-            for (let i = 0; i < img.data.length; i += 4) {
-                const v = Math.random() * 255;
-                img.data[i] = v;     // r
-                img.data[i+1] = v;   // g
-                img.data[i+2] = v;   // b
-                img.data[i+3] = 255; // a
-            }
-            nctx.putImageData(img, 0, 0);
-            sn.lastTime = now;
-            sn.phase = (sn.phase + 1) % 1000;
-        }
-        const ctx = this.targetCtx;
-        ctx.save();
-        // Draw in viewport coordinates regardless of prior transforms
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalAlpha = Math.max(0, Math.min(0.4, intensity));
-        // Slight jitter to avoid a fixed pattern feel
-        const jx = (Math.random() - 0.5) * 2;
-        const jy = (Math.random() - 0.5) * 2;
-        ctx.imageSmoothingEnabled = false;
-        ctx.translate(jx, jy);
-        ctx.drawImage(this.staticNoise.canvas, 0, 0, w, h);
-        ctx.restore();
-    }
-
-    /**
-     * Thin horizontal scanlines overlay
-     */
-    drawScanlines(w, h, alpha = 0.06) {
-        const ctx = this.targetCtx;
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = '#000';
-        for (let y = 0; y < h; y += 2) {
-            ctx.fillRect(0, y, w, 1);
-        }
-        ctx.restore();
-    }
-
-    /**
-     * Soft rolling band to mimic signal fluctuation
-     */
-    drawRollingBand(w, h, alpha = 0.06) {
-        const ctx = this.targetCtx;
-        const t = Date.now() * 0.0015;
-        const bandY = (h * 0.5) + Math.sin(t) * (h * 0.5);
-        const grad = ctx.createLinearGradient(0, bandY - 8, 0, bandY + 8);
-        grad.addColorStop(0, 'rgba(200,255,255,0)');
-        grad.addColorStop(0.5, `rgba(200,255,255,${alpha})`);
-        grad.addColorStop(1, 'rgba(200,255,255,0)');
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, Math.max(0, bandY - 8), w, 16);
-        ctx.restore();
-    }
-
-    /**
      * Handle shield hit event to spawn a short-lived ring effect
      */
     handleShieldHit(data) {
@@ -1781,7 +1305,7 @@ export class RenderSystem {
             }
             // NPCs
             for (const npc of state.npcShips || []) {
-                this.ctx.strokeStyle = npc.behavior === 'aggressive' ? '#f44' : (npc.behavior === 'lawful' ? '#4af' : '#aaa');
+                this.ctx.strokeStyle = HOSTILE_BEHAVIORS.has(npc.behavior) ? '#f44' : (npc.behavior === 'lawful' ? '#4af' : '#aaa');
                 this.ctx.beginPath();
                 this.ctx.arc(npc.x, npc.y, npc.size, 0, Math.PI * 2);
                 this.ctx.stroke();
@@ -1911,9 +1435,10 @@ export class RenderSystem {
         if (id === this._zoneId) return;
         this._zoneId = id;
         this._zoneTheme = (zone && zone.theme) || null;
-        // Both caches are theme-derived; drop them so they rebuild lazily.
+        // These caches are theme-derived; drop them so they rebuild lazily.
         this._nebulaTile = null;
         this._bgGrad.canvas = null;
+        this._starTiles = null;
     }
 
     // Parse 'rgba(r, g, b, a)' / 'rgb(...)' / '#rrggbb' into components.
@@ -2001,91 +1526,174 @@ export class RenderSystem {
     }
     
     /**
-     * Render parallax star layers
+     * Star layers, drawn as pre-rendered tiles in screen space (P5).
+     *
+     * Before: every star in `state.stars` (9,600 at the shipped density) got a
+     * `fillRect` in world space each frame, with a wrap band anchored at the world
+     * origin — so ~115 of those rects landed on screen, and past roughly 2,100
+     * units from the origin the near field visibly thinned out. Now each layer is
+     * a small offscreen tile repeated across the viewport at a modulo offset:
+     * ~30 blits a frame, and the field is genuinely infinite because the tiling
+     * has no origin.
+     *
+     * Parallax: `GameConstants.WORLD.STAR_PARALLAX` is read as the fraction of
+     * camera motion each layer travels (far 0.05 barely drifts, near 0.4 moves
+     * fastest but still slower than the world). The old code subtracted the
+     * parallax term inside world space, which made the layers travel at 1+f — i.e.
+     * faster than the planets they sit behind.
+     *
+     * Twinkle: the mid layer has three baked variants and each tile picks one from
+     * `state.effects.starPhase` (advanced by VisualEffectsSystem) plus a per-tile
+     * offset, so neighbouring tiles are never in step.
      */
     renderStars() {
         const state = this.stateManager.state;
         if (!state.stars) return;
         if (this._starBootSkip > 0) { this._starBootSkip -= 1; return; }
 
-        // Wrap in save/restore to protect globalAlpha and shadowBlur
-        this.ctx.save();
+        const tiles = this._ensureStarTiles();
+        if (!tiles || !tiles.layers.length) return;
+
+        const dpr = this.canvas.__dpr || 1;
+        const viewW = this.canvas.width / dpr;
+        const viewH = this.canvas.height / dpr;
+        const phase = (state.effects && state.effects.starPhase) || 0;
+
+        withScreen(this.ctx, () => {
+            this.ctx.imageSmoothingEnabled = false;
+            this.ctx.globalAlpha = 1;
+            for (const layer of tiles.layers) {
+                const variants = layer.variants;
+                // Each layer repeats on its own period so the three grids never
+                // line up into a visible lattice.
+                const T = layer.size;
+                const cols = Math.ceil(viewW / T) + 1;
+                const rows = Math.ceil(viewH / T) + 1;
+                // Whole-pixel offsets: a fractional blit of a nearest-neighbour tile
+                // shimmers, and integer parallax is what pixel starfields want.
+                let ox = (-this.camera.x * layer.parallax + this._shake.x) % T;
+                let oy = (-this.camera.y * layer.parallax + this._shake.y) % T;
+                if (ox > 0) ox -= T;
+                if (oy > 0) oy -= T;
+                ox = Math.floor(ox);
+                oy = Math.floor(oy);
+                const base = (variants.length > 1)
+                    ? Math.floor(phase / ((Math.PI * 2) / variants.length))
+                    : 0;
+                for (let cx = 0; cx < cols; cx++) {
+                    for (let cy = 0; cy < rows; cy++) {
+                        const v = (variants.length > 1)
+                            ? (((base + cx * 2 + cy * 3) % variants.length) + variants.length) % variants.length
+                            : 0;
+                        this.ctx.drawImage(variants[v], ox + cx * T, oy + cy * T);
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Build (and cache) the per-layer star tiles.
+     *
+     * Star count per tile is derived from the live `state.stars` arrays so the
+     * on-screen density matches what the per-star loops produced: a layer holding
+     * N stars spread over a field of `size x size` contributes
+     * `N * tile^2 / size^2` stars per tile. Zone `starDensity` and the low-quality
+     * strides scale that the same way they scaled the old loop's step.
+     *
+     * Cached against quality, zone and star-array lengths; `_syncZoneTheme()`
+     * drops it on a zone change so a new theme re-renders.
+     */
+    _ensureStarTiles() {
+        const state = this.stateManager.state;
+        const stars = state.stars;
+        if (!stars) return null;
+
+        const q = this.quality;
+        const density = Math.max(0.15, Math.min(1, Number(this._zoneTheme?.starDensity) || 1));
+        const counts = [(stars.far || []).length, (stars.mid || []).length, (stars.near || []).length];
+        const key = `${q}|${this._zoneId}|${density.toFixed(3)}|${counts.join(',')}`;
+        if (this._starTiles && this._starTiles.key === key) return this._starTiles;
+
+        const FIELD = GameConstants?.WORLD?.STAR_FIELD_SIZE || { far: 12000, mid: 8000, near: 6000 };
+        const PARALLAX = GameConstants?.WORLD?.STAR_PARALLAX || { far: 0.05, mid: 0.2, near: 0.4 };
+        const aScale = 0.6 + 0.4 * density;
+        // Mutually prime-ish tile sizes: the layers' repeats do not coincide, so no
+        // lattice is visible even though each layer alone is periodic.
+        const specs = [
+            { name: 'far',  size: 640, arr: stars.far || [],  field: FIELD.far  || 12000, parallax: PARALLAX.far  ?? 0.05, stride: (q === 'low') ? 2 : 1, variants: 1, glowMinSize: 2 },
+            { name: 'mid',  size: 512, arr: stars.mid || [],  field: FIELD.mid  || 8000,  parallax: PARALLAX.mid  ?? 0.2,  stride: (q === 'low') ? 3 : 1, variants: 3, glowMinSize: Infinity },
+            { name: 'near', size: 448, arr: stars.near || [], field: FIELD.near || 6000,  parallax: PARALLAX.near ?? 0.4,  stride: (q === 'low') ? 4 : 1, variants: 1, glowMinSize: 1 }
+        ];
+
+        const layers = [];
         try {
-            // Stable, quality-based sampling (no per-frame alternation)
-            const q = this.quality;
-            const farArr = state.stars.far || [];
-            const midArr = state.stars.mid || [];
-            const nearArr = state.stars.near || [];
-            // Zone star density (P1): fractional stride thins the field, alpha dims it,
-            // so The Void (0.3) reads as far emptier than Core Systems (1.0).
-            const density = Math.max(0.15, Math.min(1, Number(this._zoneTheme?.starDensity) || 1));
-            const aScale = 0.6 + 0.4 * density;
-            const stepFar = ((q === 'low') ? 2 : 1) / density; // draw ~1/2 on low
-            const stepMid = ((q === 'low') ? 3 : 1) / density; // draw ~1/3 on low
-            const stepNear = ((q === 'low') ? 4 : 1) / density; // draw ~1/4 on low
-
-            // Far stars (minimal parallax)
-            for (let f = 0; f < farArr.length; f += stepFar) { const star = farArr[f | 0];
-                const screenX = star.x - this.camera.x * 0.05;
-                const screenY = star.y - this.camera.y * 0.05;
-
-                // Wrap stars for infinite field
-                const wrappedX = ((screenX + 6000) % 12000) - 6000;
-                const wrappedY = ((screenY + 6000) % 12000) - 6000;
-
-                this.ctx.globalAlpha = star.brightness * aScale;
-                this.ctx.fillStyle = star.color || '#ffffff';
-
-                if (star.size > 2 && q === 'high') {
-                    this.ctx.shadowColor = star.color || '#ffffff';
-                    this.ctx.shadowBlur = star.size;
-                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-                    this.ctx.shadowBlur = 0;
-                } else {
-                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
+            for (const spec of specs) {
+                const n = spec.arr.length;
+                if (!n) continue;
+                const T = spec.size;
+                const perTile = Math.round(n * (T * T) / (spec.field * spec.field) * density / spec.stride);
+                const count = Math.max(1, perTile);
+                const variants = [];
+                for (let v = 0; v < spec.variants; v++) {
+                    variants.push(this._buildStarTile(spec, count, T, aScale, v, q));
                 }
+                layers.push({ name: spec.name, size: T, parallax: spec.parallax, variants });
             }
-
-            // Mid stars with twinkling
-            for (let f = 0; f < midArr.length; f += stepMid) { const star = midArr[f | 0];
-                const screenX = star.x - this.camera.x * 0.2;
-                const screenY = star.y - this.camera.y * 0.2;
-
-                const wrappedX = ((screenX + 4000) % 8000) - 4000;
-                const wrappedY = ((screenY + 4000) % 8000) - 4000;
-
-                // Twinkling effect
-                star.twinkle = (star.twinkle || 0) + (star.twinkleSpeed || 0.02);
-                const twinkle = Math.sin(star.twinkle) * 0.1 + 0.9;
-
-                this.ctx.globalAlpha = star.brightness * twinkle * aScale;
-                this.ctx.fillStyle = star.color || '#ffffff';
-                this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-            }
-
-            // Near stars
-            for (let f = 0; f < nearArr.length; f += stepNear) { const star = nearArr[f | 0];
-                const screenX = star.x - this.camera.x * 0.4;
-                const screenY = star.y - this.camera.y * 0.4;
-
-                const wrappedX = ((screenX + 3000) % 6000) - 3000;
-                const wrappedY = ((screenY + 3000) % 6000) - 3000;
-
-                this.ctx.globalAlpha = star.brightness * aScale;
-                this.ctx.fillStyle = star.color || '#ffffff';
-
-                if (star.size > 1 && q === 'high') {
-                    this.ctx.shadowColor = '#ffffff';
-                    this.ctx.shadowBlur = 2;
-                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-                    this.ctx.shadowBlur = 0;
-                } else {
-                    this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
-                }
-            }
-        } finally {
-            this.ctx.restore();
+        } catch (_) {
+            return this._starTiles || null;
         }
+
+        this._starTiles = { key, layers };
+        return this._starTiles;
+    }
+
+    /**
+     * Render one star tile. Positions come from the layer's own stars (world
+     * coordinates folded into the tile), so colour/size/brightness distribution is
+     * exactly the authored one; only the layout is re-tiled.
+     */
+    _buildStarTile(spec, count, T, aScale, variant, quality) {
+        const c = document.createElement('canvas');
+        c.width = T; c.height = T;
+        const g = c.getContext('2d');
+        g.imageSmoothingEnabled = false;
+        const arr = spec.arr;
+        const n = arr.length;
+        const glow = (quality === 'high');
+        const twinklePhase = (variant / Math.max(1, spec.variants)) * Math.PI * 2;
+
+        for (let i = 0; i < count; i++) {
+            const star = arr[Math.min(n - 1, Math.floor(i * n / count))];
+            if (!star) continue;
+            const size = Math.max(1, star.size || 1);
+            const blur = (glow && size > spec.glowMinSize) ? (spec.name === 'far' ? size : 2) : 0;
+            // Keep the whole glyph (and its glow) inside the tile so the repeat is seamless.
+            const pad = size + blur + 1;
+            const span = Math.max(1, T - 2 * pad);
+            const fx = (((star.x % T) + T) % T) / T;
+            const fy = (((star.y % T) + T) % T) / T;
+            const x = Math.round(pad + fx * span);
+            const y = Math.round(pad + fy * span);
+
+            let alpha = (star.brightness || 0.5) * aScale;
+            if (spec.variants > 1) {
+                // Same +/-10% modulation the per-star sine produced, sampled at
+                // this variant's phase.
+                alpha *= Math.sin((star.twinkle || 0) + twinklePhase) * 0.1 + 0.9;
+            }
+            g.globalAlpha = Math.max(0, Math.min(1, alpha));
+            g.fillStyle = star.color || '#ffffff';
+            if (blur > 0) {
+                g.shadowColor = (spec.name === 'far') ? (star.color || '#ffffff') : '#ffffff';
+                g.shadowBlur = blur;
+                g.fillRect(x, y, size, size);
+                g.shadowBlur = 0;
+            } else {
+                g.fillRect(x, y, size, size);
+            }
+        }
+        return c;
     }
     
     /**
@@ -2317,10 +1925,8 @@ export class RenderSystem {
             this.ctx.save();
             this.ctx.translate(asteroid.x, asteroid.y);
             
-            // Rotation
-            if (!asteroid.rotation) asteroid.rotation = 0;
-            asteroid.rotation += asteroid.rotationSpeed || 0;
-            this.ctx.rotate(asteroid.rotation);
+            // Spin is advanced by VisualEffectsSystem on the fixed tick (P11)
+            this.ctx.rotate(asteroid.rotation || 0);
             
             // Color based on damage
             const damage = 1 - (asteroid.health / asteroid.maxHealth);
@@ -2329,19 +1935,17 @@ export class RenderSystem {
             this.ctx.strokeStyle = `rgb(${Math.min(r + 30, 255)}, 102, 102)`;
             this.ctx.lineWidth = 1;
             
-            // Generate shape points if missing
-            if (!asteroid.shapePoints) {
-                asteroid.shapePoints = [];
-                for (let j = 0; j < 8; j++) {
-                    asteroid.shapePoints.push(0.7 + Math.random() * 0.6);
-                }
-            }
-            
+            // Silhouette variance. Every producer (world init, SpawnSystem fragments,
+            // save restore) seeds it; VisualEffectsSystem backfills anything that
+            // slipped through (P11). Skip rather than draw a wrong shape.
+            const shape = asteroid.shapePoints;
+            if (!shape) { this.ctx.restore(); continue; }
+
             // Draw irregular shape
             this.ctx.beginPath();
             for (let i = 0; i < 8; i++) {
                 const angle = (Math.PI * 2 / 8) * i;
-                const variance = asteroid.shapePoints[i];
+                const variance = shape[i];
                 const r = asteroid.radius * variance;
                 if (i === 0) {
                     this.ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
@@ -2378,9 +1982,8 @@ export class RenderSystem {
             if (pickup.x < viewLeft || pickup.x > viewRight || pickup.y < viewTop || pickup.y > viewBottom) continue;
             const tnow = Date.now();
             const pulse = Math.sin(tnow * (GameConstants?.EFFECTS?.PICKUP_PULSE_SPEED ?? 0.008)) * 0.3 + 0.7;
+            // Sparkle phase is seeded by VisualEffectsSystem (P11)
             const twinkle = 0.5 + 0.5 * Math.sin((pickup._twk || 0) + tnow * TWINKLE_SPD + (pickup.x + pickup.y) * TWINKLE_POS);
-            // Lazily seed sparkle phase to avoid sync
-            if (pickup._twk === undefined) pickup._twk = Math.random() * Math.PI * 2;
             if (this.quality === 'low' || heavy) {
                 // Simple core only for low quality (smaller size)
                 this.ctx.globalAlpha = 1;
@@ -2570,28 +2173,51 @@ export class RenderSystem {
                 // Always restore per-NPC to avoid transform leaks
                 this.ctx.restore();
             }
-
-            // Faction/hostility brackets (screen-space corner brackets around hostiles)
-            const selectedId = (this.stateManager.state.targeting && this.stateManager.state.targeting.selectedId) || null;
-            const isTargeted = selectedId && npc.id === selectedId;
-            if (isTargeted) {
-                const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
-                this.hud.drawFactionBracket(npc, (this.getTypeScale(npc.type) || 1.4) * this.sizeMultiplier, true, palette.accent || '#ff4444');
-            }
-            
-            // State indicator icon
-            if (npc.state) {
-                this.hud.drawNPCStateIndicator(npc);
-            }
-            
-            // Communication bubble
-            if (npc.message && npc.messageTime) {
-                this.hud.drawNPCMessage(npc);
-            }
-            
-            // Health bar
-            if (npc.health < npc.maxHealth) { this.hud.drawNPCHealth(npc); }
         }
+    }
+
+    /**
+     * Per-NPC screen-space decorations: target bracket, AI state icon, chatter
+     * bubble, health bar.
+     *
+     * Runs as one screen-space pass AFTER the world pass, so projectiles,
+     * explosions and warp FX can no longer paint over a health bar (P10). The
+     * HUD's camera carries this frame's shake offset, so the decorations stay
+     * locked to their ships while the screen shakes.
+     */
+    renderNPCOverlays(state) {
+        const npcShips = state.npcShips || [];
+        if (!npcShips.length) return;
+        const selectedId = (state.targeting && state.targeting.selectedId) || null;
+        // Decorations sit above the ship, so a generous margin, but no reason to
+        // ask the HUD to draw text and bars far outside the viewport.
+        const margin = 120;
+        const viewLeft = this.camera.x - this.screenCenter.x - margin;
+        const viewTop = this.camera.y - this.screenCenter.y - margin;
+        const viewRight = this.camera.x + this.screenCenter.x + margin;
+        const viewBottom = this.camera.y + this.screenCenter.y + margin;
+        this.hud.updateContext(this.ctx, this._hudCamera, this.screenCenter);
+        withScreen(this.ctx, () => {
+            for (const npc of npcShips) {
+                if (!npc) continue;
+                if (npc.x < viewLeft || npc.x > viewRight || npc.y < viewTop || npc.y > viewBottom) continue;
+
+                // Faction/hostility brackets (corner brackets around the target)
+                if (selectedId && npc.id === selectedId) {
+                    const palette = FactionVisuals.getPalette(npc.faction || 'civilian', npc.color);
+                    this.hud.drawFactionBracket(npc, (this.getTypeScale(npc.type) || 1.4) * this.sizeMultiplier, true, palette.accent || '#ff4444');
+                }
+
+                // State indicator icon
+                if (npc.state) this.hud.drawNPCStateIndicator(npc);
+
+                // Communication bubble
+                if (npc.message && npc.messageTime) this.hud.drawNPCMessage(npc);
+
+                // Health bar
+                if (npc.health < npc.maxHealth) this.hud.drawNPCHealth(npc);
+            }
+        });
     }
 
     
@@ -2705,157 +2331,6 @@ export class RenderSystem {
         if (spritesActive) this.ctx.restore();
     }
     
-    renderFreighter(npc) {
-        const width = npc.size * 1.3;
-        const height = npc.size * 0.7;
-        
-        // Main body
-        this.ctx.fillRect(-width, -height, width * 2, height * 2);
-        
-        // Cargo pods
-        this.ctx.fillStyle = npc.color + '88';
-        for (let i = 0; i < 5; i++) {
-            const podX = -width * 0.8 + (i * width * 0.4);
-            this.ctx.fillRect(podX, -height * 1.2, width * 0.3, height * 0.3);
-            this.ctx.fillRect(podX, height * 0.9, width * 0.3, height * 0.3);
-        }
-        
-        // Engines
-        this.ctx.fillStyle = '#333';
-        this.ctx.fillRect(-width - 4, -height * 0.5, 4, height * 0.3);
-        this.ctx.fillRect(-width - 4, height * 0.2, 4, height * 0.3);
-        
-        // Bridge
-        this.ctx.fillStyle = 'rgba(100, 200, 255, 0.3)';
-        this.ctx.fillRect(width * 0.7, -2, 6, 4);
-    }
-    
-    renderPirate(npc) {
-        // Angular aggressive fighter
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.size * 1.2, 0);
-        this.ctx.lineTo(npc.size * 0.6, -npc.size * 0.4);
-        this.ctx.lineTo(npc.size * 0.3, -npc.size * 0.3);
-        this.ctx.lineTo(-npc.size * 0.5, -npc.size * 0.7);
-        this.ctx.lineTo(-npc.size * 0.8, -npc.size * 0.4);
-        this.ctx.lineTo(-npc.size * 0.7, 0);
-        this.ctx.lineTo(-npc.size * 0.8, npc.size * 0.4);
-        this.ctx.lineTo(-npc.size * 0.5, npc.size * 0.7);
-        this.ctx.lineTo(npc.size * 0.3, npc.size * 0.3);
-        this.ctx.lineTo(npc.size * 0.6, npc.size * 0.4);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
-        
-        // Weapon pods
-        this.ctx.fillStyle = '#ff0000';
-        this.ctx.fillRect(npc.size * 0.2, -npc.size * 0.5, 3, 3);
-        this.ctx.fillRect(npc.size * 0.2, npc.size * 0.5 - 3, 3, 3);
-        
-        // Cockpit
-        this.ctx.fillStyle = 'rgba(255, 100, 100, 0.5)';
-        this.ctx.fillRect(npc.size * 0.5, -2, 4, 4);
-    }
-    
-    renderPatrol(npc) {
-        const wingSpan = npc.size * 1.2;
-        
-        // Main fuselage
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.size, 0);
-        this.ctx.lineTo(0, -npc.size * 0.3);
-        this.ctx.lineTo(-npc.size * 0.7, -npc.size * 0.2);
-        this.ctx.lineTo(-npc.size * 0.7, npc.size * 0.2);
-        this.ctx.lineTo(0, npc.size * 0.3);
-        this.ctx.closePath();
-        this.ctx.fill();
-        
-        // Wings
-        this.ctx.fillRect(-npc.size * 0.4, -wingSpan, npc.size * 0.8, wingSpan * 2);
-        
-        // Wing tips
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.size * 0.4, -wingSpan);
-        this.ctx.lineTo(npc.size * 0.7, -wingSpan * 0.8);
-        this.ctx.lineTo(npc.size * 0.4, -wingSpan * 0.6);
-        this.ctx.closePath();
-        this.ctx.fill();
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.size * 0.4, wingSpan);
-        this.ctx.lineTo(npc.size * 0.7, wingSpan * 0.8);
-        this.ctx.lineTo(npc.size * 0.4, wingSpan * 0.6);
-        this.ctx.closePath();
-        this.ctx.fill();
-        
-        // Engines
-        this.ctx.fillStyle = '#444';
-        this.ctx.fillRect(-npc.size * 0.9, -wingSpan * 0.5, 4, 6);
-        this.ctx.fillRect(-npc.size * 0.9, wingSpan * 0.5 - 6, 4, 6);
-        
-        // Markings
-        this.ctx.strokeStyle = '#fff';
-        this.ctx.lineWidth = 0.5;
-        this.ctx.beginPath();
-        this.ctx.moveTo(0, -wingSpan * 0.3);
-        this.ctx.lineTo(0, wingSpan * 0.3);
-        this.ctx.stroke();
-        
-        // Cockpit
-        this.ctx.fillStyle = 'rgba(50, 150, 255, 0.6)';
-        this.ctx.fillRect(npc.size * 0.3, -3, 5, 6);
-    }
-    
-    renderTrader(npc) {
-        // Rounded hull
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, npc.size * 0.8, 0, Math.PI * 2);
-        this.ctx.fill();
-        
-        // Cargo bulge
-        this.ctx.beginPath();
-        this.ctx.ellipse(-npc.size * 0.2, 0, npc.size * 0.6, npc.size * 0.8, 0, 0, Math.PI * 2);
-        this.ctx.fill();
-        
-        // Engine pods
-        this.ctx.fillStyle = '#555';
-        this.ctx.beginPath();
-        this.ctx.arc(-npc.size * 0.8, -npc.size * 0.4, 4, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.beginPath();
-        this.ctx.arc(-npc.size * 0.8, npc.size * 0.4, 4, 0, Math.PI * 2);
-        this.ctx.fill();
-        
-        // Viewports
-        this.ctx.fillStyle = 'rgba(100, 200, 255, 0.4)';
-        for (let i = 0; i < 3; i++) {
-            const angle = -Math.PI * 0.2 + (i * Math.PI * 0.2);
-            const x = Math.cos(angle) * npc.size * 0.5;
-            const y = Math.sin(angle) * npc.size * 0.5;
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, 2, 0, Math.PI * 2);
-            this.ctx.fill();
-        }
-    }
-    
-    renderDefaultShip(npc) {
-        // V-shape
-        this.ctx.beginPath();
-        this.ctx.moveTo(npc.size, 0);
-        this.ctx.lineTo(-npc.size * 0.7, -npc.size * 0.6);
-        this.ctx.lineTo(-npc.size * 0.4, -npc.size * 0.3);
-        this.ctx.lineTo(-npc.size * 0.6, 0);
-        this.ctx.lineTo(-npc.size * 0.4, npc.size * 0.3);
-        this.ctx.lineTo(-npc.size * 0.7, npc.size * 0.6);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
-        
-        // Cockpit
-        this.ctx.fillStyle = 'rgba(100, 200, 255, 0.5)';
-        this.ctx.fillRect(npc.size * 0.3, -2, 4, 4);
-    }
-    
     /**
      * Render projectiles
      */
@@ -2873,32 +2348,21 @@ export class RenderSystem {
             // Wrap each projectile in save/restore to prevent state leaks
             this.ctx.save();
             try {
+                const style = PROJECTILE_STYLE[proj.type] || PROJECTILE_STYLE_DEFAULT;
+
                 // Trail effect
-                let seg = Math.max(3, Math.min(12, proj.trailLen || 5));
+                let seg = Math.max(3, Math.min(style.maxSeg, proj.trailLen || style.seg));
                 const heavy = (typeof window !== 'undefined' && window.__lastFrameMs && window.__lastFrameMs > 24);
-                if (this.quality === 'low' || heavy) seg = Math.min(seg, 5);
+                if (this.quality === 'low' || heavy) seg = Math.min(seg, style.heavySeg);
                 const trailGradient = this.ctx.createLinearGradient(
                     proj.x - proj.vx * seg, proj.y - proj.vy * seg,
                     proj.x, proj.y
                 );
 
-                // Color based on type
-                let color = '#ffff00';
-                let trailColor = null;
-                if (proj.type === 'plasma') {
-                    color = '#00ffff';
-                } else if (proj.type === 'rapid') {
-                    color = '#ff8800';
-                } else if (proj.type === 'mining') {
-                    color = '#888888';
-                } else if (proj.type === 'void') {
-                    // Final boss weapon: violet core over a deeper violet trail
-                    color = '#c26bff';
-                    trailColor = '#7a2cff';
-                }
+                const color = style.core;
 
                 trailGradient.addColorStop(0, 'transparent');
-                trailGradient.addColorStop(1, trailColor || color);
+                trailGradient.addColorStop(1, style.trail || color);
 
                 this.ctx.strokeStyle = trailGradient;
                 this.ctx.lineWidth = Math.max(1.2, Math.min(heavy ? 3 : 4, proj.trailWidth || 3));
@@ -2908,14 +2372,13 @@ export class RenderSystem {
                 this.ctx.stroke();
 
                 // Core with glow
-                if (this.quality !== 'low') {
+                if (this.quality !== 'low' && style.glow !== false) {
                     this.ctx.shadowColor = color;
                     this.ctx.shadowBlur = 5;
                 }
                 this.ctx.fillStyle = color;
                 this.ctx.beginPath();
-                const coreR = (proj.type === 'void') ? 5 : (proj.type === 'plasma') ? 4 : 2;
-                this.ctx.arc(proj.x, proj.y, coreR, 0, Math.PI * 2);
+                this.ctx.arc(proj.x, proj.y, style.coreR, 0, Math.PI * 2);
                 this.ctx.fill();
             } finally {
                 this.ctx.restore();
@@ -3198,7 +2661,9 @@ export class RenderSystem {
      * Render explosions
      */
     renderExplosions(state) {
-        this.explosionRenderer.render(this.ctx, state, this.camera, this.screenCenter, this.quality, this.showParticles);
+        // The flipbook overlay is drawn in screen space; hand it the shake-shifted
+        // camera so it lands on the same pixels as the world-space rings (P10).
+        this.explosionRenderer.render(this.ctx, state, this._hudCamera, this.screenCenter, this.quality, this.showParticles);
     }
 
     /**
@@ -3643,14 +3108,6 @@ export class RenderSystem {
         // Screen center remains in CSS pixels
         this.screenCenter.x = cssW / 2;
         this.screenCenter.y = cssH / 2;
-    }
-    
-    /**
-     * Update render system (called each frame)
-     */
-    update(state, deltaTime) {
-        // Could update visual effects here if needed
-        // For now, rendering happens in render() method
     }
     
     /**

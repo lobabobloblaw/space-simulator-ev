@@ -473,14 +473,6 @@ export class AudioSystem {
     }
     
     /**
-     * Update audio system (called each frame)
-     */
-    update(state, deltaTime) {
-        // Audio system doesn't need per-frame updates
-        // All sounds are triggered by events
-    }
-    
-    /**
      * Sync audio state to StateManager
      */
     syncState() {

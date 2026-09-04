@@ -184,7 +184,6 @@ export const GameConstants = {
             trader: 300
         },
         
-        PURSUIT_TIMEOUT: 300,      // Frames before giving up pursuit (NPCSystem pursuitTimer)
         FLEE_DISTANCE: 200,        // Distance to maintain when fleeing
         PATROL_RADIUS: 300,        // Radius of patrol patterns
         
@@ -562,31 +561,6 @@ export const GameConstants = {
         PERFORMANCE_OVERLAY: false,
         ENTITY_INFO: false,
         EVENT_LOGGING: false
-    }
-};
-
-// Convenience exports for commonly used constants
-export const SHIP_DEFAULTS = GameConstants.SHIP;
-export const WEAPON_TYPES = GameConstants.WEAPONS;
-export const NPC_CONFIG = GameConstants.NPC;
-export const WORLD_CONFIG = GameConstants.WORLD;
-export const UI_CONFIG = GameConstants.UI;
-export const COLORS = GameConstants.COLORS;
-
-// Calculated constants (derived from base constants)
-export const CALCULATED = {
-    // Frame-rate independent timings (assuming 60fps)
-    FRAMES_PER_SECOND: GameConstants.PERFORMANCE.TARGET_FPS,
-    
-    // Convert frame-based values to time-based
-    FUEL_REGEN_PER_SECOND: GameConstants.SHIP.FUEL_REGEN_RATE * 60,
-    SHIELD_REGEN_PER_SECOND: GameConstants.SHIP.SHIELD_REGEN_RATE * 60,
-    
-    // Weapon speeds in units per second
-    PROJECTILE_SPEED_PER_SECOND: {
-        laser: GameConstants.WEAPONS.DEFAULT_LASER.speed * 60,
-        rapid: GameConstants.WEAPONS.RAPID_LASER.speed * 60,
-        plasma: GameConstants.WEAPONS.PLASMA_CANNON.speed * 60
     }
 };
 
