@@ -5,7 +5,7 @@
 
 export const GameConstants = {
     META: {
-        VERSION: 'pre-remediation-2026-07-4-g14be27e-dirty+2026-09-04'
+        VERSION: 'v2.0.0-alpha.1+2026-09-04'
     },
     // Display settings
     CANVAS: {
