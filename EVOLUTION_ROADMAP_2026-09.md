@@ -375,6 +375,21 @@ passes and a human playthrough matches.
 16. Re-run `stamp_version.sh`; fix CLAUDE.md content facts; delete the seven dead scripts and the
     published cruft. (S5, S6, S7, S10)
 
+### Round 2 (2026-09-04, commit 47bb884) — status
+
+Landed from Phase 1: S4 (`core/SystemRegistry.js`, explicit update order), S9 (WebGL spike,
+legacy TargetCam pipeline, StateManager dead API, ~1,600 lines), S1/S2/S3
+(`core/Persistence.js`: schema versions, migrations, throttled run saves, run/ship pairing,
+quota surfaced), P5 (star tiles), P10, P11 (`VisualEffectsSystem`). Landed from Phase 2:
+3.1-4 (elite/ambusher/scavenger AI, faction visuals), 3.1-5 (boss signatures: mines, lance;
+Warlord Krix guards Frontier; adds despawn), 3.2-5 (hit-stop, damage numbers, value flashes),
+3.2-6 (zone/boss banner, contract tracker, PAUSED, gate readout), 3.6-1/2-partial/4
+(keyboard carousel, reduced motion, ARIA, visibility pause, PWA manifest, share card).
+Still open: Proxy retirement, content registries, seeded RNG, orchestrator/RenderSystem/
+UISystem splits, relics, node map, missions rework (escort, trade profit, store merge),
+unlock ladder for freighter/gunship, achievements, art batch, audio beds/SFX, post-FX
+(vignette/chromatic/bloom), gamepad, mobile decision.
+
 ### Phase 1 — Foundations (2–3 sessions)
 
 SystemRegistry → sim harness + `node:test` → Proxy retirement → content registries (weapons, NPCs,

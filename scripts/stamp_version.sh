@@ -25,7 +25,7 @@ if command -v git >/dev/null 2>&1; then
 fi
 
 if [ -n "$tag" ]; then
-  ver="$tag+$date_str"
+  ver="v${tag#v}+$date_str"
 elif [ -n "$sha" ]; then
   ver="g$sha+$date_str"
 else
