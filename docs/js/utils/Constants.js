@@ -5,7 +5,7 @@
 
 export const GameConstants = {
     META: {
-        VERSION: 'c1e2bfd-dirty+2025-08-27'
+        VERSION: 'pre-remediation-2026-07-4-g14be27e-dirty+2026-09-04'
     },
     // Display settings
     CANVAS: {
@@ -482,7 +482,10 @@ export const GameConstants = {
         PIRATE_SUPPRESS_MS: 4500,               // Suppress pirate spawns after any death
         POST_NPC_DEATH_PAUSE_MS: 2000,          // Pause spawning briefly after any NPC death
         POST_SHIP_DEATH_PAUSE_MS: 2500,         // Pause spawning after player death
-        SHIP_DEATH_EXTRA_PIRATE_SUPPRESS_MS: 1500 // Additional pirate suppress after player death
+        SHIP_DEATH_EXTRA_PIRATE_SUPPRESS_MS: 1500, // Additional pirate suppress after player death
+        PAD_CLEAR_IN: 400,                      // NPCs this close to a landing site are moved
+        PAD_CLEAR_OUT: 620,                     // ...out to this distance (landing no longer wipes NPCs)
+        BOSS_ZONE_SCALE: 0.25                   // Bosses take a quarter of the zone difficulty scaling
     },
 
     // Save system

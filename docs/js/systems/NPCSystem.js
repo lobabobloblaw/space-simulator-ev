@@ -8,6 +8,7 @@ import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
 import { MathUtils } from '../utils/MathUtils.js';
 import { SpatialHash } from '../utils/SpatialHash.js';
+import { RunEvents } from './RunSystem.js';
 
 export default class NPCSystem {
     constructor() {
@@ -301,18 +302,21 @@ export default class NPCSystem {
     handleNPCDeath(npc, ship, state) {
         // Credits, kills, and reputation are handled centrally in main_eventbus_pure NPC_DEATH handler
         // Keep visuals/loot here only.
-        // Create explosion effect
-        this.eventBus.emit(GameEvents.EXPLOSION_CREATED, {
+        // Create explosion effect. These used to go to EXPLOSION_CREATED, which
+        // has no listener, so NPC deaths rendered nothing (P8). This is now the
+        // only death-explosion emitter — main's NPC_DEATH handler no longer
+        // emits a second one.
+        this.eventBus.emit(GameEvents.EXPLOSION, {
             x: npc.x,
             y: npc.y,
             size: 'large'
         });
-        
+
         // Create multiple smaller explosions for dramatic effect
         for (let j = 0; j < 4; j++) {
             const angle = (Math.PI * 2 / 4) * j;
             const dist = npc.size * 0.8;
-            this.eventBus.emit(GameEvents.EXPLOSION_CREATED, {
+            this.eventBus.emit(GameEvents.EXPLOSION, {
                 x: npc.x + Math.cos(angle) * dist,
                 y: npc.y + Math.sin(angle) * dist,
                 size: 'small'
@@ -513,6 +517,7 @@ export default class NPCSystem {
                 // Fire at target
                 if (bestTargetDist < 260 && Math.abs(angleDiff) < Math.PI / 5 && npc.weaponCooldown <= 0) {
                     decision.shouldFire = true;
+                    decision.fireTarget = bestTarget;
                 }
             } else {
                 // Wander when no targets
@@ -654,6 +659,7 @@ export default class NPCSystem {
             
             if (distToPlayer < (GameConstants?.NPC?.PATROL_FIRE_DISTANCE ?? 450) && Math.abs(angleDiff) < Math.PI / 3 && npc.weaponCooldown <= 0) {
                 decision.shouldFire = true;
+                decision.fireTarget = ship;
             }
         } else if (!targetPirate && playerHostility.isHostile && ship.patrolWarningShown && !ship.patrolWarningExpired && distToPlayer < (GameConstants?.NPC?.PATROL_WARNING_DISTANCE ?? 1000)) {
             // Warning period - approach but don't fire
@@ -698,6 +704,7 @@ export default class NPCSystem {
                 
                 if (Math.random() < accuracy * movementPenalty) {
                     decision.shouldFire = true;
+                    decision.fireTarget = targetPirate;
                 } else {
                     npc.weaponCooldown = npc.weapon.cooldown * 0.5;
                 }
@@ -941,20 +948,23 @@ export default class NPCSystem {
         const dy = ship.y - npc.y;
         const distToPlayer = Math.hypot(dx, dy);
 
-        // Determine current phase based on health
+        // Determine current phase based on health. Phases are ordered by
+        // descending healthThreshold (1.0, 0.5 …) — the active phase is the
+        // LAST one whose threshold is still at or above the current ratio.
         const healthRatio = (npc.health || 0) / (npc.maxHealth || 1);
         let currentPhase = 0;
         if (npc.phases) {
             for (let i = 0; i < npc.phases.length; i++) {
-                if (healthRatio <= npc.phases[i].healthThreshold) {
+                const threshold = npc.phases[i]?.healthThreshold;
+                if (typeof threshold === 'number' && threshold >= healthRatio) {
                     currentPhase = i;
-                    break;
                 }
             }
         }
 
-        // Phase transition messages
+        // Phase transition messages + adds
         if (npc._lastPhase !== currentPhase) {
+            const previousPhase = (typeof npc._lastPhase === 'number') ? npc._lastPhase : -1;
             npc._lastPhase = currentPhase;
             const phaseKey = currentPhase === 0 ? 'spawnMessage' :
                              currentPhase === 1 ? 'phase2Message' :
@@ -964,6 +974,12 @@ export default class NPCSystem {
                 npc.messageTime = this._frameTime;
                 npc[`_${phaseKey}Shown`] = true;
             }
+            // Escalating phases summon reinforcements (SpawnSystem listens).
+            // A dying boss summons nothing.
+            const addSpawnCount = npc.phases?.[currentPhase]?.addSpawnCount || 0;
+            if (addSpawnCount > 0 && currentPhase > previousPhase && npc.health > 0 && !npc.deathSeq) {
+                this.eventBus.emit(RunEvents.ZONE_BOSS_PHASE, { npc, phase: currentPhase, addSpawnCount });
+            }
         }
 
         // Get phase behavior
@@ -972,6 +988,9 @@ export default class NPCSystem {
 
         // Always target player
         decision.desiredAngle = Math.atan2(dy, dx);
+        decision.fireTarget = ship;
+        // Reset per-phase fire rate modifier (raised again below when desperate)
+        npc.fireRateMult = 1;
 
         // Behavior variants
         if (behavior === 'tactical') {
@@ -989,19 +1008,30 @@ export default class NPCSystem {
             // Fire when facing player
             const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
             decision.shouldFire = angleDiff < Math.PI / 4 && distToPlayer < 600;
-        } else if (behavior === 'aggressive' || behavior === 'berserk') {
-            // Chase and fire constantly
+        } else if (behavior === 'berserk') {
+            // Ram-and-maul: harder thrust, wider firing arc, closes to point blank
             const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
-            if (angleDiff < Math.PI / 3) {
+            if (angleDiff < Math.PI / 2) {
                 decision.shouldThrust = true;
-                decision.thrustPower = behavior === 'berserk' ? 1.2 : 1.0;
+                decision.thrustPower = distToPlayer > 150 ? 1.6 : 1.2;
             }
-            decision.shouldFire = angleDiff < Math.PI / 3 && distToPlayer < 700;
+            decision.shouldFire = angleDiff < Math.PI / 2 && distToPlayer < 500;
         } else if (behavior === 'desperate') {
-            // All-out attack - constant thrust and fire
+            // Cornered animal: erratic strafing, constant thrust, faster fire
+            const wobble = Math.sin((this._frameTime + (npc.id || 0) * 137) / 240) * 0.9;
+            decision.desiredAngle = Math.atan2(dy, dx) + wobble;
             decision.shouldThrust = true;
             decision.thrustPower = 1.3;
             decision.shouldFire = distToPlayer < 800;
+            npc.fireRateMult = 0.6;
+        } else {
+            // 'aggressive' (and any unknown phase) - chase and fire constantly
+            const angleDiff = Math.abs(this.normalizeAngle(decision.desiredAngle - npc.angle));
+            if (angleDiff < Math.PI / 3) {
+                decision.shouldThrust = true;
+                decision.thrustPower = 1.0;
+            }
+            decision.shouldFire = angleDiff < Math.PI / 3 && distToPlayer < 700;
         }
 
         npc.state = 'pursuing';
@@ -1080,16 +1110,26 @@ export default class NPCSystem {
         
         // Fire weapon if decided
         if (decision.shouldFire && npc.weapon && npc.weaponCooldown <= 0 && !npc.deathSeq) {
-            this.fireNPCWeapon(npc, state);
+            this.fireNPCWeapon(npc, state, decision.fireTarget || null);
         }
     }
     
     /**
      * Fire NPC weapon
      */
-    fireNPCWeapon(npc, state) {
+    fireNPCWeapon(npc, state, target = null) {
+        // Preferred path: WeaponSystem owns projectile creation, so per-weapon
+        // speed (including a boss's projectileSpeed) and the NPC accuracy
+        // spread from GameConstants.NPC.ACCURACY both apply (E17).
+        const ws = this.weaponSystem;
+        if (ws && typeof ws.fireNPCProjectile === 'function') {
+            ws.fireNPCProjectile(npc, target || state.ship);
+            return;
+        }
+
+        // Fallback for standalone harnesses with no WeaponSystem wired in.
         if (!state.projectiles) state.projectiles = [];
-        
+
         const projectile = {
             x: npc.x + Math.cos(npc.angle) * (npc.size + 5),
             y: npc.y + Math.sin(npc.angle) * (npc.size + 5),
@@ -1103,7 +1143,12 @@ export default class NPCSystem {
         };
         
         state.projectiles.push(projectile);
-        npc.weaponCooldown = npc.weapon.cooldown;
+        // fireRateMult lets phase AI (boss 'desperate') fire faster without
+        // mutating the weapon definition
+        const rateMult = Number(npc.fireRateMult);
+        npc.weaponCooldown = (Number.isFinite(rateMult) && rateMult > 0)
+            ? Math.max(3, Math.round(npc.weapon.cooldown * rateMult))
+            : npc.weapon.cooldown;
         
         // Emit fire event for sound
         this.eventBus.emit(GameEvents.WEAPON_FIRED, {

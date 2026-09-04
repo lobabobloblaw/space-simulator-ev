@@ -1,8 +1,18 @@
 # Galaxy Trader
 
-A sophisticated 2D space trading/combat game written in pure JavaScript with ES6 modules.
+A 2D space trading/combat roguelike written in pure JavaScript with ES6 modules.
 
 🎮 **PLAY NOW**: https://lobabobloblaw.github.io/space-simulator-ev/
+
+## The Run
+
+Pick a ship at the main menu, then fly through four increasingly dangerous zones —
+Core Systems → Frontier Space → Outer Rim → The Void — trading, taking missions, and
+fighting pirates along the way. Core Systems and Frontier Space open the next zone once
+you hit that zone's kill/credit targets; Outer Rim and The Void are gated by boss fights
+(Captain Blackstar, then The Void King). Win by defeating The Void King, or die trying —
+either way the run ends, `MetaStateManager` records the run's stats, and any unlocks
+carry forward into your next run from the main menu.
 
 ## Project Structure
 
@@ -73,6 +83,8 @@ bash scripts/deploy.sh
 
 ## Features
 
+- **Roguelike Runs**: 4 zones of rising difficulty, 2 boss fights (Captain Blackstar,
+  The Void King), permanent cross-run unlocks tracked by `MetaStateManager`
 - **Ship Progression**: 6 purchasable ships with distinct roles (fighter, hauler, balanced, endgame)
 - **Mission System**: 26 hand-crafted missions + infinite procedural generation
   - Delivery/courier missions with time limits
@@ -81,33 +93,17 @@ bash scripts/deploy.sh
 - **Dynamic Economy**: Trading across 4 planets with price variations
 - **Combat**: Multiple weapon types, ship upgrades, NPC AI (pirates, traders, patrols)
 - **Tutorial System**: Progressive 5-stage tutorial for new players
-- **Save/Load**: Full game state persistence (F5/F9/F12)
+- **Save/Load**: Ship/run state persistence (F5/F9/F12)
 - **Cyberpunk UI**: Particle effects, damage flash, screen shake
 - **HiDPI Support**: DPR-aware canvases and crisp rendering
 - **TargetCam**: In-canvas gradient + crosshair, pixel-perfect alignment
 
-## Latest Updates (Session 69 — Phase 1 MVP)
+## History
 
-**Major Content Expansion**:
-- **26 Missions**: Added 10 delivery, 8 bounty, 5 escort missions + procedural generator
-- **6 Ships**: Complete ship progression from Scout Shuttle to Phoenix Battlecruiser
-- **Mission Board UI**: Accept/complete/abandon missions at any planet ([5] key)
-- **Shipyard UI**: Purchase ships with stat comparison and requirements ([6] key)
-- **Tutorial System**: Restored 5-stage progressive tutorial with helpful guidance
-- **Game Feel**: 3x screen shake intensity, enhanced damage flash overlay
-
-**Technical**:
-- New systems: MissionSystem.js, MissionGenerator.js
-- Extended ShopSystem.js with ship purchase logic (trade-ins, requirements)
-- Enhanced UISystem.js with mission/shipyard panels and event delegation
-- Balance: Ships have meaningful trade-offs (speed vs cargo vs combat)
-
-**Previous Sessions (65–68)**:
-- Session 68: Strategic roadmap, AAA quality review
-- Session 66-67: TargetCam alignment, HiDPI rendering, security fixes
-- Session 65: CSP, ARIA, DOM safety improvements
-
-See `SESSION_69_HANDOFF.md` for complete details and `INTERNAL_DEV_DOCS/` for architecture.
+Older per-session changelogs (Session 65–69 and earlier) are archived as
+`SESSION_*_HANDOFF.md` files in the repo root and under `archive/`. For a current,
+evidence-based account of what's implemented vs. broken vs. planned, see
+`EVOLUTION_ROADMAP_2026-09.md`.
 
 Run locally: `python3 -m http.server 8000` → `http://localhost:8000/docs/`.
 

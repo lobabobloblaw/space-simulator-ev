@@ -13,6 +13,7 @@ import { getRunSystem, RunEvents } from './systems/RunSystem.js';
 import { getMainMenuUI } from './ui/MainMenuUI.js';
 import { getDeathScreenUI } from './ui/DeathScreenUI.js';
 import { shipClasses } from './data/gameData.js';
+import { applyShipClass, deriveShipStats, inferUpgradeLevels } from './systems/ShipStats.js';
 import { validateSaveData } from './utils/SaveUtils.js';
 
 // Import systems
@@ -155,7 +156,9 @@ function initShip(state, shipData) {
         isLanded: false,
         landedPlanet: null,
         landingCooldown: 0,
-        class: shipData?.class ?? 'shuttle',
+        // Canonical hull id is shipClass; `class` mirrors it (RenderSystem)
+        shipClass: shipData?.shipClass ?? shipData?.class ?? 'shuttle',
+        class: shipData?.shipClass ?? shipData?.class ?? 'shuttle',
         health: shipData?.health ?? 100,
         maxHealth: shipData?.maxHealth ?? 100,
         weaponCooldown: 0,
@@ -170,12 +173,16 @@ function initShip(state, shipData) {
         engineLevel: shipData?.engineLevel ?? 1,
         weaponLevel: shipData?.weaponLevel ?? 1,
         radarLevel: shipData?.radarLevel ?? 0,
+        // Upgrade levels; undefined on legacy saves and inferred after load
+        shieldLevel: shipData?.shieldLevel,
+        cargoLevel: shipData?.cargoLevel,
         currentPlanet: null,
         pirateKills: shipData?.pirateKills ?? 0
     };
     state.ship.faction = state.ship.faction || 'civilian';
-    // Player-only sprite override (keeps NPC mappings unchanged). Respects saved spriteId.
-    try { if (!state.ship.spriteId) state.ship.spriteId = 'ships/shuttle_1'; } catch(_) {}
+    // spriteId comes from the hull class (ShipStats.deriveShipStats); a saved
+    // spriteId is respected until the derivation overwrites it.
+    if (shipData?.spriteId) state.ship.spriteId = shipData.spriteId;
     state.camera = { x: 0, y: 0 };
     state.paused = false;
     state.gameTime = 0;
@@ -328,13 +335,10 @@ async function initializeGameState() {
     const { planetsData, missionsData } = await loadGameData();
     const { shipData, missionData, repData } = loadSaveOrDefaults(state);
     initShip(state, shipData);
-    // Saves persist engineLevel, not its derived stats — re-derive so upgrades
-    // don't silently revert on reload (formula mirrors ShopSystem engine branch)
-    const engLvl = Math.max(1, Number(state.ship.engineLevel) || 1);
-    if (engLvl > 1) {
-        state.ship.maxSpeed = 0.8 + (engLvl - 1) * 0.2;
-        state.ship.thrust = 0.012 + (engLvl - 1) * 0.003;
-    }
+    // Saves persist hull + upgrade levels, not the derived stats. Recover the
+    // levels a pre-ShipStats save lacks, then re-derive everything once.
+    inferUpgradeLevels(state.ship, shipClasses);
+    deriveShipStats(state.ship, shipClasses);
     if (!Array.isArray(state.ship.weapons) || state.ship.currentWeapon >= state.ship.weapons.length) {
         state.ship.currentWeapon = 0;
     }
@@ -368,6 +372,17 @@ function setupEventHandlers() {
     });
     eventBus.on(GameEvents.GAME_RESUME, () => {
         if (stateManager.state.paused) stateManager.state.paused = false;
+    });
+
+    // A save applied after boot brings raw ship fields back: re-derive the
+    // hull stats from the restored levels and reattach mission closures.
+    eventBus.on('state.loaded', () => {
+        try {
+            const state = stateManager.state;
+            inferUpgradeLevels(state.ship, shipClasses);
+            deriveShipStats(state.ship, shipClasses);
+            systems.mission?.rehydrate(state.ship);
+        } catch (e) { console.warn('[EventBus] Post-load derive failed:', e); }
     });
 
     // Ship damage handling — only escalate to SHIP_DEATH on the transition
@@ -428,13 +443,28 @@ function setupEventHandlers() {
                 state.ship.currentPlanet = planet;
                 state.ship.landingCooldown = (GameConstants?.SHIP?.LANDING_COOLDOWN ?? 60);
                 
-                state.npcShips = [];
+                // Projectiles in flight are cleared; the world's NPCs are NOT
+                // (E6 — landing used to wipe every hostile). SpawnSystem nudges
+                // anything parked on the pad away on SHIP_LANDED.
                 state.projectiles = [];
-                
+
+                // Refuelling is free; hull repair costs 1 cr per point and is
+                // partial when the pilot can't cover it.
                 state.ship.fuel = state.ship.maxFuel;
-                state.ship.health = state.ship.maxHealth;
-                state.ship.credits += 50;
-                
+                const missing = Math.max(0, Math.round((state.ship.maxHealth || 0) - (state.ship.health || 0)));
+                if (missing > 0) {
+                    const paidFor = Math.max(0, Math.min(missing, Math.floor(state.ship.credits || 0)));
+                    if (paidFor > 0) {
+                        state.ship.health = Math.min(state.ship.maxHealth, (state.ship.health || 0) + paidFor);
+                        state.ship.credits -= paidFor;
+                        eventBus.emit(GameEvents.UI_MESSAGE, {
+                            message: `Repairs: −${paidFor} cr`,
+                            type: paidFor < missing ? 'warning' : 'info',
+                            duration: 2500
+                        });
+                    }
+                }
+
                 const angle = Math.atan2(dy, dx);
                 const posOff = (GameConstants?.SHIP?.LANDING_POS_OFFSET ?? 40);
                 state.ship.x = planet.x + Math.cos(angle) * (planet.radius + posOff);
@@ -536,7 +566,9 @@ function setupEventHandlers() {
         const state = stateManager.state;
         
         if (data.npc && data.npc.killedBy === 'player') {
-            const bounty = data.npc.behavior === 'aggressive' ? 
+            // Hostiles (pirates and bosses) pay their full declared bounty
+            const fullBounty = data.npc.behavior === 'aggressive' || data.npc.behavior === 'boss';
+            const bounty = fullBounty ?
                 data.npc.credits : Math.floor(data.npc.credits * 0.5);
             state.ship.credits += bounty + 25;
             state.ship.kills++;
@@ -577,26 +609,14 @@ function setupEventHandlers() {
                         });
                     }
 
-                    // Check for victory condition (Void King defeated)
-                    if (data.npc.victoryTrigger) {
-                        setTimeout(() => {
-                            runSystem.endRun('victory');
-                        }, 2000);
-                    }
-
-                    // Boss unlocks are granted (and announced) by
-                    // RunSystem.recordBossDefeat — single owner
+                    // Victory (Void King) and boss unlocks are both owned by
+                    // RunSystem.recordBossDefeat — do not end the run here
                 }
             }
         }
 
-        // Larger explosion for bosses
-        const explosionSize = data.npc.type === 'boss' ? 'large' : 'medium';
-        eventBus.emit(GameEvents.EXPLOSION, {
-            x: data.npc.x,
-            y: data.npc.y,
-            size: explosionSize
-        });
+        // Death explosions are owned by NPCSystem.handleNPCDeath (P8) — emitting
+        // one here as well double-counted every death.
     });
     
     console.log('[EventBus] Event handlers setup complete');
@@ -746,7 +766,16 @@ async function initializeSystems() {
     
     // Set audioSystem reference in state for compatibility
     stateManager.state.audioSystem = systems.audio;
-    
+
+    // NPC fire routes through WeaponSystem so per-weapon projectile speed and
+    // the NPC accuracy spread apply (E17). NPCSystem falls back to its own
+    // inline path when this reference is absent (standalone test pages).
+    if (systems.npc && systems.weapon) systems.npc.weaponSystem = systems.weapon;
+
+    // Mission objects that came back from a save lost their isComplete()
+    // closures to JSON; reattach them from the static definitions (E13).
+    try { systems.mission?.rehydrate(stateManager.state.ship); } catch(e) { console.warn('[EventBus] Mission rehydrate failed:', e); }
+
     return systems;
 }
 
@@ -1057,49 +1086,67 @@ async function initGame() {
     mainMenuUI.init();
     deathScreenUI.init();
 
-    // Helper to initialize ship for a new run
+    // Helper to initialize ship for a new run.
+    // A run must inherit nothing from the last one (E15): hull, upgrade levels,
+    // loadout, missions, reputation and the whole entity field are rebuilt.
     const initShipForRun = (shipId) => {
         const state = stateManager.state;
-        const shipData = shipClasses[shipId] || shipClasses.shuttle;
+        const classId = shipClasses[shipId] ? shipId : 'shuttle';
+        const shipData = shipClasses[classId];
+        const ship = state.ship;
 
-        // Reset ship state from class data
-        state.ship.class = shipId;
-        state.ship.x = 0;
-        state.ship.y = 0;
-        state.ship.vx = 0;
-        state.ship.vy = 0;
-        state.ship.angle = 0;
-        state.ship.health = shipData.maxHealth || 100;
-        state.ship.maxHealth = shipData.maxHealth || 100;
-        state.ship.shield = shipData.maxShield || 0;
-        state.ship.maxShield = shipData.maxShield || 0;
-        state.ship.thrust = shipData.thrust || 0.012;
-        state.ship.maxSpeed = shipData.maxSpeed || 0.8;
-        state.ship.cargoCapacity = shipData.cargoCapacity || 10;
-        state.ship.cargo = [];
-        state.ship.credits = shipData.startingCredits || 250;
-        state.ship.weapons = shipData.startingWeapons ? [...shipData.startingWeapons] : [];
-        state.ship.currentWeapon = 0;
-        state.ship.kills = 0;
-        state.ship.pirateKills = 0;
-        state.ship.isDestroyed = false;
-        state.ship.isLanded = false;
-        state.ship.landedPlanet = null;
-        state.ship.fuel = state.ship.maxFuel || 100;
+        // Hull + upgrade levels back to baseline; ShipStats derives the rest
+        applyShipClass(ship, classId, shipClasses);
 
-        // Clear game entities for fresh run
+        ship.x = 0;
+        ship.y = 0;
+        ship.vx = 0;
+        ship.vy = 0;
+        ship.angle = 0;
+        ship.fuel = ship.maxFuel || 100;
+        ship.cargo = [];
+        ship.credits = shipData.startingCredits ?? 250;
+        ship.weapons = (shipData.startingWeapons || []).map(w => ({ ...w }));
+        ship.currentWeapon = 0;
+        ship.weaponCooldown = 0;
+        ship.spreadBloom = 0;
+        ship.kills = 0;
+        ship.pirateKills = 0;
+        ship.isDestroyed = false;
+        ship.isLanded = false;
+        ship.landedPlanet = null;
+        ship.currentPlanet = null;
+        ship.landingCooldown = 0;
+        ship.screenShake = 0;
+        ship.damageFlash = 0;
+        delete ship.deathSeq;
+        ship.tutorialStage = ship.weapons.length > 0 ? 'armed' : 'start';
+
+        // Mission progress is per-run
+        ship.missions = { active: [], completed: [], available: [] };
+        ship.missionStates = {};
+        if (state.missionSystem) state.missionSystem.active = null;
+
+        // World state: standings, entities and the asteroid field are re-seeded
+        state.reputation = { trader: 0, patrol: 0, pirate: 0 };
         state.npcShips = [];
-        state.projectiles = [];
-        state.explosions = [];
+        initAsteroids(state);   // also clears projectiles/explosions/warp/pickups
+        state.debris = [];
+        state.hitSparks = [];
 
-        console.log('[Roguelike] Ship initialized for run:', shipId);
+        console.log('[Roguelike] Ship initialized for run:', classId);
     };
 
-    // Wire up main menu callbacks
+    // Wire up main menu callbacks.
+    // The ship is rebuilt BEFORE the run starts so the run's credit ledger does
+    // not record the reset to the starting balance as earnings/spend.
+    const effectiveShipId = (shipId) => (metaManager.isShipUnlocked(shipId) ? shipId : 'shuttle');
+
     mainMenuUI.onStartRun = (shipId) => {
-        console.log('[Roguelike] Starting new run with ship:', shipId);
-        runSystem.startNewRun(shipId);
-        initShipForRun(shipId);
+        const id = effectiveShipId(shipId);
+        console.log('[Roguelike] Starting new run with ship:', id);
+        initShipForRun(id);
+        runSystem.startNewRun(id);
         mainMenuUI.hide();
         stateManager.state.paused = false;
     };
@@ -1113,16 +1160,25 @@ async function initGame() {
         }
     };
 
+    // Freeze the world while the run-end overlay is up (death and victory)
+    const pauseForOverlay = () => {
+        if (!stateManager.state.paused) stateManager.state.paused = true;
+    };
+    eventBus.on(RunEvents.RUN_END, pauseForOverlay);
+    eventBus.on(RunEvents.RUN_VICTORY, pauseForOverlay);
+
     // Wire up death screen callbacks
     deathScreenUI.onRetry = (shipId) => {
-        console.log('[Roguelike] Retry with ship:', shipId);
-        runSystem.startNewRun(shipId);
-        initShipForRun(shipId);
+        const id = effectiveShipId(shipId);
+        console.log('[Roguelike] Retry with ship:', id);
+        initShipForRun(id);
+        runSystem.startNewRun(id);
         stateManager.state.paused = false;
     };
 
     deathScreenUI.onMainMenu = () => {
         console.log('[Roguelike] Returning to main menu');
+        stateManager.state.paused = true;
         mainMenuUI.show();
     };
 
@@ -1146,15 +1202,10 @@ async function initGame() {
             ship: state.ship
         });
     }
-    if (state.missionSystem && state.missionSystem.available.length > 0 && !state.missionSystem.active) {
-        state.missionSystem.active = state.missionSystem.available[0];
-        eventBus.emit(GameEvents.UI_MESSAGE, {
-            message: `New Mission: ${state.missionSystem.active.title}`,
-            type: 'info',
-            duration: 3000
-        });
-    }
-    
+    // No mission is auto-assigned at boot (E13): the board announced a mission
+    // the live store never considered active. Missions are accepted from the
+    // mission board; state.missionSystem stays as the save-facing store.
+
     // Autosave (idle/light gated in adapter). QA controls:
     //  - window.SAVE_DISABLED = true (skip)
     //  - window.SAVE_INTERVAL_MS (default 30000)

@@ -16,6 +16,7 @@ import ShipDesigns from './ShipDesigns.js';
 import TargetCamRenderer from './TargetCamRenderer.js';
 import FactionVisuals from './FactionVisuals.js';
 import { GameConstants } from '../utils/Constants.js';
+import { zones } from '../data/zones.js';
 
 /**
  * RenderSystem - Handles all visual rendering for the game
@@ -39,7 +40,7 @@ export class RenderSystem {
         // Performance optimization flags
         this.quality = 'high'; // 'low', 'medium', 'high'
         this._manualQuality = this.quality;
-        this._autoQuality = { enabled: false, lastTs: 0, overBudgetStreak: 0, underBudgetStreak: 0, target: 'high' };
+        this._autoQuality = { enabled: false, lastTs: 0, overBudgetStreak: 0, underBudgetStreak: 0, underBudgetMisses: 0, target: 'high' };
         this.showParticles = true;
         this.showEffects = true;
         
@@ -151,9 +152,17 @@ export class RenderSystem {
         } catch(_) { this._bootUntil = 0; }
 
         // Canvas 2D quality hints
-        try { this.ctx.imageSmoothingEnabled = false; } catch(_) {}
-        try { if (this.minimapCtx) this.minimapCtx.imageSmoothingEnabled = false; } catch(_) {}
-        try { if (this.targetCtx) this.targetCtx.imageSmoothingEnabled = false; } catch(_) {}
+        this._applyPixelHints(this.ctx);
+        this._applyPixelHints(this.minimapCtx);
+        this._applyPixelHints(this.targetCtx);
+
+        // Zone theme (P1): cached per zone id; drives nebula tile, star density, bg tint
+        this._zoneId = null;
+        this._zoneTheme = null;
+        this._nebulaTile = null;
+
+        // Cached overlay-visibility probe for the PAUSED indicator (250ms TTL)
+        this._overlayProbe = { until: 0, visible: false };
 
         // Background caches
         this._bgGrad = { canvas: null, h: 0 };
@@ -162,6 +171,16 @@ export class RenderSystem {
         try { const g = (typeof window !== 'undefined') ? window : globalThis; if (Number(g.STAR_BOOT_SKIP)) this._starBootSkip = Math.max(0, Number(g.STAR_BOOT_SKIP)|0); } catch(_) {}
 
         console.log('[RenderSystem] Created');
+    }
+
+    // Pixel-art hints for a 2D context. Must be re-applied after any
+    // canvas.width/height assignment (that resets the context state per spec).
+    _applyPixelHints(ctx) {
+        if (!ctx) return;
+        try {
+            ctx.imageSmoothingEnabled = false;
+            if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'low';
+        } catch(_) {}
     }
 
     getTypeScale(type) {
@@ -815,22 +834,32 @@ export class RenderSystem {
         // Thresholds tuned for ~60Hz target
         if (frameMs > 26) { // > ~38 FPS
             a.overBudgetStreak += 2;
-            a.underBudgetStreak = 0;
         } else if (frameMs > 19) { // > ~52 FPS
             a.overBudgetStreak += 1;
-            a.underBudgetStreak = 0;
         } else {
             a.overBudgetStreak = Math.max(0, a.overBudgetStreak - 1);
+        }
+        // Recovery window: 45 frames under 17ms, tolerating up to 2 slower frames.
+        // A single miss used to reset the streak, which made recovery practically
+        // unreachable and left players stuck on 'medium' for the whole session.
+        if (frameMs < 17) {
             a.underBudgetStreak += 1;
+        } else {
+            a.underBudgetMisses = (a.underBudgetMisses || 0) + 1;
+            a.underBudgetStreak = Math.max(0, a.underBudgetStreak - 10);
+            if (a.underBudgetMisses > 2) { a.underBudgetStreak = 0; a.underBudgetMisses = 0; }
         }
         // Degrade quickly if repeated misses
         if (a.overBudgetStreak >= 4) {
             a.overBudgetStreak = 0;
+            a.underBudgetStreak = 0;
+            a.underBudgetMisses = 0;
             a.target = (this.quality === 'high') ? 'medium' : 'low';
         }
-        // Recover slowly after sustained good frames
-        if (a.underBudgetStreak >= 90) { // ~1.5s at 60fps
+        // Recover after a mostly-clean window (~0.75s at 60fps)
+        if (a.underBudgetStreak >= 45) {
             a.underBudgetStreak = 0;
+            a.underBudgetMisses = 0;
             a.target = (this.quality === 'low') ? 'medium' : 'high';
         }
         // Apply target only if it differs from current manual to avoid oscillation
@@ -885,6 +914,11 @@ export class RenderSystem {
         this.ctx.font = '14px sans-serif';
         this.ctx.textAlign = 'left';
         this.ctx.textBaseline = 'alphabetic';
+        // A resize between frames resets the context; restore pixel-art hints here too
+        this._applyPixelHints(this.ctx);
+
+        // Zone theming (nebula tile, star density, background tint)
+        this._syncZoneTheme();
 
         // Update camera to follow ship
         this.camera.x = state.ship.x;
@@ -1005,6 +1039,10 @@ export class RenderSystem {
                 __appliedOtherGuard = true; // skip HUD this frame
             }
         } catch(_) {}
+
+        // PAUSED indicator (U5) — drawn even during the boot ramp so a pause is never
+        // mistaken for a hang; suppressed while a full-screen overlay owns the view.
+        try { this.drawPausedIndicator(state); } catch(_) {}
 
         // Consume one guard frame if we skipped any soft UI draws
         if (__appliedOtherGuard && this._otherGuard && this._otherGuard.frames > 0) {
@@ -1702,8 +1740,13 @@ export class RenderSystem {
                 gc.width = 1; gc.height = this.canvas.height;
                 const gctx = gc.getContext('2d');
                 const grad = gctx.createLinearGradient(0, 0, 0, gc.height);
+                // Bottom stop carries a little of the zone hue (P1); cache is dropped
+                // by _syncZoneTheme() when the zone changes.
+                const c = this._themeColor();
+                const mix = 0.55;
+                const bottom = `rgb(${Math.round(c.r * mix)}, ${Math.round(c.g * mix)}, ${Math.round(c.b * mix)})`;
                 grad.addColorStop(0, '#000011');
-                grad.addColorStop(1, '#000000');
+                grad.addColorStop(1, bottom);
                 gctx.fillStyle = grad;
                 gctx.fillRect(0, 0, 1, gc.height);
                 this._bgGrad.canvas = gc; this._bgGrad.h = this.canvas.height;
@@ -1799,39 +1842,159 @@ export class RenderSystem {
         this.ctx.restore();
     }
     
+    // True when a full-screen DOM overlay is covering the canvas. Probed at most
+    // once per 250ms because getComputedStyle forces style/layout work.
+    _fullscreenOverlayVisible() {
+        const now = performance.now ? performance.now() : Date.now();
+        const probe = this._overlayProbe;
+        if (now < probe.until) return probe.visible;
+        let visible = false;
+        try {
+            const ids = ['mainMenuOverlay', 'deathScreenOverlay', 'landingOverlay'];
+            for (const id of ids) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                if (getComputedStyle(el).display !== 'none') { visible = true; break; }
+            }
+        } catch(_) {}
+        probe.until = now + 250;
+        probe.visible = visible;
+        return visible;
+    }
+
     /**
-     * Render nebula background
+     * Centred PAUSED label (screen space).
+     */
+    drawPausedIndicator(state) {
+        if (!state || !state.paused) return;
+        if (this._fullscreenOverlayVisible()) return;
+        withScreen(this.ctx, () => {
+            const ctx = this.ctx;
+            ctx.save();
+            try {
+                const dpr = this.canvas.__dpr || 1;
+                const w = this.canvas.width / dpr;
+                const h = this.canvas.height / dpr;
+                const cx = Math.round(w / 2);
+                const cy = Math.round(h / 2);
+                ctx.font = 'bold 28px VT323, monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const label = 'PAUSED';
+                const tw = Math.ceil(ctx.measureText(label).width);
+                const bw = tw + 48, bh = 44;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.fillRect(cx - bw / 2, cy - bh / 2, bw, bh);
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.35)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(cx - bw / 2 + 0.5, cy - bh / 2 + 0.5, bw - 1, bh - 1);
+                ctx.fillStyle = '#bff6ff';
+                ctx.fillText(label, cx, cy + 1);
+            } finally {
+                ctx.restore();
+            }
+        });
+    }
+
+    /**
+     * Resolve the active zone theme once per zone change (P1).
+     * Falls back to the first zone's theme outside an active run.
+     */
+    _syncZoneTheme() {
+        let zone = null;
+        try {
+            const rs = getRunSystem();
+            if (rs && rs.isRunActive && rs.isRunActive()) zone = rs.getCurrentZone();
+        } catch(_) {}
+        if (!zone) zone = (Array.isArray(zones) && zones[0]) || null;
+        const id = (zone && zone.id) || 'core';
+        if (id === this._zoneId) return;
+        this._zoneId = id;
+        this._zoneTheme = (zone && zone.theme) || null;
+        // Both caches are theme-derived; drop them so they rebuild lazily.
+        this._nebulaTile = null;
+        this._bgGrad.canvas = null;
+    }
+
+    // Parse 'rgba(r, g, b, a)' / 'rgb(...)' / '#rrggbb' into components.
+    _parseColor(str) {
+        if (typeof str !== 'string') return null;
+        const s = str.trim();
+        const m = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i);
+        if (m) {
+            return { r: +m[1] | 0, g: +m[2] | 0, b: +m[3] | 0, a: (m[4] === undefined ? 1 : parseFloat(m[4])) };
+        }
+        const h = s.match(/^#([0-9a-f]{6})$/i);
+        if (h) {
+            const v = parseInt(h[1], 16);
+            return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255, a: 1 };
+        }
+        return null;
+    }
+
+    _themeColor() {
+        const theme = this._zoneTheme || (Array.isArray(zones) && zones[0] && zones[0].theme) || null;
+        return this._parseColor(theme && theme.nebulaColor) || { r: 20, g: 60, b: 100, a: 0.15 };
+    }
+
+    /**
+     * Build (once per theme) a 512x512 nebula tile: two soft blobs in the zone hue.
+     * Replaces two per-frame 4000x4000 radial-gradient fills.
+     */
+    _ensureNebulaTile() {
+        if (this._nebulaTile) return this._nebulaTile;
+        try {
+            const col = this._themeColor();
+            // The authored colours are dark washes; lift them so the cloud reads as
+            // a hue instead of just darkening the background.
+            const peak = Math.max(col.r, col.g, col.b) || 1;
+            const lift = 205 / peak;
+            const p = { r: Math.min(255, col.r * lift), g: Math.min(255, col.g * lift), b: Math.min(255, col.b * lift) };
+            // Complementary-ish darker partner: rotate channels, dim
+            const s = { r: p.b * 0.55, g: p.r * 0.45, b: p.g * 0.6 + 40 };
+            const intensity = Math.max(0.12, Math.min(0.45, (col.a || 0.2) * 1.2));
+
+            const size = 512;
+            const c = document.createElement('canvas');
+            c.width = size; c.height = size;
+            const g = c.getContext('2d');
+            const blob = (cx, cy, r, rgb, alpha) => {
+                const grad = g.createRadialGradient(cx, cy, r * 0.08, cx, cy, r);
+                grad.addColorStop(0, `rgba(${rgb.r|0}, ${rgb.g|0}, ${rgb.b|0}, ${alpha})`);
+                grad.addColorStop(0.55, `rgba(${rgb.r|0}, ${rgb.g|0}, ${rgb.b|0}, ${alpha * 0.35})`);
+                grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                g.fillStyle = grad;
+                g.fillRect(0, 0, size, size);
+            };
+            blob(size * 0.36, size * 0.34, size * 0.46, p, intensity);
+            blob(size * 0.70, size * 0.68, size * 0.40, s, intensity * 0.8);
+            this._nebulaTile = c;
+            return c;
+        } catch(_) { return null; }
+    }
+
+    /**
+     * Render nebula background (world space; called inside withWorld)
      */
     renderNebula() {
-        // Only draw nebula on high quality; it uses large radial gradients
-        if (this.quality !== 'high') return;
+        // Cheap enough for medium now that it is a single blit; still off on low
+        if (this.quality === 'low') return;
+        const tile = this._ensureNebulaTile();
+        if (!tile) return;
 
         // Wrap in save/restore to protect globalAlpha
         this.ctx.save();
         try {
-            this.ctx.globalAlpha = 0.03;
-
-            // Purple nebula cloud
-            const nebulaGradient1 = this.ctx.createRadialGradient(
-                -this.camera.x * 0.05 + 200, -this.camera.y * 0.05 - 300, 100,
-                -this.camera.x * 0.05 + 200, -this.camera.y * 0.05 - 300, 600
-            );
-            nebulaGradient1.addColorStop(0, 'rgba(200, 100, 255, 0.4)');
-            nebulaGradient1.addColorStop(0.5, 'rgba(100, 50, 200, 0.2)');
-            nebulaGradient1.addColorStop(1, 'transparent');
-            this.ctx.fillStyle = nebulaGradient1;
-            this.ctx.fillRect(-2000, -2000, 4000, 4000);
-
-            // Blue nebula cloud
-            const nebulaGradient2 = this.ctx.createRadialGradient(
-                -this.camera.x * 0.05 - 500, -this.camera.y * 0.05 + 400, 150,
-                -this.camera.x * 0.05 - 500, -this.camera.y * 0.05 + 400, 800
-            );
-            nebulaGradient2.addColorStop(0, 'rgba(100, 200, 255, 0.3)');
-            nebulaGradient2.addColorStop(0.5, 'rgba(50, 100, 200, 0.15)');
-            nebulaGradient2.addColorStop(1, 'transparent');
-            this.ctx.fillStyle = nebulaGradient2;
-            this.ctx.fillRect(-2000, -2000, 4000, 4000);
+            this.ctx.globalAlpha = (this.quality === 'high') ? 0.5 : 0.38;
+            // Not pixel art: smooth this one upscale (restored by the save/restore)
+            this.ctx.imageSmoothingEnabled = true;
+            try { this.ctx.imageSmoothingQuality = 'high'; } catch(_) {}
+            // Parallax: anchored at 95% of the camera, so the cloud drifts at 5%
+            // of ship speed and always covers the viewport.
+            const span = 4000;
+            const cx = this.camera.x * 0.95;
+            const cy = this.camera.y * 0.95;
+            this.ctx.drawImage(tile, cx - span / 2, cy - span / 2, span, span);
         } finally {
             this.ctx.restore();
         }
@@ -1853,12 +2016,16 @@ export class RenderSystem {
             const farArr = state.stars.far || [];
             const midArr = state.stars.mid || [];
             const nearArr = state.stars.near || [];
-            const stepFar = (q === 'low') ? 2 : 1; // draw ~1/2 on low
-            const stepMid = (q === 'low') ? 3 : 1; // draw ~1/3 on low
-            const stepNear = (q === 'low') ? 4 : 1; // draw ~1/4 on low
+            // Zone star density (P1): fractional stride thins the field, alpha dims it,
+            // so The Void (0.3) reads as far emptier than Core Systems (1.0).
+            const density = Math.max(0.15, Math.min(1, Number(this._zoneTheme?.starDensity) || 1));
+            const aScale = 0.6 + 0.4 * density;
+            const stepFar = ((q === 'low') ? 2 : 1) / density; // draw ~1/2 on low
+            const stepMid = ((q === 'low') ? 3 : 1) / density; // draw ~1/3 on low
+            const stepNear = ((q === 'low') ? 4 : 1) / density; // draw ~1/4 on low
 
             // Far stars (minimal parallax)
-            for (let i = 0; i < farArr.length; i += stepFar) { const star = farArr[i];
+            for (let f = 0; f < farArr.length; f += stepFar) { const star = farArr[f | 0];
                 const screenX = star.x - this.camera.x * 0.05;
                 const screenY = star.y - this.camera.y * 0.05;
 
@@ -1866,7 +2033,7 @@ export class RenderSystem {
                 const wrappedX = ((screenX + 6000) % 12000) - 6000;
                 const wrappedY = ((screenY + 6000) % 12000) - 6000;
 
-                this.ctx.globalAlpha = star.brightness;
+                this.ctx.globalAlpha = star.brightness * aScale;
                 this.ctx.fillStyle = star.color || '#ffffff';
 
                 if (star.size > 2 && q === 'high') {
@@ -1880,7 +2047,7 @@ export class RenderSystem {
             }
 
             // Mid stars with twinkling
-            for (let i = 0; i < midArr.length; i += stepMid) { const star = midArr[i];
+            for (let f = 0; f < midArr.length; f += stepMid) { const star = midArr[f | 0];
                 const screenX = star.x - this.camera.x * 0.2;
                 const screenY = star.y - this.camera.y * 0.2;
 
@@ -1891,20 +2058,20 @@ export class RenderSystem {
                 star.twinkle = (star.twinkle || 0) + (star.twinkleSpeed || 0.02);
                 const twinkle = Math.sin(star.twinkle) * 0.1 + 0.9;
 
-                this.ctx.globalAlpha = star.brightness * twinkle;
+                this.ctx.globalAlpha = star.brightness * twinkle * aScale;
                 this.ctx.fillStyle = star.color || '#ffffff';
                 this.ctx.fillRect(wrappedX, wrappedY, star.size, star.size);
             }
 
             // Near stars
-            for (let i = 0; i < nearArr.length; i += stepNear) { const star = nearArr[i];
+            for (let f = 0; f < nearArr.length; f += stepNear) { const star = nearArr[f | 0];
                 const screenX = star.x - this.camera.x * 0.4;
                 const screenY = star.y - this.camera.y * 0.4;
 
                 const wrappedX = ((screenX + 3000) % 6000) - 3000;
                 const wrappedY = ((screenY + 3000) % 6000) - 3000;
 
-                this.ctx.globalAlpha = star.brightness;
+                this.ctx.globalAlpha = star.brightness * aScale;
                 this.ctx.fillStyle = star.color || '#ffffff';
 
                 if (star.size > 1 && q === 'high') {
@@ -2717,16 +2884,21 @@ export class RenderSystem {
 
                 // Color based on type
                 let color = '#ffff00';
+                let trailColor = null;
                 if (proj.type === 'plasma') {
                     color = '#00ffff';
                 } else if (proj.type === 'rapid') {
                     color = '#ff8800';
                 } else if (proj.type === 'mining') {
                     color = '#888888';
+                } else if (proj.type === 'void') {
+                    // Final boss weapon: violet core over a deeper violet trail
+                    color = '#c26bff';
+                    trailColor = '#7a2cff';
                 }
 
                 trailGradient.addColorStop(0, 'transparent');
-                trailGradient.addColorStop(1, color);
+                trailGradient.addColorStop(1, trailColor || color);
 
                 this.ctx.strokeStyle = trailGradient;
                 this.ctx.lineWidth = Math.max(1.2, Math.min(heavy ? 3 : 4, proj.trailWidth || 3));
@@ -2742,7 +2914,8 @@ export class RenderSystem {
                 }
                 this.ctx.fillStyle = color;
                 this.ctx.beginPath();
-                this.ctx.arc(proj.x, proj.y, proj.type === 'plasma' ? 4 : 2, 0, Math.PI * 2);
+                const coreR = (proj.type === 'void') ? 5 : (proj.type === 'plasma') ? 4 : 2;
+                this.ctx.arc(proj.x, proj.y, coreR, 0, Math.PI * 2);
                 this.ctx.fill();
             } finally {
                 this.ctx.restore();
@@ -3442,6 +3615,9 @@ export class RenderSystem {
             this.canvas.height = Math.max(1, Math.floor(cssH * dpr));
             this.canvas.__dpr = dpr;
             if (this.ctx) this.ctx.__dpr = dpr;
+            // Assigning canvas.width/height resets the whole 2D context state,
+            // including smoothing — re-apply or every pixel sprite is bilinear-blurred.
+            this._applyPixelHints(this.ctx);
         }
 
         // Resize minimap and target-cam panels against their CSS sizes
@@ -3457,6 +3633,9 @@ export class RenderSystem {
             canvas.width = Math.max(1, Math.round(w * dpr));
             canvas.height = Math.max(1, Math.round(h * dpr));
             canvas.__dpr = dpr; ctx.__dpr = dpr;
+            // Backing-store assignment above cleared the context state (minimap and
+            // TargetCam both blit sprite frames).
+            this._applyPixelHints(ctx);
         };
         try { resizePanel(this.minimapCanvas, this.minimapCtx); } catch(_) {}
         try { resizePanel(this.targetCanvas, this.targetCtx); } catch(_) {}

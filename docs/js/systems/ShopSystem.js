@@ -6,11 +6,22 @@ import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { getMetaStateManager } from '../core/MetaStateManager.js';
 import { shopInventory, shipClasses } from '../data/gameData.js';
+import { applyShipClass, deriveShipStats, UPGRADE_LEVEL_RANGE } from './ShipStats.js';
+
+// Upgrade item type -> the ship field that stores its level
+const LEVEL_FIELD_BY_TYPE = {
+    shield: 'shieldLevel',
+    engine: 'engineLevel',
+    cargo: 'cargoLevel',
+    radar: 'radarLevel'
+};
 
 export default class ShopSystem {
     constructor() {
         this.eventBus = getEventBus();
         this.stateManager = getStateManager();
+        // Default catalogue; MENU_OPEN('shop') narrows it to the planet's stock
+        this.currentShopInventory = shopInventory;
     }
 
     async init() {
@@ -41,7 +52,7 @@ export default class ShopSystem {
         const state = this.stateManager.state;
         const ship = state.ship;
         if (ship.isDestroyed) return;
-        const item = this.currentShopInventory[itemId] || shopInventory[itemId];
+        const item = (this.currentShopInventory && this.currentShopInventory[itemId]) || shopInventory[itemId];
         
         if (!item) {
             console.error('[ShopSystem] Item not found:', itemId);
@@ -90,36 +101,13 @@ export default class ShopSystem {
             }
             
             purchaseSuccess = true;
-            
-        } else if (item.type === 'shield') {
-            // Upgrade shield
-            ship.maxShield = item.value;
-            ship.shield = item.value; // Fully charge on purchase
-            purchaseSuccess = true;
-            
-        } else if (item.type === 'engine') {
-            // Upgrade engine
-            ship.engineLevel = item.value;
-            ship.maxSpeed = 0.8 + (item.value - 1) * 0.2;
-            ship.thrust = 0.012 + (item.value - 1) * 0.003;
-            purchaseSuccess = true;
-            
-        } else if (item.type === 'cargo') {
-            // Upgrade cargo capacity
-            ship.cargoCapacity = item.value;
-            purchaseSuccess = true;
-        } else if (item.type === 'radar') {
-            // Upgrade radar level (minimap detail)
-            const newLevel = Math.max(ship.radarLevel || 0, item.value || 0);
-            if (newLevel === (ship.radarLevel || 0)) {
-                this.eventBus.emit(GameEvents.UI_MESSAGE, {
-                    message: 'Radar already at this level',
-                    type: 'warning',
-                    duration: 1800
-                });
-                return;
-            }
-            ship.radarLevel = newLevel;
+
+        } else if (LEVEL_FIELD_BY_TYPE[item.type]) {
+            // Levelled upgrades (shield/engine/cargo/radar): the item sets a
+            // LEVEL, never an absolute stat. ShipStats derives the stat from
+            // hull + level, so an upgrade can no longer downgrade a better hull
+            // (E5) and a reload can no longer lose it.
+            if (!this._applyLevelUpgrade(ship, item)) return;
             purchaseSuccess = true;
         }
 
@@ -153,6 +141,45 @@ export default class ShopSystem {
                 });
             }
         }
+    }
+
+    /**
+     * Apply a levelled upgrade. Only the next level up is sellable; anything
+     * already owned or out of order is refused with a message.
+     * @returns {boolean} true when the level was applied
+     */
+    _applyLevelUpgrade(ship, item) {
+        const field = LEVEL_FIELD_BY_TYPE[item.type];
+        const range = UPGRADE_LEVEL_RANGE[field];
+        const current = Number.isFinite(Number(ship[field])) ? Number(ship[field]) : range.min;
+        const target = Number(item.level);
+
+        if (!Number.isFinite(target)) {
+            console.error('[ShopSystem] Upgrade item has no level:', item.name);
+            return false;
+        }
+        if (target <= current) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `${item.name} already installed`,
+                type: 'warning',
+                duration: 1800
+            });
+            return false;
+        }
+        if (target !== current + 1) {
+            this.eventBus.emit(GameEvents.UI_MESSAGE, {
+                message: `Install the previous ${item.type} upgrade first`,
+                type: 'warning',
+                duration: 2000
+            });
+            return false;
+        }
+
+        ship[field] = target;
+        deriveShipStats(ship, shipClasses);
+        // A new shield generator comes charged
+        if (item.type === 'shield') ship.shield = ship.maxShield;
+        return true;
     }
 
     buyShip(shipId) {
@@ -229,20 +256,20 @@ export default class ShopSystem {
             return;
         }
 
-        // Apply new ship stats
-        ship.shipClass = shipId;
-        ship.maxSpeed = newShipClass.maxSpeed;
-        ship.thrust = newShipClass.thrust;
-        ship.turnSpeed = newShipClass.turnSpeed;
-        ship.maxHealth = newShipClass.maxHealth;
-        ship.health = newShipClass.maxHealth; // Full repair on purchase
-        ship.maxShield = newShipClass.maxShield;
-        ship.shield = newShipClass.maxShield; // Full shield on purchase
-        ship.cargoCapacity = newShipClass.cargoCapacity;
-        ship.weaponSlots = newShipClass.weaponSlots;
-        ship.size = newShipClass.size;
-        ship.width = newShipClass.width;
-        ship.color = newShipClass.color;
+        // Installed upgrades move to the new hull with the pilot
+        const levels = {
+            engineLevel: ship.engineLevel,
+            shieldLevel: ship.shieldLevel,
+            cargoLevel: ship.cargoLevel,
+            radarLevel: ship.radarLevel
+        };
+
+        // Apply new ship stats (single derivation — ShipStats owns the formula)
+        applyShipClass(ship, shipId, shipClasses);
+        Object.assign(ship, levels);
+        deriveShipStats(ship, shipClasses);
+        ship.health = ship.maxHealth;   // Full repair on purchase
+        ship.shield = ship.maxShield;   // Full shield on purchase
 
         // Deduct final price
         ship.credits = currentCredits - finalPrice;

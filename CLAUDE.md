@@ -70,11 +70,11 @@ Main Menu (ship select) → BEGIN RUN
   ↓
 Zone 1: Core Systems (★) → meet kill/credit requirements → Z to advance
   ↓
-Zone 2: Frontier Space (★★) → boss gate (Captain Blackstar)
+Zone 2: Frontier Space (★★) → meet kill/credit requirements → Z to advance
   ↓
-Zone 3: Outer Rim (★★★) → boss gate (Warlord Krix)
+Zone 3: Outer Rim (★★★) → boss gate (Captain Blackstar) → Z to advance
   ↓
-Zone 4: The Void (★★★★) → final boss (The Devourer) → VICTORY
+Zone 4: The Void (★★★★) → final boss (The Void King) → VICTORY
   ↓
 Death/Victory → MetaStateManager records stats → unlocks → Main Menu
 ```
@@ -138,7 +138,7 @@ Death/Victory → MetaStateManager records stats → unlocks → Main Menu
 
 ### Current Content
 - **Zones**: 4 (Core Systems → Frontier Space → Outer Rim → The Void) with scaling difficulty
-- **Bosses**: 3 (Captain Blackstar, Warlord Krix, The Devourer) with phase-based AI
+- **Bosses**: 2 (Captain Blackstar in Outer Rim, The Void King in The Void) with phase-based AI; a third boss for Frontier is planned (see `EVOLUTION_ROADMAP_2026-09.md`)
 - **Missions**: 26 static + infinite procedural (delivery, bounty, escort types)
 - **Ships**: 6 classes (Scout Shuttle → Viper Interceptor → Falcon Corvette → Mammoth Freighter → Tempest Gunship → Phoenix Battlecruiser)
 - **Planets**: 4 (Terra Nova, Crimson Moon, Ice World, Mining Station)
@@ -147,8 +147,9 @@ Death/Victory → MetaStateManager records stats → unlocks → Main Menu
 ## Development Guidelines
 
 ### Session Start
-1. Read latest `SESSION_*_HANDOFF.md` (in repo root; older ones archived in `archive/`) and `AGENTS.md`
+1. Read latest `SESSION_*_HANDOFF.md` (in repo root; older ones archived in `archive/`), `AGENTS.md`, and `EVOLUTION_ROADMAP_2026-09.md` (current defect/enhancement audit with file:line evidence — verify findings against current code before acting on them, since the codebase moves)
    - Sessions may be numbered sequentially (69), or prefixed (AUDIT_5, ROGUELIKE_3)
+   - Exploratory scripts used to produce the roadmap's evidence live in `tests/exploratory/` and are a starting point for the run-to-victory smoke test in `tests/smoke.mjs`
 2. Start local server and clear stale toggles (see `INTERNAL_DEV_DOCS/QUICK_TOGGLES.md`)
 3. Verify TargetCam with `docs/test/targetcam-spec.html`
 4. Use plan tool for 3-6 concrete steps

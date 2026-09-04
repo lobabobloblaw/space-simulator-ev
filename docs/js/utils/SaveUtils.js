@@ -21,6 +21,14 @@ export function validateSaveData(data) {
         return false;
     }
 
+    // Version gate: reject saves missing a version, or from an incompatible
+    // save format (anything not on the current '6.x' schema). Treated as
+    // invalid rather than thrown so callers fall back to fresh defaults.
+    if (typeof data.version !== 'string' || !data.version.startsWith('6')) {
+        console.warn('[SaveUtils] Invalid save data: missing or unsupported version', data.version);
+        return false;
+    }
+
     // Critical ship properties must be numbers
     const numericProps = ['x', 'y', 'health', 'credits'];
     for (const prop of numericProps) {

@@ -40,10 +40,11 @@ export class UISystem {
         
         console.log('[UISystem] Created');
 
-        // Image provider preference for planet landscapes
-        // Options: 'lexica' (search existing high-res), 'unsplash' (photo keywords), 'auto' (lexica→unsplash), 'none' (disable)
-        // Default to 'unsplash' to avoid CORS warnings during local runs
-        this.landscapeImageProvider = 'unsplash';
+        // Image provider preference for planet landscapes.
+        // Options: 'none' (procedural canvas art), 'lexica', 'pollinations', 'auto' (lexica→pollinations).
+        // Default 'none': the remote providers cost up to ~48s of doomed fetches per
+        // landing and are QA-only now (window.LANDING_ART_PROVIDER).
+        this.landscapeImageProvider = 'none';
         // If true, when using Pollinations, prefer a single HQ attempt and wait longer
         this.pollinationsHQOnly = false;
         // Max wait per attempt (ms)
@@ -57,13 +58,16 @@ export class UISystem {
         this.radioScanInterval = null;
         this.radioScanTimeout = null;
 
-        // Notification queue (sequential, no stack overlap)
+        // Notification queue + concurrently visible toasts
         this._notifQueue = [];
-        this._notifActive = false;
+        this._activeToasts = [];
+        this._maxToasts = 3;
         // Tiny console readout (reuse #tutorialHint area)
         this._consoleTimer = null;
-        // Disable floating toast notifications by default (console line only)
-        this._toastsEnabled = false;
+        // Severity toasts are on; plain 'info' stays on the console line.
+        // null = per-type policy; window.UI_TOASTS forces true/false for QA.
+        this._toastsEnabled = null;
+        this._toastTypes = new Set(['warning', 'success', 'error']);
 
         // HUD cache to minimize DOM churn
         this._hudCache = {
@@ -102,12 +106,13 @@ export class UISystem {
         // Optional override to re-enable toasts for QA
         try { const g = (typeof window !== 'undefined') ? window : globalThis; if (typeof g.UI_TOASTS === 'boolean') this._toastsEnabled = !!g.UI_TOASTS; } catch(_) {}
         
-        // Allow runtime override for landscape provider to avoid CORS noise during QA
+        // QA-only override: opt back into the remote landscape providers
         try {
-            const prov = (typeof window !== 'undefined') ? window.UI_LANDSCAPE_PROVIDER : null;
+            const g = (typeof window !== 'undefined') ? window : globalThis;
+            const prov = g.LANDING_ART_PROVIDER || g.UI_LANDSCAPE_PROVIDER || null;
             if (prov && typeof prov === 'string') {
                 const v = prov.toLowerCase();
-                if (v === 'lexica' || v === 'unsplash' || v === 'auto' || v === 'none') {
+                if (v === 'lexica' || v === 'pollinations' || v === 'auto' || v === 'none') {
                     this.landscapeImageProvider = v;
                 }
             }
@@ -477,43 +482,50 @@ export class UISystem {
     updateTutorialHint(ship) {
         const hintElement = this._domCache.tutorialHint;
         if (!hintElement) return;
-        // If console is showing a readout, do not override it
-        if (hintElement.dataset && hintElement.dataset.console === '1') return;
-        
+
         let message = null;
         
         switch(this.tutorialStage) {
             case 'start':
-                message = 'Welcome pilot! Land at a planet (L key when close) to purchase weapons and start trading.';
-                if (ship.weapons && ship.weapons.length > 0) {
-                    this.tutorialStage = 'armed';
-                    message = 'WEAPONS ONLINE. Fire with SPACE. Check missions at planets for rewards!';
+                // Every hull now starts armed, so the objective line stays up
+                // until the first kill; the unarmed hint only appears if the
+                // player somehow has no weapon.
+                message = 'ZONE 1: destroy 5 hostiles and bank 1000 credits, then press Z to jump. X targets, F fires. Land (L) to trade and refit.';
+                if (!ship.weapons || ship.weapons.length === 0) {
+                    message = 'UNARMED: land (L) and buy a weapon at the outfitter.';
+                } else if (ship.kills >= 1) {
+                    this.tutorialStage = 'combat';
+                    message = 'FIRST KILL. Bounties pay. Watch the zone panel top-left for gate progress.';
                 }
                 break;
 
             case 'armed':
-                message = 'ARMED: Fire with SPACE. Hunt pirates or accept missions for credits.';
+                message = 'WEAPONS HOT — X targets, F fires, Q switches. Zone 1: 5 kills and 1000 credits, then Z to jump.';
                 if (ship.kills >= 1) {
                     this.tutorialStage = 'combat';
-                    message = 'First kill confirmed! You can now access all ship systems.';
+                    message = 'FIRST KILL. Bounties pay. Watch the zone panel top-left for gate progress.';
                 }
                 break;
 
             case 'combat':
                 if (ship.kills >= 5 || ship.credits >= 2000) {
-                    message = 'Good work! Explore the shipyard to upgrade your vessel.';
+                    message = 'When the zone panel shows ADVANCE, press Z. Bosses guard the deeper zones. Death is permanent; unlocks are not.';
                     this.tutorialStage = 'complete';
                 } else {
-                    message = 'Complete missions and trade goods to earn credits. Press M to toggle minimap.';
+                    message = 'FIRST KILL. Bounties pay. Watch the zone panel top-left for gate progress.';
                 }
                 break;
 
             case 'complete':
-                message = 'Tutorial complete! Explore the galaxy, upgrade ships, and build your fortune.';
+                message = 'When the zone panel shows ADVANCE, press Z. Bosses guard the deeper zones. Death is permanent; unlocks are not.';
                 this.tutorialStage = 'done';
                 break;
         }
         
+        // Remember the standing hint so a console readout can restore it instead of
+        // leaving the line blank (a single toast used to erase it for the whole run).
+        this._lastHintMessage = message;
+        if (hintElement.dataset && hintElement.dataset.console === '1') return;
         if (message) {
             hintElement.textContent = message;
             hintElement.classList.add('visible');
@@ -707,17 +719,6 @@ export class UISystem {
                     await this.loadPlanetImage(url, planet, planetCanvas, ctx, 'LEX');
                     return;
                 }
-            } catch (e) {
-                // Continue to pollinations attempts
-            }
-        }
-
-        // Attempt provider 2: Unsplash Source (free, high-res photos by keywords)
-        if (useAI && (this.landscapeImageProvider === 'unsplash' || this.landscapeImageProvider === 'auto')) {
-            try {
-                const url = this.buildUnsplashUrl(Math.floor(cssWidth * dpr), Math.floor(cssHeight * dpr), planet);
-                const ok = await this.loadPlanetImage(url, planet, planetCanvas, ctx, 'UNS', { crossorigin: false });
-                if (ok) return;
             } catch (e) {
                 // Continue to pollinations attempts
             }
@@ -956,18 +957,6 @@ export class UISystem {
         info.textContent = `${provider} ${w}x${h} (try ${attempt}/${total})`;
     }
 
-    /**
-     * Build an Unsplash Source URL for planet landscapes
-     */
-    buildUnsplashUrl(w, h, planet) {
-        const terms = [
-            'space', 'planet', 'atmosphere', 'landscape',
-            planet?.name?.toLowerCase().replace(/\s+/g, '-') || ''
-        ].filter(Boolean).join(',');
-        // Unsplash Source returns a random matching image at requested size
-        return `https://source.unsplash.com/${w}x${h}/?${encodeURIComponent(terms)}`;
-    }
-    
     /**
      * Close landing overlay
      */
@@ -1770,42 +1759,118 @@ export class UISystem {
         console.log('[UISystem] AI landscape loaded successfully for', planetName);
     }
     
+    // Deterministic 32-bit hash for procedural planet art
+    _artHash(str) {
+        let h = 0;
+        const s = String(str || '');
+        for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
+        return Math.abs(h);
+    }
+
     /**
-     * Draw canvas fallback for planet visual
+     * Build the procedural landing visual once per planet+size: starfield plus a
+     * lit sphere in the planet's own colour. Cached so re-landing is a single blit.
+     */
+    _buildPlanetArt(planet, width, height) {
+        const name = planet?.name || 'unknown';
+        const key = `${name}|${width}x${height}`;
+        if (!this._planetArtCache) this._planetArtCache = new Map();
+        const hit = this._planetArtCache.get(key);
+        if (hit) return hit;
+
+        const c = document.createElement('canvas');
+        c.width = width; c.height = height;
+        const ctx = c.getContext('2d');
+        const base = (typeof planet?.color === 'string' && /^#[0-9a-f]{6}$/i.test(planet.color)) ? planet.color : '#4A90E2';
+        const r = parseInt(base.slice(1, 3), 16);
+        const g = parseInt(base.slice(3, 5), 16);
+        const b = parseInt(base.slice(5, 7), 16);
+        const shade = (k) => `rgb(${Math.max(0, Math.min(255, Math.round(r * k)))}, ${Math.max(0, Math.min(255, Math.round(g * k)))}, ${Math.max(0, Math.min(255, Math.round(b * k)))})`;
+
+        // Deep-space backdrop tinted by the planet hue
+        ctx.save();
+        const sky = ctx.createLinearGradient(0, 0, 0, height);
+        sky.addColorStop(0, '#000008');
+        sky.addColorStop(1, shade(0.16));
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, width, height);
+
+        // Deterministic starfield
+        let seed = this._artHash(name) || 1;
+        const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+        ctx.fillStyle = '#ffffff';
+        const starCount = Math.round((width * height) / 5200);
+        for (let i = 0; i < starCount; i++) {
+            const sx = rnd() * width, sy = rnd() * height;
+            const sSize = rnd() < 0.12 ? 2 : 1;
+            ctx.globalAlpha = 0.25 + rnd() * 0.6;
+            ctx.fillRect(sx | 0, sy | 0, sSize, sSize);
+        }
+        ctx.globalAlpha = 1;
+
+        // Lit sphere, light from the upper left
+        const cx = width * 0.5;
+        const cy = height * 0.54;
+        const rad = Math.min(width, height) * 0.34;
+        const lit = ctx.createRadialGradient(cx - rad * 0.42, cy - rad * 0.45, rad * 0.08, cx, cy, rad);
+        lit.addColorStop(0, shade(1.55));
+        lit.addColorStop(0.45, shade(1.0));
+        lit.addColorStop(0.82, shade(0.42));
+        lit.addColorStop(1, shade(0.14));
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.fillStyle = lit;
+        ctx.fill();
+
+        // Terminator: darken the far limb
+        const term = ctx.createLinearGradient(cx - rad, cy - rad, cx + rad, cy + rad);
+        term.addColorStop(0, 'rgba(0,0,0,0)');
+        term.addColorStop(0.62, 'rgba(0,0,0,0)');
+        term.addColorStop(1, 'rgba(0,0,0,0.62)');
+        ctx.fillStyle = term;
+        ctx.fill();
+
+        // Thin atmosphere rim along the lit limb (upper-left)
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = shade(1.35);
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = Math.max(1.5, rad * 0.03);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad * 0.985, Math.PI * 0.85, Math.PI * 1.7);
+        ctx.stroke();
+        ctx.restore();
+
+        // Keep the cache tiny (one entry per planet at the current panel size)
+        if (this._planetArtCache.size > 8) {
+            const oldest = this._planetArtCache.keys().next().value;
+            this._planetArtCache.delete(oldest);
+        }
+        this._planetArtCache.set(key, c);
+        return c;
+    }
+
+    /**
+     * Draw canvas fallback for planet visual (procedural; no network)
      */
     drawCanvasFallback(planet, planetCanvas) {
-        // This is a simplified version - the full implementation is in allSystems.js
         const ctx = planetCanvas.getContext('2d');
         const width = planetCanvas.width;
         const height = planetCanvas.height;
-        
-        // Clear with black
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        
-        // Add some basic visual based on planet type
-        const gradient = ctx.createLinearGradient(0, 0, 0, height);
-        
-        if (planet.name === "Terra Nova") {
-            gradient.addColorStop(0, '#001133');
-            gradient.addColorStop(0.5, '#003366');
-            gradient.addColorStop(1, '#4A90E2');
-        } else if (planet.name === "Crimson Moon") {
-            gradient.addColorStop(0, '#1A0000');
-            gradient.addColorStop(0.5, '#3A0F0A');
-            gradient.addColorStop(1, '#7B241C');
-        } else if (planet.name === "Ice World") {
-            gradient.addColorStop(0, '#000033');
-            gradient.addColorStop(0.5, '#003366');
-            gradient.addColorStop(1, '#154360');
-        } else {
-            gradient.addColorStop(0, '#000011');
-            gradient.addColorStop(1, '#1A1A1A');
+
+        ctx.save();
+        try {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            const art = this._buildPlanetArt(planet, width, height);
+            if (art) ctx.drawImage(art, 0, 0);
+        } catch(_) {
+        } finally {
+            ctx.restore();
         }
-        
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
-        
+
         // Fade grain overlay
         const grainOverlay = planetCanvas.parentElement.querySelector('.film-grain-overlay');
         if (grainOverlay) {
@@ -1822,54 +1887,74 @@ export class UISystem {
      * Show notification message
      */
     showNotification(message, type = 'info', duration = 2000) {
-        // If toasts are disabled, use console-only readout
-        if (!this._toastsEnabled) { this._setConsoleReadout(message, duration); return; }
-        const msg = document.createElement('div');
-        msg.className = `game-notification ${type}`;
-        msg.textContent = message;
-        document.body.appendChild(msg);
-        setTimeout(() => {
-            try {
-                msg.classList.add('fade-out');
-                msg.addEventListener('transitionend', () => msg.remove(), { once: true });
-            } catch(_) { msg.remove(); }
-        }, duration);
+        // Console line always carries the message; toasts only for severities
+        if (!this._shouldToast(type)) { this._setConsoleReadout(message, duration); return; }
+        this.enqueueNotification(message, type, duration);
+    }
+
+    /**
+     * Toast policy (U3): severity messages get a coloured toast, plain info stays
+     * on the console line. window.UI_TOASTS forces all-on / all-off for QA.
+     */
+    _shouldToast(type) {
+        if (typeof this._toastsEnabled === 'boolean') return this._toastsEnabled;
+        return this._toastTypes.has(String(type || 'info').toLowerCase());
     }
 
     enqueueNotification(message, type = 'info', duration = 2000) {
         // Always mirror into tiny console readout
         this._setConsoleReadout(message, duration);
-        if (!this._toastsEnabled) return;
+        if (!this._shouldToast(type)) return;
         this._notifQueue.push({ message, type, duration });
-        if (!this._notifActive) this._drainNotifications();
+        this._drainNotifications();
     }
 
+    // Show queued toasts concurrently (up to MAX_TOASTS) so a later message no
+    // longer replaces an earlier one; extras wait for a free slot.
     _drainNotifications() {
-        if (this._notifActive) return;
-        const next = this._notifQueue.shift();
-        if (!next) return;
-        this._notifActive = true;
+        while (this._activeToasts.length < this._maxToasts) {
+            const next = this._notifQueue.shift();
+            if (!next) return;
+            this._showToast(next);
+        }
+    }
+
+    _showToast(next) {
         const el = document.createElement('div');
-        el.className = `game-notification ${next.type}`;
+        const type = String(next.type || 'info').toLowerCase();
+        el.className = `game-notification ${type}`;
         el.textContent = next.message;
+        // main.css has no .warning accent; apply it inline
+        if (type === 'warning') el.style.borderLeft = '3px solid var(--status-warning)';
+        const entry = { el, timer: null };
+        this._activeToasts.push(entry);
         document.body.appendChild(el);
-        // schedule fade-out then play next
+        this._layoutToasts();
+
         const totalMs = Math.max(800, Number(next.duration) || 2000);
-        this._drainTimerId = setTimeout(() => {
+        const dismiss = () => {
+            const idx = this._activeToasts.indexOf(entry);
+            if (idx !== -1) this._activeToasts.splice(idx, 1);
+            try { el.remove(); } catch(_) {}
+            this._layoutToasts();
+            this._drainNotifications();
+        };
+        entry.timer = setTimeout(() => {
             try {
                 el.classList.add('fade-out');
-                el.addEventListener('transitionend', () => {
-                    el.remove();
-                    this._notifActive = false;
-                    // slight gap to mimic "rolodex" paging
-                    setTimeout(() => this._drainNotifications(), 120);
-                }, { once: true });
-            } catch (_) {
-                el.remove();
-                this._notifActive = false;
-                setTimeout(() => this._drainNotifications(), 120);
-            }
+                el.addEventListener('transitionend', dismiss, { once: true });
+                // Safety net if the transition never fires (reduced motion, detached)
+                entry.timer = setTimeout(dismiss, 600);
+            } catch (_) { dismiss(); }
         }, totalMs);
+    }
+
+    // Stack offsets are inline: .game-notification:nth-of-type rules in main.css
+    // count every <div> in <body>, so they cannot address toasts reliably.
+    _layoutToasts() {
+        this._activeToasts.forEach((entry, i) => {
+            try { entry.el.style.top = `calc(var(--spacing-lg) + ${60 + i * 50}px)`; } catch(_) {}
+        });
     }
 
     _setConsoleReadout(message, duration = 2000) {
@@ -1885,8 +1970,13 @@ export class UISystem {
             const ms = Math.max(800, Number(duration) || 2000);
             this._consoleTimer = setTimeout(() => {
                 try {
-                    el.classList.remove('visible');
                     delete el.dataset.console;
+                    if (this._lastHintMessage) {
+                        el.textContent = this._lastHintMessage;
+                        el.classList.add('visible');
+                    } else {
+                        el.classList.remove('visible');
+                    }
                 } catch(_) {}
             }, ms);
         } catch(_) {}
@@ -1958,12 +2048,12 @@ export class UISystem {
             this._fadeRAF = null;
         }
 
-        // Clean up notification drain timer (H15)
-        if (this._drainTimerId) {
-            clearTimeout(this._drainTimerId);
-            this._drainTimerId = null;
+        // Clean up notification timers (H15)
+        for (const entry of this._activeToasts) {
+            if (entry && entry.timer) clearTimeout(entry.timer);
         }
-        this._notifActive = false;
+        this._activeToasts = [];
+        this._notifQueue = [];
 
         // Clean up mute key handler (H16)
         if (this._muteKeyHandler) {

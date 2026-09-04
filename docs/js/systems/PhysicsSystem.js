@@ -2,7 +2,6 @@ import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
 import { MathUtils } from '../utils/MathUtils.js';
-import { SpatialHash } from '../utils/SpatialHash.js';
 
 /**
  * PhysicsSystem - Handles all physics simulation
@@ -19,9 +18,8 @@ export class PhysicsSystem {
         const worldHalf = Math.floor(((GameConstants?.WORLD?.ASTEROID_WORLD_SIZE ?? 4000) / 2));
         this.WORLD_BOUNDS = { min: -worldHalf, max: worldHalf };
 
-        // Spatial hashes for O(n) collision detection (cell size ~100px for finer granularity)
-        this._npcHash = new SpatialHash(100);
-        this._asteroidHash = new SpatialHash(150);
+        // No spatial hashes here: nothing queried them and they were rebuilt
+        // every frame. NPCSystem owns the only live broadphase (S9).
 
         // Movement state tracking
         this.thrustActive = false;
@@ -117,13 +115,8 @@ export class PhysicsSystem {
         // Update NPC physics (when migrated)
         this.updateNPCPhysics(state, deltaTime);
         
-        // Projectiles are updated in WeaponSystem; avoid double-updating here
-        
-        // Update asteroid physics (when migrated)
-        this.updateAsteroidPhysics(state, deltaTime);
-        
-        // Update pickup physics (when migrated)
-        this.updatePickupPhysics(state, deltaTime);
+        // Projectiles are updated in WeaponSystem, asteroids and pickups by
+        // SpawnSystem; a second integrator here doubled their speed (P12)
         
         // Check collisions
         this.checkCollisions(state);
@@ -142,7 +135,9 @@ export class PhysicsSystem {
         
         // Handle rotation
         if (this.turnDirection !== 0) {
-            const turnSpeed = (GameConstants?.PHYSICS?.TURN_SPEED ?? 0.025); // radians per frame
+            // Hull-specific turn rate (ShipStats derives ship.turnSpeed from the
+            // class); the global constant is only the fallback.
+            const turnSpeed = ship.turnSpeed ?? (GameConstants?.PHYSICS?.TURN_SPEED ?? 0.025); // radians per frame
             ship.angle += turnSpeed * this.turnDirection;
             
             // Normalize angle to 0-2π
@@ -215,11 +210,8 @@ export class PhysicsSystem {
             ship.shield = Math.min(ship.maxShield, ship.shield + rate);
         }
         
-        // Regenerate health when landed
-        if (ship.isLanded && ship.health < ship.maxHealth) {
-            const rate = (GameConstants?.SHIP?.HEALTH_REGEN_RATE_LANDED ?? 0.1);
-            ship.health = Math.min(ship.maxHealth, ship.health + rate);
-        }
+        // No free hull regeneration while landed — repairs are bought at the
+        // pad (E6). Shields still recharge on their own.
         
         // Weapon cooldown is decremented by WeaponSystem only — a second
         // decrement here doubled the player's fire rate
@@ -297,74 +289,6 @@ export class PhysicsSystem {
     }
     
     /**
-     * Update asteroid physics
-     */
-    updateAsteroidPhysics(state, deltaTime) {
-        // Access asteroids from state
-        const asteroids = state.asteroids;
-        if (!asteroids) return;
-        
-        for (let asteroid of asteroids) {
-            // Update position
-            asteroid.x += asteroid.vx;
-            asteroid.y += asteroid.vy;
-            
-            // Update rotation
-            if (asteroid.rotationSpeed) {
-                asteroid.rotation = (asteroid.rotation || 0) + asteroid.rotationSpeed;
-            }
-            
-            // Wrap around world boundaries
-            if (asteroid.x > this.WORLD_BOUNDS.max) asteroid.x = this.WORLD_BOUNDS.min;
-            if (asteroid.x < this.WORLD_BOUNDS.min) asteroid.x = this.WORLD_BOUNDS.max;
-            if (asteroid.y > this.WORLD_BOUNDS.max) asteroid.y = this.WORLD_BOUNDS.min;
-            if (asteroid.y < this.WORLD_BOUNDS.min) asteroid.y = this.WORLD_BOUNDS.max;
-            
-            // Slight random drift
-            if (Math.random() < 0.002) {
-                asteroid.vx += (Math.random() - 0.5) * 0.05;
-                asteroid.vy += (Math.random() - 0.5) * 0.05;
-                
-                // Clamp velocity
-                asteroid.vx = Math.max(-0.4, Math.min(0.4, asteroid.vx));
-                asteroid.vy = Math.max(-0.4, Math.min(0.4, asteroid.vy));
-            }
-        }
-    }
-    
-    /**
-     * Update pickup physics
-     */
-    updatePickupPhysics(state, deltaTime) {
-        // Access pickups from state
-        const pickups = state.pickups;
-        if (!pickups) return;
-        
-        for (let i = pickups.length - 1; i >= 0; i--) {
-            const pickup = pickups[i];
-            
-            // Float in space with momentum
-            pickup.x += pickup.vx;
-            pickup.y += pickup.vy;
-            
-            // Apply friction to slow down
-            pickup.vx *= 0.99;
-            pickup.vy *= 0.99;
-            
-            // Update lifetime
-            pickup.lifetime++;
-            
-            // Remove expired pickups
-            if (pickup.lifetime >= pickup.maxLifetime) {
-                pickups.splice(i, 1);
-                
-                // Emit pickup expired event
-                this.eventBus.emit(GameEvents.PHYSICS_PICKUP_EXPIRED, { pickup });
-            }
-        }
-    }
-    
-    /**
      * Check all collisions
      */
     checkCollisions(state) {
@@ -375,10 +299,6 @@ export class PhysicsSystem {
         const asteroids = state.asteroids || [];
         const pickups = state.pickups || [];
         const npcShips = state.npcShips || [];
-
-        // Rebuild spatial hashes for O(n) collision queries
-        this._npcHash.rebuild(npcShips);
-        this._asteroidHash.rebuild(asteroids);
 
         // Clear previous collisions
         state.physics.collisions = [];
@@ -505,21 +425,22 @@ export class PhysicsSystem {
             }
         }
         
-        // Ship-pickup collisions
-        for (let i = pickups.length - 1; i >= 0; i--) {
+        // Ship-pickup collisions. Detection only: the pickup is flagged and
+        // handed to SpawnSystem by identity, which awards it and removes it.
+        // (E4: emitting a post-splice index awarded the wrong pickup.)
+        for (let i = 0; i < pickups.length; i++) {
             const pickup = pickups[i];
+            if (!pickup || pickup.collected) continue;
             const dx = ship.x - pickup.x;
             const dy = ship.y - pickup.y;
             const r = (ship.size || 0) + 10; const r2 = r * r;
             if ((dx*dx + dy*dy) < r2) {
-                // Remove pickup immediately to prevent double-collection
-                pickups.splice(i, 1);
+                pickup.collected = true;
 
                 // Emit pickup collected event
                 this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, {
                     ship,
-                    pickup,
-                    index: i
+                    pickup
                 });
 
                 // Record collision

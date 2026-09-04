@@ -2,6 +2,36 @@
 
 Scope: Track targeted, low-risk refactors aligned with our architecture. Keep changes surgical and avoid enabling diagnostics by default.
 
+## 2026-09 evolution review
+
+See `EVOLUTION_ROADMAP_2026-09.md` (repo root) for the full defect/enhancement audit
+(evidence with file:line references, severity, sequenced plan). This tech-debt file
+still tracks the smaller items below; the roadmap is the source of truth for the
+larger findings (E1–E17, P1–P14, S1–S10, U1–U7) and the enhancement fronts in §3.
+
+Phase 0 batch D (persistence & repo hygiene) acted on the roadmap's §2.5 findings and
+removed:
+- `docs/assets/explosion.gif` (5.9 MB, orphaned)
+- 9 orphan planet PNGs + `terra_nova.svg` under `docs/assets/planets/` (unreferenced by
+  `planets.json` or any `.js`)
+- `docs/js/vendor/chiptune2.js` / `chiptune2.wasm` (43-byte error stubs; tracker
+  playback is actually served by `docs/js/vendor/chiptune-3/`)
+- `docs/music/which_brand_of_mustard_shall_i_buy.xm` (unreferenced by `radioPlaylist.js`)
+- 7 dead/dangerous `scripts/*` (two hardcoded a path under a Users dir that no longer
+  exists; one embedded a PAT into `.git/config`); `debug-pages.sh` and `fix-404.sh`
+  moved to `archive/scripts/`
+- untracked root-level `chiptune-3/`, `explosions/`, `screenshots/` cruft
+
+And resized `docs/assets/logo.png` from 1024×1024/1.3 MB to 256×256/~56 KB (displayed
+at 108 px tall). Added `docs/music/LICENSES.md` flagging the tracker modules' unknown
+provenance/licence — still open, see roadmap §3.3.
+
+Also fixed: live mission progress (`ship.missions`/`ship.missionStates`) was never
+included in the save snapshot or load allowlist (roadmap E14) — now round-trips through
+`SaveSystemAdapterFixed.js`. Save load now rejects a save with a missing/pre-'6.x'
+`version` instead of trusting it. F12 clear-save now also clears `galaxyTraderRun` (not
+just `galaxyTraderSave`); `galaxyTraderMeta` (permanent progression) is untouched.
+
 ## High-Value, Low-Risk Items
 
 - Distance calculations

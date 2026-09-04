@@ -4,7 +4,8 @@
   "description": "Galaxy Trader - browser space trading/combat game (served from docs/)",
   "type": "module",
   "scripts": {
-    "test": "node tests/smoke.mjs"
+    "test": "node tests/smoke.mjs",
+    "dev": "python3 -m http.server 8000"
   },
   "devDependencies": {
     "playwright": "^1.45.0"

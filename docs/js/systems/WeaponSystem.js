@@ -530,18 +530,20 @@ export class WeaponSystem {
      */
     fireNPCProjectile(npc, target) {
         if (!npc || !npc.weapon || npc.weaponCooldown > 0) return;
-        
-        // Calculate angle to target
-        const dx = target.x - npc.x;
-        const dy = target.y - npc.y;
-        let angle = Math.atan2(dy, dx);
+
+        // Shots leave along the NPC's heading — the AI already gates firing on
+        // being lined up, and stealing its aim would make every hostile a
+        // perfect shot. `target` only sizes the dispersion cone.
+        let angle = npc.angle || 0;
 
         // Apply range-based aim error using GameConstants.NPC.ACCURACY
         try {
-            const d2 = dx * dx + dy * dy;
+            const dx = (target?.x ?? npc.x) - npc.x;
+            const dy = (target?.y ?? npc.y) - npc.y;
+            const d2 = target ? dx * dx + dy * dy : 300 * 300;
             const ACC = GameConstants?.NPC?.ACCURACY || { close: 0.8, medium: 0.5, long: 0.3, max: 0.2 };
             const MOVEP = GameConstants?.NPC?.MOVEMENT_PENALTY ?? 0.5;
-            const speed = Math.sqrt((target.vx || 0) ** 2 + (target.vy || 0) ** 2);
+            const speed = Math.sqrt((target?.vx || 0) ** 2 + (target?.vy || 0) ** 2);
             // Determine bucket and base spread
             let acc = ACC.long; let baseSpreadDeg = 9;
             if (d2 < 150*150) { acc = ACC.close; baseSpreadDeg = 3; }
@@ -554,18 +556,37 @@ export class WeaponSystem {
             const spreadRad = spreadDeg * Math.PI / 180;
             angle += (Math.random() - 0.5) * 2 * spreadRad;
         } catch (_) {}
-        
+
         // Fire projectile
+        const before = this.projectiles.length;
         this.fireProjectile(npc, angle, false, npc.weapon);
-        
-        // Set cooldown (with slight cadence variance for rapid fire)
+
+        // Boss weapons declare `projectileSpeed`; fireProjectile only knows the
+        // per-type default, so re-scale the new bolt to the declared speed.
+        const declared = Number(npc.weapon.projectileSpeed);
+        if (Number.isFinite(declared) && declared > 0 && this.projectiles.length > before) {
+            const p = this.projectiles[this.projectiles.length - 1];
+            const relVx = p.vx - (npc.vx || 0);
+            const relVy = p.vy - (npc.vy || 0);
+            const mag = Math.hypot(relVx, relVy);
+            if (mag > 1e-6) {
+                p.vx = (relVx / mag) * declared + (npc.vx || 0);
+                p.vy = (relVy / mag) * declared + (npc.vy || 0);
+            }
+        }
+
+        // Set cooldown (with slight cadence variance for rapid fire).
+        // `fireRateMult` lets boss phase AI fire faster without mutating the
+        // weapon definition.
+        const rateMult = Number(npc.fireRateMult);
+        const mult = (Number.isFinite(rateMult) && rateMult > 0) ? rateMult : 1;
         if (npc.weapon.type === 'rapid') {
             const jitter = (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.5 ? 0 : 1);
-            npc.weaponCooldown = Math.max(3, npc.weapon.cooldown + jitter);
+            npc.weaponCooldown = Math.max(3, Math.round(npc.weapon.cooldown * mult) + jitter);
         } else {
-            npc.weaponCooldown = npc.weapon.cooldown;
+            npc.weaponCooldown = Math.max(3, Math.round(npc.weapon.cooldown * mult));
         }
-        
+
         // Emit event
         this.eventBus.emit(GameEvents.WEAPON_FIRED, {
             weapon: npc.weapon,

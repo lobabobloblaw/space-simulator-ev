@@ -17,6 +17,7 @@ class DeathScreenUI {
 
         // DOM elements
         this.overlay = document.getElementById('deathScreenOverlay');
+        this.titleEl = this.overlay ? this.overlay.querySelector('.death-title') : null;
         this.zoneEl = document.getElementById('deathZone');
         this.runTimeEl = document.getElementById('deathRunTime');
         this.killsEl = document.getElementById('deathKills');
@@ -33,6 +34,7 @@ class DeathScreenUI {
         // Last run stats (populated on show)
         this._lastStats = null;
         this._lastUnlocks = [];
+        this._victory = false;
     }
 
     /**
@@ -41,28 +43,32 @@ class DeathScreenUI {
     init() {
         this._setupEventListeners();
 
-        // Listen for run end events
+        // Listen for run end events (death and victory share this screen)
         this.eventBus.on(RunEvents.RUN_END, (data) => {
-            this._lastStats = data.stats;
-            this._lastUnlocks = [];
-            this.show();
+            this.show(data?.stats || null, data?.unlocks || [], false);
+        });
+        this.eventBus.on(RunEvents.RUN_VICTORY, (data) => {
+            this.show(data?.stats || null, data?.unlocks || [], true);
         });
 
         console.log('[DeathScreenUI] Initialized');
     }
 
     /**
-     * Show the death screen with stats
+     * Show the run-end screen with stats
+     * @param {Object|null} stats - Run stats
+     * @param {Array} unlocks - Unlocks granted this run ({type, id, name})
+     * @param {boolean} victory - Render the victory variant
      */
-    show(stats = null, unlocks = []) {
+    show(stats = null, unlocks = [], victory = false) {
         if (stats) {
             this._lastStats = stats;
         }
-        if (unlocks.length) {
-            this._lastUnlocks = unlocks;
-        }
+        this._lastUnlocks = Array.isArray(unlocks) ? unlocks : [];
+        this._victory = !!victory;
 
         this._renderStats();
+        this._renderOutcome();
         this._renderUnlocks();
         this.overlay.classList.add('visible');
     }
@@ -82,6 +88,22 @@ class DeathScreenUI {
     }
 
     // ==================== PRIVATE METHODS ====================
+
+    /**
+     * Swap title/subtitle/button copy between the death and victory variants
+     */
+    _renderOutcome() {
+        if (this._victory) {
+            this.overlay.classList.add('victory');
+            if (this.titleEl) this.titleEl.textContent = 'VICTORY';
+            if (this.zoneEl) this.zoneEl.textContent = 'The Void King is dead';
+            if (this.retryBtn) this.retryBtn.textContent = 'NEW RUN';
+        } else {
+            this.overlay.classList.remove('victory');
+            if (this.titleEl) this.titleEl.textContent = 'SHIP DESTROYED';
+            if (this.retryBtn) this.retryBtn.textContent = 'TRY AGAIN';
+        }
+    }
 
     _renderStats() {
         const stats = this._lastStats;

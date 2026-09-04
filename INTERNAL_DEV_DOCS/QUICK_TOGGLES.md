@@ -21,8 +21,8 @@ VFX (Asteroids)
 - `window.VFX_DEBRIS_POLISH = true` — enable molten warm fade on slivers and regular shards (OFF by default)
 
 UI/Images
-- `window.UI_LANDSCAPE_PROVIDER = 'unsplash'|'lexica'|'auto'|'none'` — 'none' to suppress external fetches
-- `window.UI_TOASTS = true` — re‑enable floating toasts (default OFF; console readout remains primary)
+- `window.LANDING_ART_PROVIDER = 'none'|'lexica'|'pollinations'|'auto'` — default 'none' (procedural planet art, no network). Legacy alias: `window.UI_LANDSCAPE_PROVIDER`
+- `window.UI_TOASTS = true|false` — force floating toasts on/off. Default: on for `warning`/`success`/`error`, off for `info` (console readout only)
 - `window.RADIO_STATIC = false` — disable faint static inside the radio dial
 
 Planets (QA)

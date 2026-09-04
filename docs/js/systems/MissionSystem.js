@@ -45,7 +45,78 @@ export default class MissionSystem {
             }
         });
 
+        // Missions that came back through JSON lost their isComplete() closures
+        this.rehydrate(this.stateManager.state?.ship);
+
         console.log('[MissionSystem] Initialized');
+    }
+
+    /**
+     * Build a completion checker for a mission whose static definition is gone
+     * (procedural missions restored from a save).
+     */
+    _genericChecker(mission) {
+        const type = mission?.type;
+        const count = Number(mission?.count) || 0;
+        const targetCredits = Number(mission?.targetCredits) || 0;
+        const anyKill = mission?.target === 'any';
+
+        if (type === 'delivery') return (ship, st) => st?.delivered === true;
+        if (type === 'escort') return (ship, st) => st?.escortArrived === true;
+        if (type === 'bounty') {
+            return (ship, st) => {
+                if (!ship) return false;
+                const since = anyKill
+                    ? (ship.kills || 0) - (st?.killsAtAccept || 0)
+                    : (ship.pirateKills || 0) - (st?.pirateKillsAtAccept || 0);
+                return since >= count;
+            };
+        }
+        if (type === 'trade') return (ship) => !!ship && (ship.credits || 0) >= targetCredits;
+        return () => false;
+    }
+
+    /**
+     * Reattach isComplete() to every mission that lost it to JSON. Static
+     * missions get their definition back from gameData; procedural ones get a
+     * generic checker built from their own fields. (E13)
+     */
+    rehydrate(ship) {
+        const state = this.stateManager.state;
+        const fix = (mission) => {
+            if (!mission || typeof mission.isComplete === 'function') return mission;
+            const def = this.allMissions.get(mission.id);
+            mission.isComplete = (def && typeof def.isComplete === 'function')
+                ? def.isComplete
+                : this._genericChecker(mission);
+            return mission;
+        };
+
+        let repaired = 0;
+        const sweep = (list) => {
+            if (!Array.isArray(list)) return;
+            for (const m of list) {
+                if (m && typeof m.isComplete !== 'function') repaired++;
+                fix(m);
+            }
+        };
+
+        const target = ship || state?.ship;
+        if (target?.missions) {
+            sweep(target.missions.active);
+            sweep(target.missions.available);
+            sweep(target.missions.completed);
+        }
+        if (state?.missionSystem) {
+            sweep(state.missionSystem.available);
+            if (state.missionSystem.active && typeof state.missionSystem.active.isComplete !== 'function') {
+                repaired++;
+                fix(state.missionSystem.active);
+            }
+        }
+
+        if (repaired > 0) console.log('[MissionSystem] Rehydrated', repaired, 'mission(s)');
+        return repaired;
     }
 
     /**
@@ -117,7 +188,9 @@ export default class MissionSystem {
                 acceptedTime: performance.now ? performance.now() : Date.now(),
                 delivered: false,
                 escortArrived: false,
-                killsAtAccept: ship.kills || 0
+                killsAtAccept: ship.kills || 0,
+                // Bounties measure pirate kills, not every kill (E12)
+                pirateKillsAtAccept: ship.pirateKills || 0
             }
         };
 

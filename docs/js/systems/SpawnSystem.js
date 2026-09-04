@@ -2,7 +2,7 @@ import { getEventBus, GameEvents } from '../core/EventBus.js';
 import { getStateManager } from '../core/StateManager.js';
 import { GameConstants } from '../utils/Constants.js';
 import ShipCatalog from './ShipCatalog.js';
-import { getRunSystem } from './RunSystem.js';
+import { getRunSystem, RunEvents } from './RunSystem.js';
 import { npcTypes } from '../data/gameData.js';
 
 /**
@@ -54,6 +54,7 @@ export class SpawnSystem {
         this.handleWarpEffectCreated = this.handleWarpEffectCreated.bind(this);
         this.handleShipTakeoff = this.handleShipTakeoff.bind(this);
         this.handleShipLanded = this.handleShipLanded.bind(this);
+        this.handleBossPhase = this.handleBossPhase.bind(this);
         this._spawnCooldown = { until: 0 };
         this._recentTypeCooldown = {}; // { [type]: untilTs }
         this._typeCooldownMs = (GameConstants?.SPAWN?.TYPE_COOLDOWN_MS ?? 6000);   // suppress same-type spawns briefly after a death
@@ -104,6 +105,8 @@ export class SpawnSystem {
         this.eventBus.on(GameEvents.WARP_EFFECT_CREATED, this.handleWarpEffectCreated);
         this.eventBus.on(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
         this.eventBus.on(GameEvents.SHIP_LANDED, this.handleShipLanded);
+        // Boss phase escalation spawns reinforcements
+        this.eventBus.on(RunEvents.ZONE_BOSS_PHASE, this.handleBossPhase);
         // Small debris on projectile hits
         this.eventBus.on(GameEvents.PHYSICS_PROJECTILE_HIT, (data) => {
             try { this.handleProjectileHitDebris(data); } catch(_) {}
@@ -148,7 +151,30 @@ export class SpawnSystem {
             const pos = evt?.ship || state.ship;
             if (!pos) return;
             this._pushWarpEffect(pos.x, pos.y, 'land', state);
+            // Landing no longer wipes the world (E6). Instead, anything parked
+            // on the pad is pushed out to a safe distance so the pilot is not
+            // ambushed the instant the landing overlay closes.
+            this._clearLandingPad(state, pos);
         } catch(_) {}
+    }
+
+    /**
+     * Push NPCs sitting within PAD_CLEAR_IN of the landing site out to
+     * PAD_CLEAR_OUT, keeping their bearing. Nothing is despawned.
+     */
+    _clearLandingPad(state, pos) {
+        const IN = (GameConstants?.SPAWN?.PAD_CLEAR_IN ?? 400);
+        const OUT = (GameConstants?.SPAWN?.PAD_CLEAR_OUT ?? 620);
+        for (const npc of state.npcShips || []) {
+            const dx = npc.x - pos.x;
+            const dy = npc.y - pos.y;
+            const d = Math.hypot(dx, dy);
+            if (d >= IN) continue;
+            const angle = d > 0.001 ? Math.atan2(dy, dx) : Math.random() * Math.PI * 2;
+            npc.x = pos.x + Math.cos(angle) * OUT;
+            npc.y = pos.y + Math.sin(angle) * OUT;
+            this._pushWarpEffect(npc.x, npc.y, 'arrive', state);
+        }
     }
     
     /**
@@ -361,20 +387,23 @@ export class SpawnSystem {
     handlePickupCollected(evt) {
         try {
             const state = this.stateManager.state;
-            const byShip = !!evt?.ship;
-            // Remove the pickup from state if an index is provided
-            if (byShip && Number.isInteger(evt.index)) {
-                const pickup = state.pickups?.[evt.index];
-                if (pickup) {
-                    // Award to player
-                    this._awardPickupToShip(pickup, state.ship);
-                    state.pickups.splice(evt.index, 1);
-                    this.eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'pickup' });
-                    this.eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
-                    // Also emit generic collected event for any listeners
-                    this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, { pickup, by: 'player' });
-                }
-            }
+            // Detection (PhysicsSystem) sends the pickup itself; awarding and
+            // removal happen here, by identity. The re-emit below carries no
+            // `ship`, which is what stops this handler from re-entering.
+            const pickup = evt?.ship ? evt.pickup : null;
+            if (!pickup || pickup.awarded) return;
+            pickup.awarded = true;
+
+            // Award to player
+            this._awardPickupToShip(pickup, state.ship);
+
+            const idx = state.pickups ? state.pickups.indexOf(pickup) : -1;
+            if (idx !== -1) state.pickups.splice(idx, 1);
+
+            this.eventBus.emit(GameEvents.AUDIO_PLAY, { sound: 'pickup' });
+            this.eventBus.emit(GameEvents.UI_UPDATE, { ship: state.ship });
+            // Also emit generic collected event for any listeners
+            this.eventBus.emit(GameEvents.PHYSICS_PICKUP_COLLECTED, { pickup, by: 'player' });
         } catch(_) {}
     }
 
@@ -918,6 +947,25 @@ export class SpawnSystem {
         // Boss faces player
         const angleToPlayer = Math.atan2(ship.y - spawnY, ship.x - spawnX);
 
+        // Zone difficulty scaling, at half strength: regular NPCs take the full
+        // multiplier on health and half of it on damage (see spawnNPC); bosses
+        // are already oversized, so they get a quarter of it (E17).
+        let zoneMult = 1.0;
+        try {
+            const runSystem = getRunSystem();
+            if (runSystem && runSystem.isRunActive()) {
+                zoneMult = runSystem.getCurrentZone()?.difficultyMultiplier || 1.0;
+            }
+        } catch(_) {}
+        const bossScale = (GameConstants?.SPAWN?.BOSS_ZONE_SCALE ?? 0.25);
+        const healthMult = 1 + Math.max(0, zoneMult - 1) * bossScale;
+        const damageMult = 1 + Math.max(0, zoneMult - 1) * bossScale * 0.5;
+        const baseHealth = bossData.maxHealth || bossData.health || 400;
+        const scaledHealth = Math.round(baseHealth * healthMult);
+        const scaledWeapon = bossData.weapon
+            ? { ...bossData.weapon, damage: Math.round((bossData.weapon.damage || 18) * damageMult) }
+            : { type: 'plasma', damage: 18, cooldown: 18 };
+
         const boss = {
             id: state.nextEntityId++,
             x: spawnX,
@@ -934,11 +982,11 @@ export class SpawnSystem {
             maxSpeed: bossData.maxSpeed || 0.6,
             thrust: bossData.thrust || 0.004,
             turnSpeed: bossData.turnSpeed || 0.012,
-            health: bossData.health || 400,
-            maxHealth: bossData.maxHealth || 400,
+            health: scaledHealth,
+            maxHealth: scaledHealth,
             credits: bossData.drops?.credits || 2000,
             behavior: 'boss',
-            weapon: bossData.weapon ? { ...bossData.weapon } : { type: 'plasma', damage: 18, cooldown: 18 },
+            weapon: scaledWeapon,
             phases: bossData.phases || [],
             spawnMessage: bossData.spawnMessage,
             phase2Message: bossData.phase2Message,
@@ -970,8 +1018,92 @@ export class SpawnSystem {
         // Emit spawn event
         this.eventBus.emit(GameEvents.NPC_SPAWN, { npc: boss, type: 'boss' });
 
-        console.log(`[SpawnSystem] Spawned boss: ${bossData.name}`);
+        console.log(`[SpawnSystem] Spawned boss: ${bossData.name} (${scaledHealth} HP, zone x${zoneMult})`);
         return boss;
+    }
+
+    /**
+     * Boss entered a new phase — summon its reinforcements.
+     * Explicit call path: intentionally bypasses the boss-fight spawn block
+     * in update().
+     */
+    handleBossPhase(data) {
+        try {
+            const count = Math.max(0, Math.floor(Number(data?.addSpawnCount) || 0));
+            if (!count) return;
+            const boss = data?.npc;
+            if (!boss) return;
+            const type = boss.bossId === 'void_king' ? 'elite_pirate' : 'pirate';
+            this.spawnBossAdds(boss, count, type);
+        } catch (e) {
+            console.warn('[SpawnSystem] Boss phase spawn failed:', e);
+        }
+    }
+
+    /**
+     * Spawn `count` escorts of `type` around a boss
+     * @returns {number} How many were actually spawned
+     */
+    spawnBossAdds(boss, count, type = 'pirate') {
+        const state = this.stateManager.state;
+        if (!state) return 0;
+        if (!state.npcShips) state.npcShips = [];
+        state.nextEntityId = state.nextEntityId || 1;
+
+        const baseTemplate = this.npcTypes[type] || this.npcTypes.pirate;
+        if (!baseTemplate) return 0;
+
+        // Match the zone difficulty scaling used by spawnNPC()
+        let difficultyMult = 1.0;
+        try {
+            const runSystem = getRunSystem();
+            if (runSystem && runSystem.isRunActive()) {
+                difficultyMult = runSystem.getCurrentZone()?.difficultyMultiplier || 1.0;
+            }
+        } catch (_) {}
+
+        let spawned = 0;
+        for (let i = 0; i < count; i++) {
+            const template = { ...baseTemplate };
+            if (difficultyMult > 1.0) {
+                template.health = Math.round(template.health * difficultyMult);
+                template.maxHealth = Math.round(template.maxHealth * difficultyMult);
+                if (template.weapon) {
+                    template.weapon = { ...template.weapon };
+                    template.weapon.damage = Math.round(template.weapon.damage * (1 + (difficultyMult - 1) * 0.5));
+                }
+            }
+
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 220 + Math.random() * 180;
+            let x = boss.x + Math.cos(angle) * dist;
+            let y = boss.y + Math.sin(angle) * dist;
+            if (!Number.isFinite(x)) x = 0;
+            if (!Number.isFinite(y)) y = 0;
+
+            const npc = {
+                id: state.nextEntityId++,
+                x, y,
+                vx: 0,
+                vy: 0,
+                angle,
+                type,
+                ...template,
+                targetPlanet: null,
+                weaponCooldown: 0,
+                lifetime: 0,
+                thrusting: false,
+                isBossAdd: true
+            };
+
+            state.npcShips.push(npc);
+            this._pushWarpEffect(x, y, 'arrive', state);
+            this.eventBus.emit(GameEvents.NPC_SPAWN, { npc, type });
+            spawned++;
+        }
+
+        console.log(`[SpawnSystem] Boss adds spawned: ${spawned} x ${type}`);
+        return spawned;
     }
 
     /**
@@ -987,9 +1119,13 @@ export class SpawnSystem {
             const dist = Math.sqrt((npc.x - state.ship.x) ** 2 + (npc.y - state.ship.y) ** 2);
             if (dist < (GameConstants?.NPC?.NEARBY_RADIUS ?? 1000)) nearbyCount++;
         }
-        
-        // Block regular spawning during boss fight (M2)
-        if (state.npcShips.some(n => n.type === 'boss' || n.behavior === 'boss')) return;
+
+        // Block regular spawning and despawning during a boss fight (M2).
+        // Everything below the guard (field objects, effect lifetimes) must
+        // keep ticking — this used to be an early return, which froze the
+        // asteroid field and every effect for the whole fight.
+        const bossActive = state.npcShips.some(n => n.type === 'boss' || n.behavior === 'boss');
+        if (!bossActive) {
 
         // Check if we should spawn new NPCs
         if (!state.npcSpawnState) {
@@ -1044,8 +1180,11 @@ export class SpawnSystem {
                 try { if (typeof window !== 'undefined' && window.DEBUG_SPAWN) console.log(`[SpawnSystem] Despawned distant NPC`); } catch(_) {}
             }
         }
-        
-        // Update asteroids
+
+        } // end !bossActive
+
+        // Update asteroids (sole integrator — PhysicsSystem no longer moves
+        // asteroids or pickups; see P12)
         for (let i = state.asteroids.length - 1; i >= 0; i--) {
             const asteroid = state.asteroids[i];
             
@@ -1232,7 +1371,8 @@ export class SpawnSystem {
         this.eventBus.off(GameEvents.WARP_EFFECT_CREATED, this.handleWarpEffectCreated);
         this.eventBus.off(GameEvents.PHYSICS_SHIP_TAKEOFF, this.handleShipTakeoff);
         this.eventBus.off(GameEvents.SHIP_LANDED, this.handleShipLanded);
-        
+        this.eventBus.off(RunEvents.ZONE_BOSS_PHASE, this.handleBossPhase);
+
         console.log('[SpawnSystem] Destroyed');
     }
 }

@@ -33,3 +33,6 @@ build/
 
 # Archive backups (keep source controlled separately)
 archive/
+
+# local screenshots from exploratory scripts
+shots/

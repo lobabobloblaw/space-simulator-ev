@@ -20,6 +20,11 @@ function nominalSizeForType(type) {
 }
 
 export const ShipCatalog = {
+  // True when the catalog carries an explicit class for this type (callers use
+  // this to decide between the catalog's nominal size and their own data).
+  has(type) {
+    return Object.prototype.hasOwnProperty.call(TYPE_TO_CLASS, type);
+  },
   get(type) {
     const cls = TYPE_TO_CLASS[type] || 'M';
     return {

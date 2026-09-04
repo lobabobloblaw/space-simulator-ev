@@ -101,7 +101,7 @@ class MetaStateManager {
      * Merge loaded state with defaults (handles missing fields)
      */
     _mergeWithDefaults(loaded) {
-        return {
+        const merged = {
             version: META_VERSION,
             unlocks: {
                 ships: [...(loaded.unlocks?.ships || DEFAULT_META_STATE.unlocks.ships)],
@@ -114,6 +114,27 @@ class MetaStateManager {
             },
             achievements: loaded.achievements || []
         };
+
+        // Migration: bossesDefeated used to be concatenated with the run's
+        // boss-id array, producing strings like "0pirate_lord,void_king"
+        merged.stats.bossesDefeated = this._coerceBossCount(merged.stats.bossesDefeated);
+
+        return merged;
+    }
+
+    /**
+     * Coerce a possibly-corrupt bossesDefeated stat back to a count
+     */
+    _coerceBossCount(value) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (Array.isArray(value)) return value.length;
+        if (typeof value === 'string') {
+            // "0pirate_lord,void_king" → 2 ids appended to a leading 0
+            const ids = value.replace(/^\d+/, '').split(',').filter(Boolean);
+            const leading = parseInt(value, 10);
+            return (Number.isFinite(leading) ? leading : 0) + ids.length;
+        }
+        return 0;
     }
 
     /**
@@ -242,8 +263,11 @@ class MetaStateManager {
             }
         }
 
-        // Track bosses defeated
-        this._meta.stats.bossesDefeated += runStats.bossesDefeated || 0;
+        // Track bosses defeated (runStats.bossesDefeated is an array of ids)
+        const bossCount = Array.isArray(runStats.bossesDefeated)
+            ? runStats.bossesDefeated.length
+            : (Number(runStats.bossesDefeated) || 0);
+        this._meta.stats.bossesDefeated = this._coerceBossCount(this._meta.stats.bossesDefeated) + bossCount;
 
         // Track zones reached
         if (runStats.zoneReached) {

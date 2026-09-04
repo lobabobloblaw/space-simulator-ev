@@ -156,7 +156,6 @@ export const GameEvents = {
     PATROL_ASSIST: 'npc.patrol.assist',
     NPC_DISTRESS: 'npc.distress',
     PROJECTILE_FIRED: 'combat.projectile.fired',
-    EXPLOSION_CREATED: 'combat.explosion.created',
     WARP_EFFECT_CREATED: 'warp.effect.created',
     
     // Economy events

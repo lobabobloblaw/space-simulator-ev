@@ -37,17 +37,19 @@ This guide orients new contributors to the project’s architecture and day‑to
 
 ## UI Notifications
 
-- The tiny console readout (bottom‑left, `#tutorialHint`) mirrors notifications and fades in/out. Top toasts are disabled by default to reduce noise.
-- Toggle toasts for QA: `window.UI_TOASTS = true`.
+- The tiny console readout (bottom‑left, `#tutorialHint`) mirrors every notification and fades in/out, then restores the standing tutorial hint.
+- Top toasts are shown for `warning`, `success` and `error`; `info` stays on the console line. Up to 3 toasts stack (inline `top` offsets) and each persists for its own `duration`.
+- Force toasts on/off for QA: `window.UI_TOASTS = true|false`.
 - Suppressed legacy tutorial banners (“WEAPONS OFFLINE/ONLINE”) to keep the console area dedicated to notifications.
 
 ## UI/Images (Landing Overlay)
 
-- `window.UI_LANDSCAPE_PROVIDER` — select image provider for planet landscapes in landing overlay:
-  - `'unsplash'` (default): keyword photo source; typically fewer CORS issues.
+- `window.LANDING_ART_PROVIDER` (legacy alias `window.UI_LANDSCAPE_PROVIDER`) — image provider for planet landscapes in the landing overlay:
+  - `'none'` (default): no network; procedural lit-sphere art drawn from the planet's own colour and cached per planet.
   - `'lexica'`: prompt-based image search; may log CORS warnings when served from localhost.
-  - `'auto'`: try lexica, then unsplash.
-  - `'none'`: disable external image loads (uses canvas fallback).
+  - `'pollinations'`: generated image, up to 4 attempts at ~12s each.
+  - `'auto'`: try lexica, then pollinations.
+  - The dead `source.unsplash.com` provider was removed (P14).
 
 ## Spawn QA Toggles
 

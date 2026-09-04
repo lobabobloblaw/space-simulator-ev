@@ -125,9 +125,13 @@ export class InputSystem {
             this.eventBus.emit(GameEvents.INPUT_BRAKE, { active: false });
             this.eventBus.emit(GameEvents.INPUT_TURN, { direction: 0 });
             this.eventBus.emit(GameEvents.INPUT_FIRE, { active: false });
-            // Auto-pause on blur to prevent unfair damage while tabbed out
-            this._blurPaused = true;
-            this.eventBus.emit(GameEvents.GAME_PAUSE);
+            // Auto-pause on blur to prevent unfair damage while tabbed out.
+            // Only claim the pause if the game was actually running — a menu,
+            // death screen or manual pause must survive the focus round-trip.
+            let alreadyPaused = false;
+            try { alreadyPaused = !!this.stateManager?.state?.paused; } catch(_) {}
+            this._blurPaused = !alreadyPaused;
+            if (this._blurPaused) this.eventBus.emit(GameEvents.GAME_PAUSE);
         };
         // Auto-resume on focus only if we were the ones who paused
         this._handleFocus = () => {

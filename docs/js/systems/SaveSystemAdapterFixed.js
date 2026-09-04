@@ -52,16 +52,21 @@ export class SaveSystemAdapterFixed {
                 'fuel','credits','health','maxHealth','shield','maxShield',
                 'cargo','weapons','currentWeapon',
                 'kills','pirateKills','missionKills',
-                'engineLevel','weaponLevel','radarLevel',
-                'cargoCapacity','tutorialStage',
+                // Upgrade levels — the stats themselves are derived from these
+                // by ShipStats after load (see main's post-load handler)
+                'engineLevel','weaponLevel','radarLevel','shieldLevel','cargoLevel',
+                'cargoCapacity','tutorialStage','spriteId',
                 // optional UI/flags we might persist later
-                'isLanded','landedPlanet','landingCooldown','class','shipClass'
+                'isLanded','landedPlanet','landingCooldown','class','shipClass',
+                // live mission progress store (MissionSystem reads/writes these on ship)
+                'missions','missionStates'
             ]);
             for (const key of Object.keys(source)) {
                 if (dangerous.has(key) || !allowed.has(key)) continue;
                 const val = source[key];
                 // Minimal type sanity where cheap
                 if ((key === 'cargo' || key === 'weapons') && !Array.isArray(val)) continue;
+                if ((key === 'missions' || key === 'missionStates') && (val === null || typeof val !== 'object' || Array.isArray(val))) continue;
                 target[key] = val;
             }
         } catch(e) { logError('SaveSystem._assignShipSafe', e); }
@@ -369,6 +374,11 @@ export class SaveSystemAdapterFixed {
                 kills: state.ship.kills || 0,
                 weaponSlots: state.ship.weaponSlots || 1,
                 cargoCapacity: state.ship.cargoCapacity || 10,
+                engineLevel: state.ship.engineLevel || 1,
+                shieldLevel: state.ship.shieldLevel || 0,
+                cargoLevel: state.ship.cargoLevel || 0,
+                radarLevel: state.ship.radarLevel || 0,
+                shipClass: state.ship.shipClass || state.ship.class || 'shuttle',
                 class: state.ship.class || state.ship.shipClass || 'shuttle'
             },
             reputation: state.reputation || { trader: 0, patrol: 0, pirate: 0 }
@@ -401,10 +411,23 @@ export class SaveSystemAdapterFixed {
             engineLevel: ship.engineLevel || 1,
             weaponLevel: ship.weaponLevel || 1,
             radarLevel: ship.radarLevel || 0,
+            shieldLevel: ship.shieldLevel || 0,
+            cargoLevel: ship.cargoLevel || 0,
             maxShield: ship.maxShield || 0,
             cargoCapacity: ship.cargoCapacity || 10,
             tutorialStage: ship.tutorialStage || 'start',
-            class: ship.class || ship.shipClass || 'shuttle'
+            shipClass: ship.shipClass || ship.class || 'shuttle',
+            class: ship.class || ship.shipClass || 'shuttle',
+            // Live mission progress (the store MissionSystem and the mission board
+            // actually read/write); deep-copied plain data — JSON.stringify() on the
+            // full payload drops any non-serializable fields (e.g. static missions'
+            // isComplete() functions) same as it always has for the rest of the save.
+            missions: ship.missions ? {
+                active: Array.isArray(ship.missions.active) ? [...ship.missions.active] : [],
+                completed: Array.isArray(ship.missions.completed) ? [...ship.missions.completed] : [],
+                available: Array.isArray(ship.missions.available) ? [...ship.missions.available] : []
+            } : { active: [], completed: [], available: [] },
+            missionStates: ship.missionStates ? { ...ship.missionStates } : {}
         };
 
         // Snapshot reputation
@@ -714,9 +737,13 @@ export class SaveSystemAdapterFixed {
             }, 3000);
         } else {
             // Second press - actually clear
+            // Clears the run save and the ephemeral run-state key; deliberately
+            // leaves 'galaxyTraderMeta' untouched — that's permanent cross-run
+            // progression (unlocks/stats), not part of "clear save".
             try {
-                localStorage.removeItem(this.SAVE_KEY);
-                localStorage.removeItem(this.LOAD_PENDING_KEY);
+                const clearedKeys = [this.SAVE_KEY, this.LOAD_PENDING_KEY, 'galaxyTraderRun'];
+                clearedKeys.forEach(k => localStorage.removeItem(k));
+                console.log('[SaveSystemAdapterFixed] Cleared keys:', clearedKeys.join(', '));
                 this.clearConfirmPending = false;
                 this.showMessage('SAVE CLEARED - RESTARTING', 'success');
                 

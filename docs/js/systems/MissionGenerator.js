@@ -136,6 +136,9 @@ export class MissionGenerator {
 
         const title = this._randomChoice(this.bountyTitles);
 
+        // 'any' contracts count every kill; a named target counts pirates (E12)
+        const anyKill = template.target === 'any';
+
         return {
             id: `proc_bounty_${this._generatedCount++}`,
             type: 'bounty',
@@ -147,7 +150,9 @@ export class MissionGenerator {
             procedural: true,
             isComplete: function(ship, missionState) {
                 if (!ship) return false;
-                const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+                const killsSinceAccept = anyKill
+                    ? (ship.kills || 0) - (missionState?.killsAtAccept || 0)
+                    : (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
                 return killsSinceAccept >= count;
             }
         };

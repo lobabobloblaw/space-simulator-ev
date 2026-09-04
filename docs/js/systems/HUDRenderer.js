@@ -2,6 +2,7 @@
 // Keep draws at identity transform and restore context state locally.
 import { withScreen } from './RenderHelpers.js';
 import { logError } from '../utils/ErrorUtils.js';
+import { getRunSystem } from './RunSystem.js';
 
 export default class HUDRenderer {
   constructor(ctx, camera, screenCenter) {
@@ -202,16 +203,51 @@ export default class HUDRenderer {
   }
 
   /**
+   * Every unmet half of the zone gate, as display lines (E9/U1: the old
+   * else-if chain showed only the first requirement, so a player at 15/15
+   * kills and 4,000/5,000 credits saw no reason the gate stayed shut).
+   * @returns {string[]}
+   */
+  _zoneGateLines(zoneData, runStats) {
+    const req = zoneData.requirements || runStats?.requirements || null;
+    if (!req) return [];
+    const lines = [];
+
+    if (req.bossDefeated) {
+      const bossName = runStats?.bossName || 'the zone boss';
+      if (runStats?.bossSpawned) {
+        lines.push(`Defeat ${bossName}`);
+      } else {
+        const need = Number(runStats?.bossTriggerKills) || 0;
+        lines.push(need > 0
+          ? `Lure the boss: ${runStats?.zoneKills || 0}/${need} kills`
+          : `Find ${bossName}`);
+      }
+    }
+    if (req.kills) lines.push(`Kills ${zoneData.kills || 0}/${req.kills}`);
+    if (req.credits) lines.push(`Credits ${zoneData.credits || 0}/${req.credits}`);
+    return lines;
+  }
+
+  /**
    * Draw zone indicator in top-left corner
-   * Shows current zone name and progress toward advancement
+   * Shows current zone name and every outstanding advance requirement
    */
   drawZoneIndicator(zoneData) {
     try {
       if (!zoneData || !zoneData.zoneName) return;
       const ctx = this.ctx;
-      const dpr = (ctx?.canvas?.__dpr) || 1;
       const margin = 12;
       const topOffset = 130; // Below logo (108px) + version + padding
+
+      // Gate detail the caller may not have passed (boss name/spawn state,
+      // in-zone kill count) comes straight from the run system.
+      let runStats = null;
+      try { runStats = getRunSystem().getRunStats(); } catch (_) { runStats = null; }
+
+      const lines = zoneData.canAdvance
+        ? ['▶ PRESS Z TO JUMP']
+        : this._zoneGateLines(zoneData, runStats);
 
       withScreen(ctx, () => {
         ctx.save();
@@ -220,15 +256,20 @@ export default class HUDRenderer {
         const stars = '★'.repeat(zoneData.difficulty || 1);
         const zoneText = `${zoneData.zoneName}`;
 
-        ctx.font = 'bold 14px VT323, monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
 
-        // Background box
-        const textWidth = ctx.measureText(zoneText).width;
-        const starsWidth = ctx.measureText(stars).width;
-        const boxWidth = Math.max(textWidth, starsWidth) + 20;
-        const boxHeight = 44;
+        // Background box sized to the widest line actually drawn
+        ctx.font = 'bold 14px VT323, monospace';
+        let contentWidth = ctx.measureText(zoneText).width;
+        ctx.font = '12px VT323, monospace';
+        contentWidth = Math.max(contentWidth, ctx.measureText(stars).width);
+        ctx.font = 'bold 11px VT323, monospace';
+        for (const line of lines) contentWidth = Math.max(contentWidth, ctx.measureText(line).width);
+
+        const lineHeight = 12;
+        const boxWidth = contentWidth + 20;
+        const boxHeight = 32 + Math.max(1, lines.length) * lineHeight;
 
         ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
         ctx.strokeStyle = zoneData.canAdvance ? '#44ff88' : 'rgba(100, 150, 255, 0.5)';
@@ -239,6 +280,7 @@ export default class HUDRenderer {
         ctx.stroke();
 
         // Zone name
+        ctx.font = 'bold 14px VT323, monospace';
         ctx.fillStyle = '#ffffff';
         ctx.fillText(zoneText, margin + 10, topOffset + 6);
 
@@ -247,24 +289,18 @@ export default class HUDRenderer {
         ctx.font = '12px VT323, monospace';
         ctx.fillText(stars, margin + 10, topOffset + 22);
 
-        // Progress or "READY" indicator
+        // Gate progress, or the jump prompt when the gate is open
         if (zoneData.canAdvance) {
           ctx.fillStyle = '#44ff88';
           ctx.font = 'bold 11px VT323, monospace';
-          ctx.fillText('▶ ADVANCE', margin + 10, topOffset + 34);
-        } else if (zoneData.requirements) {
-          const req = zoneData.requirements;
-          let progText = '';
-          if (req.kills) {
-            progText = `Kills: ${zoneData.kills || 0}/${req.kills}`;
-          } else if (req.credits) {
-            progText = `Credits: ${zoneData.credits || 0}/${req.credits}`;
-          } else if (req.bossDefeated) {
-            progText = 'Defeat Boss';
-          }
+        } else {
           ctx.fillStyle = '#aaaaaa';
           ctx.font = '10px VT323, monospace';
-          ctx.fillText(progText, margin + 10, topOffset + 34);
+        }
+        let y = topOffset + 34;
+        for (const line of lines) {
+          ctx.fillText(line, margin + 10, y);
+          y += lineHeight;
         }
 
         ctx.restore();

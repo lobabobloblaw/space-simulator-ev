@@ -2,6 +2,19 @@
  * All game data and configuration
  */
 
+import { GameConstants } from '../utils/Constants.js';
+
+// Starting loadouts are built from the canonical weapon table so a hull's
+// opening weapon can never drift from the shop/pickup definition of the same
+// weapon. Shape matches what ShopSystem pushes onto ship.weapons.
+const W = GameConstants.WEAPONS;
+const startingWeapon = (def) => ({
+    type: def.type,
+    damage: def.damage,
+    cooldown: def.cooldown,
+    speed: def.speed
+});
+
 // Canonical NPC stat table — SpawnSystem clones this at construction and the
 // debug spawner reads it directly. Values are the live, balanced numbers
 // (this table previously carried a stale older design that nothing spawned).
@@ -103,29 +116,33 @@ export const shopInventory = {
         name: "Basic Shield", 
         type: "shield", 
         price: 500, 
+        level: 1,
         value: 25,
-        description: "Provides 25 shield points"
+        description: "+25 shield capacity on top of the hull's own"
     },
     shield2: { 
         name: "Advanced Shield", 
         type: "shield", 
         price: 1500, 
+        level: 2,
         value: 50,
-        description: "Provides 50 shield points"
+        description: "+50 shield capacity on top of the hull's own"
     },
     engine2: { 
         name: "Enhanced Engine", 
         type: "engine", 
         price: 800, 
+        level: 2,
         value: 2,
-        description: "Increases thrust by 50% and speed by 30%"
+        description: "+25% thrust and top speed over the hull baseline"
     },
     engine3: { 
         name: "Military Engine", 
         type: "engine", 
         price: 2000, 
+        level: 3,
         value: 3,
-        description: "Increases thrust by 100% and speed by 60%"
+        description: "+50% thrust and top speed over the hull baseline"
     },
     weapon2: { 
         name: "Rapid Laser", 
@@ -145,6 +162,7 @@ export const shopInventory = {
         name: "Cargo Expansion", 
         type: "cargo", 
         price: 400, 
+        level: 1,
         value: 5,
         description: "Adds 5 cargo slots"
     },
@@ -152,6 +170,7 @@ export const shopInventory = {
         name: "Large Cargo Bay", 
         type: "cargo", 
         price: 1000, 
+        level: 2,
         value: 10,
         description: "Adds 10 cargo slots"
     },
@@ -159,6 +178,7 @@ export const shopInventory = {
         name: "Radar MK I",
         type: "radar",
         price: 350,
+        level: 1,
         value: 1,
         description: "Basic target separation on minimap"
     },
@@ -166,6 +186,7 @@ export const shopInventory = {
         name: "Radar MK II",
         type: "radar",
         price: 900,
+        level: 2,
         value: 2,
         description: "Faction colors and hostile pings on minimap"
     }
@@ -241,7 +262,9 @@ export const missions = [
         reward: 200,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 1;
         }
     },
@@ -266,7 +289,9 @@ export const missions = [
         reward: 500,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 3;
         }
     },
@@ -442,7 +467,9 @@ export const missions = [
         reward: 800,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 5;
         }
     },
@@ -456,7 +483,9 @@ export const missions = [
         reward: 1500,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 10;
         }
     },
@@ -470,7 +499,9 @@ export const missions = [
         reward: 2500,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 15;
         }
     },
@@ -484,7 +515,9 @@ export const missions = [
         reward: 600,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 3;
         }
     },
@@ -513,7 +546,9 @@ export const missions = [
         urgent: true,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 2;
         }
     },
@@ -527,7 +562,9 @@ export const missions = [
         reward: 1200,
         isComplete: function(ship, missionState) {
             if (!ship) return false;
-            const killsSinceAccept = ship.kills - (missionState?.killsAtAccept || 0);
+            // Bounties count pirate kills only (E12) — a trader or patrol death
+            // must not tick a hostile-elimination contract.
+            const killsSinceAccept = (ship.pirateKills || 0) - (missionState?.pirateKillsAtAccept || 0);
             return killsSinceAccept >= 7;
         }
     },
@@ -635,7 +672,7 @@ export const shipClasses = {
         // Base stats
         maxSpeed: 0.8,
         thrust: 0.012,
-        turnSpeed: 0.015,
+        turnSpeed: 0.022,
         maxHealth: 100,
         maxShield: 0,
         cargoCapacity: 10,
@@ -644,6 +681,12 @@ export const shipClasses = {
         size: 12,
         width: 14,
         color: '#95A5A6',
+        // Visual — placeholder art reused from the NPC ship sheet until
+        // dedicated player-hull sprites exist (see roadmap P3)
+        spriteId: 'ships/shuttle_1',
+        // Starting loadout (read by initShipForRun)
+        startingWeapons: [startingWeapon(W.DEFAULT_LASER)],
+        startingCredits: 250,
         // Requirements
         requiredKills: 0,
         requiredCredits: 0
@@ -666,6 +709,13 @@ export const shipClasses = {
         size: 11,
         width: 13,
         color: '#E74C3C',
+        // Visual — placeholder art reused from the NPC ship sheet until
+        // dedicated player-hull sprites exist (see roadmap P3)
+        spriteId: 'ships/interceptor_0',
+        // Starting loadout (read by initShipForRun)
+        startingWeapons: [startingWeapon(W.DEFAULT_LASER)],
+        startingCredits: 400,
+        // Requirements
         requiredKills: 5,
         requiredCredits: 1000
     },
@@ -687,6 +737,13 @@ export const shipClasses = {
         size: 14,
         width: 16,
         color: '#3498DB',
+        // Visual — placeholder art reused from the NPC ship sheet until
+        // dedicated player-hull sprites exist (see roadmap P3)
+        spriteId: 'ships/patrol_1',
+        // Starting loadout (read by initShipForRun)
+        startingWeapons: [startingWeapon(W.DEFAULT_LASER), startingWeapon(W.RAPID_LASER)],
+        startingCredits: 600,
+        // Requirements
         requiredKills: 10,
         requiredCredits: 5000
     },
@@ -708,6 +765,13 @@ export const shipClasses = {
         size: 20,
         width: 26,
         color: '#8B7355',
+        // Visual — placeholder art reused from the NPC ship sheet until
+        // dedicated player-hull sprites exist (see roadmap P3)
+        spriteId: 'ships/freighter_1',
+        // Starting loadout (read by initShipForRun)
+        startingWeapons: [startingWeapon(W.MINING_LASER), startingWeapon(W.DEFAULT_LASER)],
+        startingCredits: 1500,
+        // Requirements
         requiredKills: 0,
         requiredCredits: 10000
     },
@@ -721,7 +785,7 @@ export const shipClasses = {
         class: 'gunship',
         maxSpeed: 0.7,
         thrust: 0.011,
-        turnSpeed: 0.013,
+        turnSpeed: 0.015,
         maxHealth: 300,
         maxShield: 100,
         cargoCapacity: 15,
@@ -729,6 +793,13 @@ export const shipClasses = {
         size: 18,
         width: 22,
         color: '#1E3A5F',
+        // Visual — placeholder art reused from the NPC ship sheet until
+        // dedicated player-hull sprites exist (see roadmap P3)
+        spriteId: 'ships/patrol_0',
+        // Starting loadout (read by initShipForRun)
+        startingWeapons: [startingWeapon(W.PLASMA_CANNON), startingWeapon(W.DEFAULT_LASER)],
+        startingCredits: 800,
+        // Requirements
         requiredKills: 25,
         requiredCredits: 15000
     },
@@ -750,6 +821,13 @@ export const shipClasses = {
         size: 22,
         width: 28,
         color: '#9B59B6',
+        // Visual — placeholder art reused from the NPC ship sheet until
+        // dedicated player-hull sprites exist (see roadmap P3)
+        spriteId: 'ships/freighter_0',
+        // Starting loadout (read by initShipForRun)
+        startingWeapons: [startingWeapon(W.PLASMA_CANNON), startingWeapon(W.RAPID_LASER), startingWeapon(W.DEFAULT_LASER)],
+        startingCredits: 1000,
+        // Requirements
         requiredKills: 50,
         requiredCredits: 50000
     }

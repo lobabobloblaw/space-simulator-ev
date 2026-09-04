@@ -1,13 +1,21 @@
 # Galaxy Trader
 
-A retro-style space trading and combat game built with HTML5 Canvas and JavaScript.
+A retro-style space trading and combat roguelike built with HTML5 Canvas and JavaScript.
 
 ## Play Now
 [Launch Galaxy Trader](https://lobabobloblaw.github.io/space-simulator-ev/)
 
+## The Run
+Pick a ship at the main menu, then fly through four zones of rising difficulty —
+Core Systems → Frontier Space → Outer Rim → The Void. Core Systems and Frontier
+Space open once you hit that zone's kill/credit targets; Outer Rim and The Void are
+each gated by a boss fight (Captain Blackstar, then The Void King). Defeat The Void
+King to win, or die trying — either way the run ends and any unlocks persist into
+your next run from the main menu.
+
 ## Features
 - 🚀 **Space Trading**: Buy low, sell high across multiple planets
-- ⚔️ **Combat**: Fight pirates, earn bounties
+- ⚔️ **Combat**: Fight pirates, earn bounties, face down 2 zone bosses
 - 🛸 **Ship Upgrades**: Weapons, shields, engines, cargo expansions
 - 🌍 **Multiple Planets**: Each with unique economies
 - 🎮 **Retro Graphics**: Classic arcade-style visuals with modern effects
@@ -25,11 +33,11 @@ A retro-style space trading and combat game built with HTML5 Canvas and JavaScri
  - **F12** - Clear save
 
 ## Getting Started
-1. Start unarmed - trade commodities to earn credits
-2. Buy your first weapon from a planet's outfitter
-3. Hunt pirates for bounties
-4. Upgrade your ship with better equipment
-5. Become the ultimate space trader!
+1. Pick a ship at the main menu and start a run
+2. Trade commodities and take missions to earn credits
+3. Hunt pirates for bounties and upgrade your ship
+4. Clear each zone's requirements (or its boss) to advance — `Z` advances once you qualify
+5. Beat the final boss to win the run; death or victory both end it and record your stats
 
 ## Local Development
 ```bash

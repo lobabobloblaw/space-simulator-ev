@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Galaxy Trader - Space Trading & Combat</title>
-    <!-- CSP: 'unsafe-eval' required for potential WASM/Emscripten modules; connect-src restricted to known APIs -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://lexica.art https://image.pollinations.ai; object-src 'none'; base-uri 'self';">
+    <!-- CSP: 'wasm-unsafe-eval' covers the WASM/Emscripten audio modules; connect-src restricted to known APIs -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://lexica.art https://image.pollinations.ai; object-src 'none'; base-uri 'self';">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -110,6 +110,8 @@
                         <span class="control-action">TARGET</span>
                         <span class="control-key">Shift+X</span>
                         <span class="control-action">CLEAR</span>
+                        <span class="control-key">Z</span>
+                        <span class="control-action">JUMP</span>
                     </div>
                 </div>
                 <div id="minimap" aria-label="Minimap radar" role="img">
@@ -145,6 +147,7 @@
         <div class="death-content">
             <h1 class="death-title">SHIP DESTROYED</h1>
             <div class="death-subtitle" id="deathZone">Zone: Core Systems</div>
+            <div class="death-subtitle" id="deathSeedLine" style="display:none"></div>
 
             <div id="runSummary" class="run-summary">
                 <div class="stat-row"><span class="stat-label">Run Time</span><span class="stat-value" id="deathRunTime">0:00</span></div>

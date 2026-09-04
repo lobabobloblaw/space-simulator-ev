@@ -88,8 +88,9 @@ Warm‑up: after `TARGET_SET`, atlas/baseline fallbacks are suppressed for ~450m
 
 ## Quality & Boot Ramp (Session 59/62)
 
-- Auto quality: Enabled by default (unless `window.RENDER_AUTO_QUALITY === false`). Degrades quickly on repeated over‑budget frames and recovers slowly.
-- Stars: On `medium` and `high`, far/mid/near now render every frame for consistent brightness; blur remains enabled only on `high`. On `low`, far layer only (no blur). Nebula draws only on `high`.
+- Auto quality: Enabled by default (unless `window.RENDER_AUTO_QUALITY === false`). Degrades quickly on repeated over‑budget frames (streak of 4; a >26ms frame counts double). Recovery needs 45 frames under 17ms and tolerates up to 2 slower frames inside that window (each costs 10 frames of progress; a third resets it).
+- Stars: On `medium` and `high`, far/mid/near now render every frame for consistent brightness; blur remains enabled only on `high`. On `low`, far layer only (no blur). Star stride and alpha additionally scale with the zone theme's `starDensity`.
+- Nebula: one 512×512 offscreen tile built per zone theme from `theme.nebulaColor` and blitted with a 5% parallax offset; drawn on `medium` and `high` (skipped on `low`). The cached clear‑gradient's bottom stop carries the same zone tint; both caches are dropped on zone change.
 - Boot ramp: For ~3s after boot (`window.BOOT_QUALITY_MS`, default 3000):
   - Force `quality='medium'`.
   - Skip minimap draw and screen‑space HUD overlays.

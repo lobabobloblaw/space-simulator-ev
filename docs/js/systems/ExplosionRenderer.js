@@ -78,6 +78,8 @@ export class ExplosionRenderer {
             const dw = sw * scale, dh = sh * scale;
             ctx.save();
             ctx.globalAlpha = Math.max(0, 1 - progress);
+            // Soft FX art, not pixel art: smooth this scale (restored below)
+            ctx.imageSmoothingEnabled = true;
             ctx.drawImage(effects.image, frm.x, frm.y, sw, sh, exp.x - dw / 2, exp.y - dh / 2, dw, dh);
             ctx.restore();
           }
@@ -168,6 +170,9 @@ export class ExplosionRenderer {
         const dw = sw * a.scale, dh = sh * a.scale;
         withScreen(ctx, () => {
           ctx.globalAlpha = alpha;
+          // Flipbook frames are 277x199 soft renders drawn at ~0.4x — keep them
+          // smoothed even though the main context is nearest-neighbour for sprites
+          ctx.imageSmoothingEnabled = true;
           const sx = a.x - camera.x + screenCenter.x;
           const sy = a.y - camera.y + screenCenter.y;
           ctx.drawImage(img, sx - dw / 2, sy - dh / 2, dw, dh);

@@ -49,7 +49,6 @@ export default class AssetSystem {
             state.assets.atlases.effects = effects;
             // Defer explosion flipbooks to avoid boot hitches
             this.scheduleExplosionFallbackBuild();
-            this.scheduleExplosionFlipbookLoad();
             // Try to load standalone sprite images (optional manifest)
             await this.loadSpritesManifest();
             // Optional: preload planet sprites manifest (graceful fallback)
@@ -65,6 +64,9 @@ export default class AssetSystem {
             try { this.eventBus.emit('render.useSprites', { enabled: state.renderSettings.useSprites }); } catch(e) { /* event emit optional */ }
             this.ready = true;
             try { this.eventBus.emit('assets.ready', { atlases: Object.keys(state.assets.atlases) }); } catch(e) { /* event emit optional */ }
+            // Heavy 98-frame flipbook: start shortly after assets.ready (idle-scheduled
+            // so it never hitches the boot ramp) instead of ~12s into play.
+            this.scheduleExplosionFlipbookLoad();
             console.log('[AssetSystem] Placeholder atlas ready');
         } catch (e) {
             logError('AssetSystem.init', e);
@@ -370,7 +372,7 @@ export default class AssetSystem {
         try {
             const g = (typeof window !== 'undefined') ? window : globalThis;
             if (g.DISABLE_EXPLOSION_FLIPBOOK) return;
-            const delay = Number(g.EXPLO_FLIPBOOK_DELAY_MS) || 12000;
+            const delay = Number(g.EXPLO_FLIPBOOK_DELAY_MS) || 2000;
             const run = () => { this.loadExplosionFlipbook().catch(()=>{}); };
             if (typeof g.requestIdleCallback === 'function') {
                 setTimeout(() => g.requestIdleCallback(run, { timeout: 5000 }), delay);

@@ -261,10 +261,13 @@ export class AudioSystem {
         
         const osc = this.context.createOscillator();
         const gain = this.context.createGain();
-        
+
         osc.connect(gain);
         gain.connect(this.context.destination);
-        
+
+        // Tail length; the void variant rings out longer than the standard shots
+        let tail = 0.2;
+
         if (type === 'mining') {
             osc.frequency.setValueAtTime(200, this.context.currentTime);
             osc.frequency.exponentialRampToValueAtTime(100, this.context.currentTime + 0.1);
@@ -277,16 +280,39 @@ export class AudioSystem {
             osc.frequency.setValueAtTime(150, this.context.currentTime);
             osc.frequency.exponentialRampToValueAtTime(50, this.context.currentTime + 0.2);
             gain.gain.setValueAtTime(0.25 * this.masterVolume, this.context.currentTime);
+        } else if (type === 'void') {
+            // Final boss weapon: two detuned voices sweeping down into sub range
+            const t = this.context.currentTime;
+            tail = 0.38;
+            osc.type = 'sawtooth';
+            osc.detune.setValueAtTime(-18, t);
+            osc.frequency.setValueAtTime(190, t);
+            osc.frequency.exponentialRampToValueAtTime(34, t + 0.3);
+            gain.gain.setValueAtTime(0.2 * this.masterVolume, t);
+            try {
+                const osc2 = this.context.createOscillator();
+                const gain2 = this.context.createGain();
+                osc2.type = 'square';
+                osc2.detune.setValueAtTime(22, t);
+                osc2.frequency.setValueAtTime(143, t);
+                osc2.frequency.exponentialRampToValueAtTime(26, t + 0.3);
+                gain2.gain.setValueAtTime(0.1 * this.masterVolume, t);
+                gain2.gain.exponentialRampToValueAtTime(0.01, t + tail);
+                osc2.connect(gain2);
+                gain2.connect(this.context.destination);
+                osc2.start();
+                osc2.stop(t + tail);
+            } catch(_) {}
         } else {
             osc.frequency.setValueAtTime(600, this.context.currentTime);
             osc.frequency.exponentialRampToValueAtTime(200, this.context.currentTime + 0.1);
             gain.gain.setValueAtTime(0.15 * this.masterVolume, this.context.currentTime);
         }
-        
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.2);
-        
+
+        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + tail);
+
         osc.start();
-        osc.stop(this.context.currentTime + 0.2);
+        osc.stop(this.context.currentTime + tail);
     }
     
     /**

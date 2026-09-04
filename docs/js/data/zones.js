@@ -44,7 +44,8 @@ export const zones = [
         difficulty: 2,
         difficultyMultiplier: 1.5,
 
-        enemyTypes: ['trader', 'pirate', 'patrol'],
+        // elite_pirate must be listed here or eliteChance never fires (E16)
+        enemyTypes: ['trader', 'pirate', 'elite_pirate', 'patrol'],
         pirateSpawnWeight: 0.5,
         eliteChance: 0.1,
 
@@ -79,6 +80,9 @@ export const zones = [
         // Must defeat Pirate Lord to enter The Void
         bossId: 'pirate_lord',
 
+        // When the zone boss appears: after N kills in-zone, or after maxDelayMs
+        bossTrigger: { kills: 3, maxDelayMs: 90000 },
+
         advanceRequirements: {
             bossDefeated: 'pirate_lord'
         },
@@ -104,6 +108,9 @@ export const zones = [
 
         // Final boss - defeating grants victory
         bossId: 'void_king',
+
+        // When the zone boss appears: after N kills in-zone, or after maxDelayMs
+        bossTrigger: { kills: 3, maxDelayMs: 90000 },
 
         // No advance requirements - this is the final zone
         advanceRequirements: null,

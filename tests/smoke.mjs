@@ -164,6 +164,315 @@ check('reload: engine effect + reputation + mission restored',
   JSON.stringify(reloadRes));
 check('reload: no console errors', consoleErrors.length === errsBeforeReload, consoleErrors.slice(errsBeforeReload).slice(0, 3).join(' | '));
 
+// ============================================================================
+// Scenario 2: run-to-victory — boots fresh, plays a full roguelike run start
+// to finish (Core -> Frontier -> Outer Rim -> The Void), killing NPCs and both
+// zone bosses with real projectiles (never calling spawnZoneBoss() directly,
+// so the boss-trigger regression stays covered), reaches the victory screen,
+// unlocks the battlecruiser, starts a run with it, then dies and retries.
+// ============================================================================
+
+// Spawn an NPC via the real spawn system, place it `distance` units ahead of
+// the ship along the ship's current heading, freeze it, and set its health.
+// Tags the entity with a unique id so callers can track it across polls.
+async function spawnAhead(page, { health = 6, distance = 120 } = {}) {
+  return page.evaluate(({ health, distance }) => {
+    try {
+      const s = window.stateManager.state;
+      s.ship.vx = 0; s.ship.vy = 0;
+      window.systems.spawn.spawnNPC();
+      const npc = s.npcShips[s.npcShips.length - 1];
+      if (!npc) return { error: 'spawnNPC produced no npcShips entry' };
+      const testId = 'smoke_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      npc.__testId = testId;
+      npc.x = s.ship.x + Math.cos(s.ship.angle) * distance;
+      npc.y = s.ship.y + Math.sin(s.ship.angle) * distance;
+      npc.vx = 0; npc.vy = 0; npc.thrust = 0; npc.maxSpeed = 0;
+      npc.health = health;
+      return { testId, type: npc.type };
+    } catch (e) { return { error: String((e && e.message) || e) }; }
+  }, { health, distance });
+}
+
+// Hold 'f' (real keyboard input) until the tagged NPC is fully gone from
+// npcShips (dead + destruct sequence finished), or maxMs elapses.
+async function killTaggedNPC(page, testId, maxMs = 4000) {
+  await page.keyboard.down('f');
+  let ok = true;
+  try {
+    await page.waitForFunction((id) => {
+      const s = window.stateManager && window.stateManager.state;
+      return !!s && !s.npcShips.some((n) => n.__testId === id);
+    }, testId, { timeout: maxMs, polling: 100 });
+  } catch {
+    ok = false;
+  }
+  await page.keyboard.up('f');
+  return ok;
+}
+
+// Hold 'f' until an in-page predicate (no Node closures — only window
+// globals) becomes true, or maxMs elapses. Used for boss kills, where we
+// wait on RunSystem's recorded defeat rather than array removal.
+async function fireUntil(page, predicateFn, maxMs = 5000) {
+  await page.keyboard.down('f');
+  let ok = true;
+  try {
+    await page.waitForFunction(predicateFn, null, { timeout: maxMs, polling: 100 });
+  } catch {
+    ok = false;
+  }
+  await page.keyboard.up('f');
+  return ok;
+}
+
+// Kill `count` real NPCs one at a time via spawnAhead/killTaggedNPC, sweeping
+// dead leftovers between kills. Used for the natural (kills-based) boss
+// trigger in Outer Rim and The Void — spawnZoneBoss() is never called.
+async function killNRealNPCs(page, count, health = 6) {
+  for (let i = 0; i < count; i++) {
+    const sp = await spawnAhead(page, { health });
+    if (sp.error) return { ok: false, detail: 'spawn: ' + sp.error };
+    const dead = await killTaggedNPC(page, sp.testId, 4000);
+    if (!dead) return { ok: false, detail: `kill ${i + 1}/${count} timed out` };
+    await page.evaluate(() => {
+      const s = window.stateManager.state;
+      s.npcShips = s.npcShips.filter((n) => n.health > 0 || n.type === 'boss');
+    });
+  }
+  return { ok: true };
+}
+
+const errsBeforeVictoryRun = consoleErrors.length;
+
+// --- 1. Fresh boot, start a run ---
+await page.goto(BASE + '?fresh=1');
+await page.waitForFunction(() => window.stateManager && window.stateManager.state.ship, null, { timeout: 20000 });
+await page.waitForTimeout(1000);
+await page.evaluate(async () => {
+  // Cache the RunSystem singleton on window so later waitForFunction/evaluate
+  // calls can use it synchronously instead of re-importing every poll.
+  window.__rs = (await import('/docs/js/systems/RunSystem.js')).getRunSystem();
+});
+await page.evaluate(() => document.getElementById('startRunBtn')?.click());
+await page.waitForFunction(() => window.stateManager.state.paused === false, null, { timeout: 5000 }).catch(() => {});
+await page.waitForTimeout(300);
+
+// --- 2. Ensure the ship is armed; record starting credits ---
+const armRes = await page.evaluate(() => {
+  try {
+    const s = window.stateManager.state;
+    if (!s.ship.weapons || s.ship.weapons.length === 0) {
+      s.ship.weapons = [{ type: 'rapid', damage: 5, cooldown: 12, speed: 2 }];
+      s.ship.currentWeapon = 0;
+    }
+    s.ship.vx = 0; s.ship.vy = 0; s.ship.angle = 0;
+    return { armed: s.ship.weapons.length > 0, startCredits: s.ship.credits };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: run started and ship armed', !armRes.error && armRes.armed === true, JSON.stringify(armRes));
+const startCredits = armRes.startCredits || 0;
+
+// --- 3. Real kill: spawn, fire, verify kill count + bounty paid ---
+const sp1 = await spawnAhead(page, { health: 6 });
+const kill1Ok = sp1.error ? false : await killTaggedNPC(page, sp1.testId, 4000);
+const kill1Res = await page.evaluate(() => {
+  try {
+    const s = window.stateManager.state;
+    return { kills: s.ship.kills, statKills: window.__rs.getRunStats().kills, credits: s.ship.credits };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: first real kill registers and pays bounty',
+  !sp1.error && kill1Ok && !kill1Res.error && kill1Res.kills === 1 && kill1Res.statKills === 1 && kill1Res.credits > startCredits,
+  JSON.stringify({ sp1, kill1Ok, kill1Res, startCredits }));
+
+// --- 4. Advance Core -> Frontier -> Outer Rim ---
+await page.evaluate(() => { window.__rs._runStats.kills = 5; window.stateManager.state.ship.credits = 1200; });
+await page.keyboard.press('z');
+await page.waitForFunction(() => window.__rs.getCurrentZone().name === 'Frontier Space', null, { timeout: 3000 }).catch(() => {});
+await page.evaluate(() => { window.__rs._runStats.kills = 15; window.stateManager.state.ship.credits = 6000; });
+await page.keyboard.press('z');
+await page.waitForFunction(() => window.__rs.getCurrentZone().name === 'Outer Rim', null, { timeout: 3000 }).catch(() => {});
+const zoneRes = await page.evaluate(() => {
+  try {
+    return { zoneName: window.__rs.getCurrentZone().name, bossTriggerKills: window.__rs.getRunStats().bossTriggerKills };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: advanced Core -> Frontier -> Outer Rim',
+  !zoneRes.error && zoneRes.zoneName === 'Outer Rim' && zoneRes.bossTriggerKills === 3,
+  JSON.stringify(zoneRes));
+
+// --- 5. Natural boss trigger: 3 real kills, spawnZoneBoss() is never called ---
+const trig1 = await killNRealNPCs(page, 3, 6);
+let bossAppeared1 = false;
+if (trig1.ok) {
+  try {
+    await page.waitForFunction(() => window.stateManager.state.npcShips.some((n) => n.type === 'boss'), null, { timeout: 3000, polling: 100 });
+    bossAppeared1 = true;
+  } catch { bossAppeared1 = false; }
+}
+const bossTrigRes = await page.evaluate(() => {
+  try {
+    const s = window.stateManager.state;
+    const boss = s.npcShips.find((n) => n.type === 'boss');
+    return { bossPresent: !!boss, bossId: boss?.bossId, bossSpawnedFlag: window.__rs._bossSpawned };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: 3 real kills naturally trigger the Outer Rim boss (no spawnZoneBoss call)',
+  trig1.ok && bossAppeared1 && !bossTrigRes.error && bossTrigRes.bossPresent === true && bossTrigRes.bossSpawnedFlag !== false,
+  JSON.stringify({ trig1, bossAppeared1, bossTrigRes }));
+
+// --- 6. Kill the zone boss (Captain Blackstar / pirate_lord) with real projectiles ---
+await page.evaluate(() => {
+  const s = window.stateManager.state;
+  const b = s.npcShips.find((n) => n.type === 'boss');
+  if (b) {
+    b.x = s.ship.x + Math.cos(s.ship.angle) * 120;
+    b.y = s.ship.y + Math.sin(s.ship.angle) * 120;
+    b.vx = 0; b.vy = 0; b.maxSpeed = 0; b.thrust = 0;
+    b.health = 9;
+    s.ship.vx = 0; s.ship.vy = 0;
+  }
+});
+const blackstarDead = await fireUntil(page, () => window.__rs._runStats.bossesDefeated.includes('pirate_lord'), 5000);
+await page.waitForTimeout(300);
+const blackstarRes = await page.evaluate(() => {
+  try {
+    let meta = null;
+    try { meta = JSON.parse(localStorage.getItem('galaxyTraderMeta') || 'null'); } catch {}
+    return { unlockUpgrades: meta?.unlocks?.upgrades || [], canAdvance: window.__rs.canAdvance() };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: Pirate Lord defeated, shield2 unlocked, zone advance available',
+  blackstarDead && !blackstarRes.error && blackstarRes.unlockUpgrades.includes('shield2') && blackstarRes.canAdvance === true,
+  JSON.stringify({ blackstarDead, blackstarRes }));
+
+// --- 7. Advance to The Void; repeat the natural boss trigger; defeat the Void King -> victory ---
+await page.keyboard.press('z');
+await page.waitForFunction(() => window.__rs.getCurrentZone().name === 'The Void', null, { timeout: 3000 }).catch(() => {});
+await page.evaluate(() => {
+  const s = window.stateManager.state;
+  s.npcShips = [];
+  s.ship.vx = 0; s.ship.vy = 0;
+  s.ship.health = s.ship.maxHealth;
+});
+
+const trig2 = await killNRealNPCs(page, 3, 6);
+let bossAppeared2 = false;
+if (trig2.ok) {
+  try {
+    await page.waitForFunction(() => window.stateManager.state.npcShips.some((n) => n.type === 'boss'), null, { timeout: 3000, polling: 100 });
+    bossAppeared2 = true;
+  } catch { bossAppeared2 = false; }
+}
+
+await page.evaluate(() => {
+  const s = window.stateManager.state;
+  const b = s.npcShips.find((n) => n.type === 'boss');
+  if (b) {
+    b.x = s.ship.x + Math.cos(s.ship.angle) * 120;
+    b.y = s.ship.y + Math.sin(s.ship.angle) * 120;
+    b.vx = 0; b.vy = 0; b.maxSpeed = 0; b.thrust = 0;
+    b.health = 9;
+    s.ship.vx = 0; s.ship.vy = 0;
+  }
+});
+const voidKingDead = await fireUntil(page, () => window.__rs._runStats.bossesDefeated.includes('void_king'), 5000);
+await page.waitForTimeout(500);
+
+const victoryRes = await page.evaluate(() => {
+  try {
+    const o = document.getElementById('deathScreenOverlay');
+    const cs = getComputedStyle(o);
+    let meta = null;
+    try { meta = JSON.parse(localStorage.getItem('galaxyTraderMeta') || 'null'); } catch {}
+    return {
+      display: cs.display,
+      classes: o.className,
+      title: o.querySelector('.death-title')?.textContent,
+      unlocksText: (document.getElementById('deathUnlocks')?.innerText || '').trim(),
+      paused: window.stateManager.state.paused,
+      totalWins: meta?.stats?.totalWins,
+      bossesDefeated: meta?.stats?.bossesDefeated,
+      unlockShips: meta?.unlocks?.ships || []
+    };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: Void King defeated -> victory screen, unlocks, meta stats',
+  trig2.ok && bossAppeared2 && voidKingDead && !victoryRes.error &&
+  victoryRes.display !== 'none' &&
+  /(^|\s)victory(\s|$)/.test(victoryRes.classes) &&
+  victoryRes.title === 'VICTORY' &&
+  victoryRes.unlocksText.length > 0 &&
+  victoryRes.paused === true &&
+  victoryRes.totalWins === 1 &&
+  typeof victoryRes.bossesDefeated === 'number' && victoryRes.bossesDefeated === 2 &&
+  victoryRes.unlockShips.includes('battlecruiser'),
+  JSON.stringify({ trig2, bossAppeared2, voidKingDead, victoryRes }));
+
+// --- 8. Main menu: battlecruiser is now unlocked ---
+await page.evaluate(() => document.getElementById('mainMenuBtn')?.click());
+await page.waitForTimeout(400);
+const menuRes = await page.evaluate(() => {
+  try {
+    const o = document.getElementById('mainMenuOverlay');
+    const card = document.querySelector('#shipCarousel [data-ship-id="battlecruiser"]');
+    return {
+      display: getComputedStyle(o).display,
+      paused: window.stateManager.state.paused,
+      cardFound: !!card,
+      cardLocked: card ? card.classList.contains('locked') : null
+    };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+check('victory-run: main menu shows the battlecruiser unlocked',
+  !menuRes.error && menuRes.display !== 'none' && menuRes.paused === true && menuRes.cardFound && menuRes.cardLocked === false,
+  JSON.stringify(menuRes));
+
+// --- 9. Select the battlecruiser and begin a new run with it ---
+await page.evaluate(() => document.querySelector('#shipCarousel [data-ship-id="battlecruiser"]')?.click());
+await page.evaluate(() => document.getElementById('startRunBtn')?.click());
+await page.waitForFunction(() => window.stateManager.state.paused === false, null, { timeout: 5000 }).catch(() => {});
+await page.waitForTimeout(300);
+const bcRes = await page.evaluate(() => {
+  const s = window.stateManager.state;
+  return { shipClass: s.ship.shipClass, cls: s.ship.class, maxHealth: s.ship.maxHealth };
+});
+check('victory-run: battlecruiser run starts with correct class and maxHealth',
+  (bcRes.shipClass === 'battlecruiser' || bcRes.cls === 'battlecruiser') && bcRes.maxHealth === 400,
+  JSON.stringify(bcRes));
+
+// --- 10. Death, then retry ---
+await page.evaluate(() => { window.stateManager.state.ship.health = 0; });
+await page.waitForTimeout(1500);
+const deathRes2 = await page.evaluate(() => {
+  const o = document.getElementById('deathScreenOverlay');
+  return {
+    display: getComputedStyle(o).display,
+    classes: o.className,
+    title: o.querySelector('.death-title')?.textContent,
+    paused: window.stateManager.state.paused
+  };
+});
+check('victory-run: death screen shows SHIP DESTROYED (not victory)',
+  deathRes2.display !== 'none' && !/(^|\s)victory(\s|$)/.test(deathRes2.classes) && deathRes2.title === 'SHIP DESTROYED' && deathRes2.paused === true,
+  JSON.stringify(deathRes2));
+
+await page.evaluate(() => document.getElementById('retryRunBtn')?.click());
+await page.waitForFunction(() => window.stateManager.state.paused === false, null, { timeout: 5000 }).catch(() => {});
+await page.waitForTimeout(300);
+const retryRes = await page.evaluate(() => {
+  const s = window.stateManager.state;
+  return { paused: s.paused, health: s.ship.health, kills: window.__rs.getRunStats().kills };
+});
+check('victory-run: retry resets to a fresh, alive run',
+  retryRes.paused === false && retryRes.health > 0 && retryRes.kills === 0,
+  JSON.stringify(retryRes));
+
+// --- 11. No new console errors accrued during the whole scenario ---
+check('victory-run: no new console errors', consoleErrors.length === errsBeforeVictoryRun,
+  consoleErrors.slice(errsBeforeVictoryRun).slice(0, 5).join(' | '));
+
 await browser.close();
 server.close();
 const failed = results.filter(r => !r.ok);

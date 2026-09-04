@@ -1500,6 +1500,20 @@ body.ship-destroyed #tutorialHint { display: none !important; }
     margin-bottom: var(--spacing-lg);
 }
 
+/* Victory variant of the run-end screen */
+#deathScreenOverlay.victory {
+    background: rgba(0, 18, 14, 0.95);
+}
+
+#deathScreenOverlay.victory .death-title {
+    color: var(--status-success);
+    text-shadow: 0 0 20px var(--accent-glow);
+}
+
+#deathScreenOverlay.victory .death-subtitle {
+    color: var(--accent-primary);
+}
+
 /* Run Summary */
 .run-summary {
     background: var(--bg-dark);
